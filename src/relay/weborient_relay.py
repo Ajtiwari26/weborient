@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-WebOrient Live Relay Server
+WebOrient Live Relay Server (v0.2.0)
 Bridges browser clients (via WebSocket) with the Gemini 3.8 Live API,
-forwarding real-time audio streams, handling barge-in interruptions,
-and dispatching DOM tool calls to the on-screen Ghost Cursor.
+forwarding real-time 16kHz/24kHz audio streams, handling barge-in interruptions,
+injecting Site Manifest + Knowledge Base, and dispatching all 10 DOM tool calls
+to the on-screen Ghost Cursor.
 """
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -54,8 +56,26 @@ def load_system_prompt_and_manifest():
             manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
             pages_desc = []
             for p in manifest_data.get("pages", []):
-                pages_desc.append(f"- {p.get('title')} ({p.get('route')}): {p.get('summary')}")
-            manifest_context = "\n\n### SITE SITEMAP & PAGES:\n" + "\n".join(pages_desc)
+                route_info = f"{p.get('route')}"
+                if p.get("hash"):
+                    route_info += f" (or {p.get('hash')})"
+                pages_desc.append(f"- {p.get('title')} [{route_info}]: {p.get('summary')}")
+                for sec in p.get("sections", []):
+                    pages_desc.append(f"  * Section '{sec.get('title')}' ({sec.get('selector')}): {sec.get('description', '')}")
+                for form in p.get("forms", []):
+                    fields_str = ", ".join(
+                        f"{fld.get('label')} ({fld.get('selector')}, type={fld.get('type')})"
+                        for fld in form.get("fields", [])
+                    )
+                    pages_desc.append(f"  * Form '{form.get('description')}' ({form.get('formSelector')}): {fields_str}")
+
+            kb_desc = []
+            for kb in manifest_data.get("knowledgeBase", []):
+                kb_desc.append(f"- Q: {kb.get('question')}\n  A: {kb.get('answer')}")
+
+            manifest_context = "\n\n### SITE SITEMAP, SECTIONS & FORMS:\n" + "\n".join(pages_desc)
+            if kb_desc:
+                manifest_context += "\n\n### SITE KNOWLEDGE BASE & FAQ:\n" + "\n".join(kb_desc)
         except Exception as e:
             print(f"[WARN] Failed to parse manifest: {e}")
 
@@ -68,59 +88,140 @@ def get_gemini_tools():
             function_declarations=[
                 types.FunctionDeclaration(
                     name="move_and_highlight",
-                    description="Moves the ghost cursor to a DOM element and highlights it with a glowing spotlight border.",
+                    description="Smoothly glides the ghost cursor to a DOM element, highlights it with a spotlight border, and shows an on-screen explanation badge.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
-                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector of element"),
-                            "explanation": types.Schema(type=types.Type.STRING, description="Brief explanation of highlight")
+                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or accessible label of the element"),
+                            "explanation": types.Schema(type=types.Type.STRING, description="Concise explanation badge text displayed beside the element")
                         },
                         required=["selector"]
                     )
                 ),
                 types.FunctionDeclaration(
                     name="click_element",
-                    description="Glides cursor to element, performs a click ripple animation, and triggers DOM click.",
+                    description="Glides cursor to a button, link, tab, toggle, or interactive control, plays a click ripple animation, and triggers full pointer/mouse click events.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
-                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector of element")
+                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or label of element"),
+                            "confirmed": types.Schema(type=types.Type.BOOLEAN, description="Set to true when user has verbally confirmed a submit action")
                         },
                         required=["selector"]
                     )
                 ),
                 types.FunctionDeclaration(
                     name="fill_form_field",
-                    description="Fills text into an input or textarea with an animated typewriter effect.",
+                    description="Fills or sets a form control (text, email, tel, textarea, select dropdown, checkbox, radio, or range slider) with typewriter animation and validation checking.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
-                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector of input"),
-                            "value": types.Schema(type=types.Type.STRING, description="Value to type")
+                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or label of the form control"),
+                            "value": types.Schema(type=types.Type.STRING, description="Value to enter, option to select, or 'true'/'false' for checkboxes")
                         },
                         required=["selector", "value"]
                     )
                 ),
                 types.FunctionDeclaration(
+                    name="fill_form_batch",
+                    description="Fills multiple form fields sequentially in one coordinated operation and returns validation status.",
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "fields": types.Schema(
+                                type=types.Type.ARRAY,
+                                description="Ordered list of { selector, value } objects to fill",
+                                items=types.Schema(
+                                    type=types.Type.OBJECT,
+                                    properties={
+                                        "selector": types.Schema(type=types.Type.STRING),
+                                        "value": types.Schema(type=types.Type.STRING)
+                                    },
+                                    required=["selector", "value"]
+                                )
+                            )
+                        },
+                        required=["fields"]
+                    )
+                ),
+                types.FunctionDeclaration(
                     name="scroll_page",
-                    description="Smoothly scrolls the page up, down, or to a specific section.",
+                    description="Smoothly scrolls the page up, down, to the top/bottom, or directly to a specific section or element.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
                             "direction": types.Schema(type=types.Type.STRING, enum=["up", "down", "top", "bottom"]),
-                            "targetSelector": types.Schema(type=types.Type.STRING, description="Optional target selector")
+                            "targetSelector": types.Schema(type=types.Type.STRING, description="Optional CSS selector to scroll directly into view"),
+                            "amount": types.Schema(type=types.Type.STRING, enum=["small", "half", "page"])
                         }
                     )
                 ),
                 types.FunctionDeclaration(
-                    name="navigate_route",
-                    description="Navigates the website to another page route.",
+                    name="swipe_or_swap",
+                    description="Swipes a carousel/slider (next, prev, left, right), swaps active tabs, toggles a switch (e.g. Monthly/Annual billing), or adjusts a range slider.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
-                            "path": types.Schema(type=types.Type.STRING, description="Target route URL path")
+                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector of carousel, tablist, tab, switch, or slider"),
+                            "action": types.Schema(type=types.Type.STRING, enum=["next", "prev", "left", "right", "toggle", "select"]),
+                            "targetValue": types.Schema(type=types.Type.STRING, description="Optional tab name, slide index, or slider value")
+                        },
+                        required=["selector", "action"]
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="navigate_route",
+                    description="Navigates the website to a section anchor, SPA route, or page URL.",
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "path": types.Schema(type=types.Type.STRING, description="Target route path or section hash, e.g. '/pricing' or '#pricing-section'")
                         },
                         required=["path"]
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="scan_visible_elements",
+                    description="Scans the active DOM and returns interactive elements with their selectors, labels, values, and states.",
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "includeOffscreen": types.Schema(type=types.Type.BOOLEAN, description="Include offscreen elements across the full page")
+                        }
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="read_page_content",
+                    description="Extracts semantic text, headings, pricing details, FAQs, and manifest knowledge to answer any user question accurately.",
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "query": types.Schema(type=types.Type.STRING, description="Topic, keyword, or question to look up"),
+                            "selector": types.Schema(type=types.Type.STRING, description="Optional CSS selector of a specific section to read")
+                        }
+                    )
+                ),
+                types.FunctionDeclaration(
+                    name="guide_tour",
+                    description="Runs a multi-step visual walkthrough across multiple elements on the page.",
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "steps": types.Schema(
+                                type=types.Type.ARRAY,
+                                description="Ordered list of tour stops ({ selector, explanation, dwellMs })",
+                                items=types.Schema(
+                                    type=types.Type.OBJECT,
+                                    properties={
+                                        "selector": types.Schema(type=types.Type.STRING),
+                                        "explanation": types.Schema(type=types.Type.STRING),
+                                        "dwellMs": types.Schema(type=types.Type.INTEGER)
+                                    },
+                                    required=["selector", "explanation"]
+                                )
+                            )
+                        },
+                        required=["steps"]
                     )
                 )
             ]
@@ -146,24 +247,28 @@ async def handle_browser_client(websocket):
         async with client.aio.live.connect(model=MODEL_NAME, config=config) as gemini_session:
             print(f"[RELAY] Active session established with {MODEL_NAME}!")
 
-            # Task 1: Forward Gemini outputs (Audio + Tool calls) to browser
+            # Task 1: Forward Gemini outputs (Audio + Transcripts + Tool calls) to browser
             async def forward_gemini_to_browser():
                 async for response in gemini_session.receive():
                     sc = response.server_content
                     if sc:
-                        # Handle barge-in interruption
                         if getattr(sc, "interrupted", False):
                             await websocket.send(json.dumps({
                                 "serverContent": {"interrupted": True}
                             }))
 
-                        # Forward transcript and audio chunks
+                        if sc.output_transcription and getattr(sc.output_transcription, "text", None):
+                            await websocket.send(json.dumps({
+                                "serverContent": {
+                                    "outputTranscription": {"text": sc.output_transcription.text}
+                                }
+                            }))
+
                         parts = []
                         if sc.model_turn and sc.model_turn.parts:
                             for part in sc.model_turn.parts:
                                 if part.inline_data and part.inline_data.data:
-                                    import base64
-                                    b64_audio = base64.b64encode(part.inline_data.data).decode('utf-8')
+                                    b64_audio = base64.b64encode(part.inline_data.data).decode("utf-8")
                                     parts.append({
                                         "inlineData": {
                                             "mimeType": "audio/pcm;rate=24000",
@@ -180,7 +285,6 @@ async def handle_browser_client(websocket):
                                 }
                             }))
 
-                    # Forward Tool Calls to browser
                     if response.tool_call:
                         calls = []
                         for call in response.tool_call.function_calls:
@@ -194,17 +298,15 @@ async def handle_browser_client(websocket):
                             "toolCall": {"functionCalls": calls}
                         }))
 
-            # Task 2: Forward browser inputs (Audio chunks + Tool responses) to Gemini
+            # Task 2: Forward browser inputs (Audio chunks + Tool responses + Text prompts) to Gemini
             async def forward_browser_to_gemini():
                 async for raw_msg in websocket:
                     try:
                         data = json.loads(raw_msg)
 
-                        # Audio chunks from user microphone
                         if "realtimeInput" in data:
                             media_chunks = data["realtimeInput"].get("mediaChunks", [])
                             for chunk in media_chunks:
-                                import base64
                                 pcm_bytes = base64.b64decode(chunk["data"])
                                 await gemini_session.send_realtime_input(
                                     media=types.Blob(
@@ -213,7 +315,6 @@ async def handle_browser_client(websocket):
                                     )
                                 )
 
-                        # Tool response after ghost cursor completes action
                         elif "toolResponse" in data:
                             responses = data["toolResponse"].get("functionResponses", [])
                             fn_responses = []
@@ -221,20 +322,18 @@ async def handle_browser_client(websocket):
                                 fn_responses.append(
                                     types.FunctionResponse(
                                         id=r["id"],
-                                        name=r.get("name", "tool_result"),
+                                        name=r.get("name", "move_and_highlight"),
                                         response=r["response"]
                                     )
                                 )
                             await gemini_session.send_tool_response(function_responses=fn_responses)
 
-                        # Direct text prompt (for testing)
                         elif "text" in data:
                             await gemini_session.send_realtime_input(text=data["text"])
 
                     except Exception as err:
                         print(f"[RELAY] Error processing client message: {err}")
 
-            # Run both streaming tasks concurrently
             await asyncio.gather(forward_gemini_to_browser(), forward_browser_to_gemini())
 
     except websockets.exceptions.ConnectionClosed:
@@ -244,13 +343,13 @@ async def handle_browser_client(websocket):
 
 
 async def main():
-    print(f"==================================================")
-    print(f" WebOrient Live Relay Server")
+    print("==================================================")
+    print(" WebOrient Live Relay Server (v0.2.0)")
     print(f" Target Model : {MODEL_NAME}")
     print(f" WebSocket URI: ws://localhost:{PORT}")
-    print(f"==================================================")
+    print("==================================================")
     async with websockets.serve(handle_browser_client, "0.0.0.0", PORT):
-        await asyncio.Future()  # run forever
+        await asyncio.Future()
 
 
 if __name__ == "__main__":

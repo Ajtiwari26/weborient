@@ -1,7 +1,7 @@
 {
   "name": "weborient",
-  "version": "0.1.0",
-  "description": "Generative UI & Voice Co-Browsing Agent SDK featuring an on-screen Ghost Cursor, real-time Gemini Multimodal Live Audio, and DOM actuation.",
+  "version": "0.2.0",
+  "description": "Generative UI & Voice Co-Browsing Agent SDK featuring a Cubic Bézier Ghost Cursor, real-time Gemini Multimodal Live Audio, semantic DOM grounding, and closed-loop DOM actuation.",
   "main": "src/sdk/weborient.js",
   "type": "module",
   "scripts": {

@@ -1,50 +1,114 @@
 {
-  "siteName": "Acme SaaS",
+  "siteName": "Acme AI Cloud",
   "baseUrl": "https://acme.example.com",
   "theme": {
     "primaryColor": "#6366f1",
     "accentColor": "#ec4899",
     "cursorStyle": "modern-glow"
   },
+  "knowledgeBase": [
+    {
+      "topic": "refund-and-cancellation",
+      "question": "What is your refund and cancellation policy?",
+      "answer": "All monthly and annual plans include a 14-day full money-back guarantee. You can cancel or switch tiers anytime from your billing dashboard with zero cancellation fees."
+    },
+    {
+      "topic": "security-and-privacy",
+      "question": "How does WebOrient handle sensitive user data like passwords or credit cards?",
+      "answer": "WebOrient automatically masks and ignores password fields, credit card inputs, and elements tagged with data-agent-ignore. All audio and tool calls pass through an encrypted gateway relay without exposing API keys."
+    },
+    {
+      "topic": "framework-compatibility",
+      "question": "Does WebOrient work with React, Next.js, Vue, and plain HTML?",
+      "answer": "Yes. WebOrient is a zero-dependency drop-in ES module that dispatches native prototype value setters and synthetic Pointer/Input events compatible with React, Next.js, Vue, Svelte, Angular, and static sites."
+    }
+  ],
   "pages": [
     {
       "route": "/",
-      "title": "Home - Acme AI Platform",
-      "summary": "Homepage introducing Acme's enterprise automation suite, customer logos, and quick demo video.",
-      "keywords": ["home", "overview", "what is acme", "start"],
+      "title": "Home - Acme AI Co-Browsing Platform",
+      "summary": "Interactive landing page with Hero section, Feature Tabs, Use-Case Carousel, Pricing Plans (with Monthly/Annual swap toggle), Technical Consultation Form, and FAQ.",
+      "keywords": ["home", "overview", "what is acme", "start", "features", "pricing", "contact", "faq"],
       "sections": [
-        { "id": "hero", "selector": "#hero-section", "title": "Hero Showcase" },
-        { "id": "features", "selector": "#features-grid", "title": "Core Features" },
-        { "id": "testimonials", "selector": "#testimonials-carousel", "title": "Social Proof" }
+        {
+          "id": "hero",
+          "selector": "#hero-section",
+          "title": "Hero Showcase",
+          "description": "Introduces real-time voice co-browsing and the Ghost Cursor with live demo and documentation CTAs."
+        },
+        {
+          "id": "features",
+          "selector": "#features-section",
+          "title": "Interactive Capabilities & Feature Tabs",
+          "description": "Swappable tabs showcasing Voice Q&A, Ghost Cursor Physics, Smart Form Co-Pilot, and Gesture/Carousel Control."
+        },
+        {
+          "id": "showcase-carousel",
+          "selector": "#carousel-section",
+          "title": "Customer Use-Case Carousel",
+          "description": "Swipeable multi-slide showcase of SaaS Onboarding, E-Commerce Checkout, and Healthcare Triage."
+        },
+        {
+          "id": "pricing",
+          "selector": "#pricing-section",
+          "title": "Pricing & Plans",
+          "description": "Starter ($29/mo or $24/mo annual), Pro Co-Pilot ($79/mo or $64/mo annual), and Enterprise (Custom) tiers with a Monthly/Annual billing toggle switch."
+        },
+        {
+          "id": "contact",
+          "selector": "#contact-section",
+          "title": "Book a Technical Consultation",
+          "description": "Interactive form with Full Name, Work Email, Plan Interest dropdown, Team Size slider, Priority Support checkbox, and Project Details."
+        },
+        {
+          "id": "faq",
+          "selector": "#faq-section",
+          "title": "Frequently Asked Questions",
+          "description": "Expandable FAQ accordion covering latency, security guardrails, framework support, and pricing."
+        }
+      ],
+      "forms": [
+        {
+          "formSelector": "#contact-form",
+          "description": "Technical Consultation & Demo Booking Form",
+          "fields": [
+            { "name": "fullName", "selector": "#contact-name", "label": "Full Name", "type": "text", "required": true },
+            { "name": "email", "selector": "#contact-email", "label": "Work Email", "type": "email", "required": true },
+            { "name": "plan", "selector": "#contact-plan", "label": "Interested Tier", "type": "select", "options": ["starter", "pro", "enterprise"], "required": false },
+            { "name": "teamSize", "selector": "#contact-team-size", "label": "Team Size", "type": "range", "required": false },
+            { "name": "priorityOnboarding", "selector": "#contact-priority", "label": "Include Priority Onboarding", "type": "checkbox", "required": false },
+            { "name": "message", "selector": "#contact-message", "label": "Project Details", "type": "textarea", "required": false }
+          ]
+        }
       ]
     },
     {
       "route": "/pricing",
+      "hash": "#pricing-section",
       "title": "Pricing & Plans",
-      "summary": "Transparent pricing plans: Starter ($29/mo), Growth ($79/mo), and Enterprise (custom).",
-      "keywords": ["pricing", "cost", "plans", "subscription", "starter", "growth", "enterprise"],
-      "sections": [
-        { "id": "pricing-table", "selector": "#pricing-table", "title": "Tier Comparison" },
-        { "id": "faq", "selector": "#pricing-faq", "title": "Billing FAQ" }
-      ]
+      "summary": "Starter ($29/mo), Pro Co-Pilot ($79/mo), and Enterprise plans plus Monthly/Annual billing toggle.",
+      "keywords": ["pricing", "cost", "plans", "subscription", "starter", "pro", "enterprise", "annual", "monthly"]
+    },
+    {
+      "route": "/features",
+      "hash": "#features-section",
+      "title": "Platform Features & Use Cases",
+      "summary": "Interactive feature tabs and swipeable customer use-case carousel.",
+      "keywords": ["features", "capabilities", "tabs", "carousel", "use cases", "how it works"]
     },
     {
       "route": "/contact",
-      "title": "Contact Sales & Support",
-      "summary": "Contact form for enterprise demo requests and support tickets.",
-      "keywords": ["contact", "sales", "demo", "support", "talk to human", "reach out"],
-      "forms": [
-        {
-          "formSelector": "#contact-form",
-          "description": "Demo Request Form",
-          "fields": [
-            { "name": "fullName", "selector": "#input-name", "label": "Full Name", "type": "text", "required": true },
-            { "name": "email", "selector": "#input-email", "label": "Work Email", "type": "email", "required": true },
-            { "name": "company", "selector": "#input-company", "label": "Company Name", "type": "text", "required": false },
-            { "name": "message", "selector": "#input-message", "label": "How can we help?", "type": "textarea", "required": false }
-          ]
-        }
-      ]
+      "hash": "#contact-section",
+      "title": "Contact Sales & Consultation",
+      "summary": "Consultation booking form with text, email, dropdown, slider, checkbox, and message fields.",
+      "keywords": ["contact", "sales", "demo", "support", "book", "form", "consultation"]
+    },
+    {
+      "route": "/faq",
+      "hash": "#faq-section",
+      "title": "Frequently Asked Questions",
+      "summary": "Answers to common technical, billing, and security questions.",
+      "keywords": ["faq", "questions", "refund", "security", "latency", "help"]
     }
   ]
 }
