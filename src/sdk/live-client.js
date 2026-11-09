@@ -33,6 +33,13 @@ export class LiveClient {
     this.captureContext = new AudioCtx({ sampleRate: 16000 });
     this.playbackContext = new AudioCtx({ sampleRate: 24000 });
 
+    if (this.captureContext.state === 'suspended') {
+      await this.captureContext.resume();
+    }
+    if (this.playbackContext.state === 'suspended') {
+      await this.playbackContext.resume();
+    }
+
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
@@ -86,6 +93,9 @@ export class LiveClient {
     }
 
     const source = this.captureContext.createMediaStreamSource(this.mediaStream);
+    const silenceGain = this.captureContext.createGain();
+    silenceGain.gain.value = 0;
+    silenceGain.connect(this.captureContext.destination);
 
     // Prefer low-latency AudioWorklet when supported
     if (this.captureContext.audioWorklet) {
@@ -123,7 +133,7 @@ export class LiveClient {
           this._sendFloat32AudioFrame(e.data);
         };
         source.connect(this.workletNode);
-        this.workletNode.connect(this.captureContext.destination);
+        this.workletNode.connect(silenceGain);
         return;
       } catch (err) {
         console.warn('[WebOrient] AudioWorklet fallback to ScriptProcessor:', err);
@@ -137,13 +147,19 @@ export class LiveClient {
       this._sendFloat32AudioFrame(inputData);
     };
     source.connect(this.scriptProcessor);
-    this.scriptProcessor.connect(this.captureContext.destination);
+    this.scriptProcessor.connect(silenceGain);
   }
 
   _sendFloat32AudioFrame(float32Array) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const pcm16 = this._floatTo16BitPCM(float32Array);
     const base64 = this._arrayBufferToBase64(pcm16.buffer);
+
+    if (!this._sentFrames) this._sentFrames = 0;
+    this._sentFrames++;
+    if (this._sentFrames % 50 === 0) {
+      console.log(`[WebOrient] Captured & sent ${this._sentFrames} mic audio chunks`);
+    }
 
     this.ws.send(JSON.stringify({
       realtimeInput: {
@@ -292,12 +308,12 @@ export class LiveClient {
 
   _base64ToInt16Array(base64) {
     const binary = window.atob(base64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
+    const alignedLen = Math.floor(binary.length / 2) * 2;
+    const bytes = new Uint8Array(alignedLen);
+    for (let i = 0; i < alignedLen; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
-    return new Int16Array(bytes.buffer);
+    return new Int16Array(bytes.buffer, 0, alignedLen / 2);
   }
 
   stop() {

@@ -308,39 +308,50 @@ async def handle_browser_client(websocket):
 
             # Task 2: Forward browser inputs (Audio chunks + Tool responses + Text prompts) to Gemini
             async def forward_browser_to_gemini():
-                async for raw_msg in websocket:
-                    try:
-                        data = json.loads(raw_msg)
+                audio_count = 0
+                try:
+                    async for raw_msg in websocket:
+                        try:
+                            data = json.loads(raw_msg)
 
-                        if "realtimeInput" in data:
-                            media_chunks = data["realtimeInput"].get("mediaChunks", [])
-                            for chunk in media_chunks:
-                                pcm_bytes = base64.b64decode(chunk["data"])
-                                await gemini_session.send_realtime_input(
-                                    audio=types.Blob(
-                                        mime_type="audio/pcm;rate=16000",
-                                        data=pcm_bytes
+                            if "realtimeInput" in data:
+                                media_chunks = data["realtimeInput"].get("mediaChunks", [])
+                                for chunk in media_chunks:
+                                    pcm_bytes = base64.b64decode(chunk["data"])
+                                    await gemini_session.send_realtime_input(
+                                        audio=types.Blob(
+                                            mime_type="audio/pcm;rate=16000",
+                                            data=pcm_bytes
+                                        )
                                     )
-                                )
+                                    audio_count += 1
+                                    if audio_count % 50 == 0:
+                                        print(f"[RELAY] Streamed {audio_count} mic audio chunks to Gemini Live")
 
-                        elif "toolResponse" in data:
-                            responses = data["toolResponse"].get("functionResponses", [])
-                            fn_responses = []
-                            for r in responses:
-                                fn_responses.append(
-                                    types.FunctionResponse(
-                                        id=r["id"],
-                                        name=r.get("name", "move_and_highlight"),
-                                        response=r["response"]
+                            elif "toolResponse" in data:
+                                responses = data["toolResponse"].get("functionResponses", [])
+                                print(f"[RELAY] Delivering tool response to Gemini:", [r.get("name") for r in responses])
+                                fn_responses = []
+                                for r in responses:
+                                    fn_responses.append(
+                                        types.FunctionResponse(
+                                            id=r["id"],
+                                            name=r.get("name", "move_and_highlight"),
+                                            response=r["response"]
+                                        )
                                     )
-                                )
-                            await gemini_session.send_tool_response(function_responses=fn_responses)
+                                await gemini_session.send_tool_response(function_responses=fn_responses)
 
-                        elif "text" in data:
-                            await gemini_session.send_realtime_input(text=data["text"])
+                            elif "text" in data:
+                                print(f"[RELAY] User sent text prompt: {data['text']}")
+                                await gemini_session.send_realtime_input(text=data["text"])
 
-                    except Exception as err:
-                        print(f"[RELAY] Error processing client message: {err}")
+                        except websockets.exceptions.ConnectionClosed:
+                            break
+                        except Exception as err:
+                            print(f"[RELAY] Error processing client message: {err}")
+                except websockets.exceptions.ConnectionClosed:
+                    pass
 
             await asyncio.gather(forward_gemini_to_browser(), forward_browser_to_gemini())
 
@@ -356,7 +367,14 @@ async def main():
     print(f" Target Model : {MODEL_NAME}")
     print(f" WebSocket URI: ws://localhost:{PORT}")
     print("==================================================")
-    async with websockets.serve(handle_browser_client, "0.0.0.0", PORT):
+    async with websockets.serve(
+        handle_browser_client,
+        "0.0.0.0",
+        PORT,
+        ping_interval=None,
+        ping_timeout=None,
+        max_size=10 * 1024 * 1024
+    ):
         await asyncio.Future()
 
 
