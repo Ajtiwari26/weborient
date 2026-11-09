@@ -1,0 +1,22 @@
+{
+  "name": "weborient",
+  "version": "0.1.0",
+  "description": "Generative UI & Voice Co-Browsing Agent SDK featuring an on-screen Ghost Cursor, real-time Gemini Multimodal Live Audio, and DOM actuation.",
+  "main": "src/sdk/weborient.js",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve .",
+    "test:demo": "open testscript/test-demo.html"
+  },
+  "keywords": [
+    "voice-agent",
+    "ghost-cursor",
+    "gemini-live",
+    "webrtc",
+    "dom-interaction",
+    "co-browsing",
+    "generative-ui"
+  ],
+  "author": "Ajay Tiwari",
+  "license": "MIT"
+}

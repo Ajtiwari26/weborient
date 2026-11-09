@@ -1,0 +1,50 @@
+{
+  "siteName": "Acme SaaS",
+  "baseUrl": "https://acme.example.com",
+  "theme": {
+    "primaryColor": "#6366f1",
+    "accentColor": "#ec4899",
+    "cursorStyle": "modern-glow"
+  },
+  "pages": [
+    {
+      "route": "/",
+      "title": "Home - Acme AI Platform",
+      "summary": "Homepage introducing Acme's enterprise automation suite, customer logos, and quick demo video.",
+      "keywords": ["home", "overview", "what is acme", "start"],
+      "sections": [
+        { "id": "hero", "selector": "#hero-section", "title": "Hero Showcase" },
+        { "id": "features", "selector": "#features-grid", "title": "Core Features" },
+        { "id": "testimonials", "selector": "#testimonials-carousel", "title": "Social Proof" }
+      ]
+    },
+    {
+      "route": "/pricing",
+      "title": "Pricing & Plans",
+      "summary": "Transparent pricing plans: Starter ($29/mo), Growth ($79/mo), and Enterprise (custom).",
+      "keywords": ["pricing", "cost", "plans", "subscription", "starter", "growth", "enterprise"],
+      "sections": [
+        { "id": "pricing-table", "selector": "#pricing-table", "title": "Tier Comparison" },
+        { "id": "faq", "selector": "#pricing-faq", "title": "Billing FAQ" }
+      ]
+    },
+    {
+      "route": "/contact",
+      "title": "Contact Sales & Support",
+      "summary": "Contact form for enterprise demo requests and support tickets.",
+      "keywords": ["contact", "sales", "demo", "support", "talk to human", "reach out"],
+      "forms": [
+        {
+          "formSelector": "#contact-form",
+          "description": "Demo Request Form",
+          "fields": [
+            { "name": "fullName", "selector": "#input-name", "label": "Full Name", "type": "text", "required": true },
+            { "name": "email", "selector": "#input-email", "label": "Work Email", "type": "email", "required": true },
+            { "name": "company", "selector": "#input-company", "label": "Company Name", "type": "text", "required": false },
+            { "name": "message", "selector": "#input-message", "label": "How can we help?", "type": "textarea", "required": false }
+          ]
+        }
+      ]
+    }
+  ]
+}
