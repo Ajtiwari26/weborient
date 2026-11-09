@@ -416,7 +416,11 @@
       manifestUrl: '../config/sample-manifest.json',
       onEvent: (type, detail) => {
         if (type === 'transcript') {
-          addLog('Voice AI', detail.text);
+          if (detail.role === 'user') {
+            addLog('🗣️ You Said', detail.text);
+          } else {
+            addLog('🤖 AI Spoke', detail.text);
+          }
         } else if (type === 'interrupted') {
           addLog('Barge-In', 'Audio & active tour interrupted by user');
         }

@@ -237,6 +237,7 @@ async def handle_browser_client(websocket):
 
     config = types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
+        input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=types.Content(parts=[types.Part.from_text(text=full_prompt)]),
         tools=tools
@@ -255,6 +256,13 @@ async def handle_browser_client(websocket):
                         if getattr(sc, "interrupted", False):
                             await websocket.send(json.dumps({
                                 "serverContent": {"interrupted": True}
+                            }))
+
+                        if sc.input_transcription and getattr(sc.input_transcription, "text", None):
+                            await websocket.send(json.dumps({
+                                "serverContent": {
+                                    "inputTranscription": {"text": sc.input_transcription.text}
+                                }
                             }))
 
                         if sc.output_transcription and getattr(sc.output_transcription, "text", None):
@@ -309,7 +317,7 @@ async def handle_browser_client(websocket):
                             for chunk in media_chunks:
                                 pcm_bytes = base64.b64decode(chunk["data"])
                                 await gemini_session.send_realtime_input(
-                                    media=types.Blob(
+                                    audio=types.Blob(
                                         mime_type="audio/pcm;rate=16000",
                                         data=pcm_bytes
                                     )

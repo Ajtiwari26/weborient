@@ -172,6 +172,10 @@ export class LiveClient {
       }
     }
 
+    if (msg.serverContent?.inputTranscription?.text) {
+      this.onTranscript(msg.serverContent.inputTranscription.text, 'user');
+    }
+
     if (msg.serverContent?.outputTranscription?.text) {
       this.onTranscript(msg.serverContent.outputTranscription.text, 'model');
     }
