@@ -22,8 +22,15 @@
       </div>
       <span class="text-xs text-indigo-400 font-mono">v0.1.0</span>
     </div>
-    <p class="text-xs text-slate-400 mb-3">Trigger simulated model tool calls to observe the Ghost Cursor and DOM actuation in action:</p>
+    <p class="text-xs text-slate-400 mb-3">Trigger simulated model tool calls or connect to Gemini 3.8 Live with your microphone:</p>
     
+    <div class="mb-3">
+      <button id="btn-toggle-live" class="w-full py-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-lg font-semibold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20">
+        <span class="w-2 h-2 rounded-full bg-red-400" id="live-indicator"></span>
+        <span id="live-btn-text">Connect Live Voice (Gemini 3.8)</span>
+      </button>
+    </div>
+
     <div class="grid grid-cols-2 gap-2 text-xs">
       <button id="btn-test-highlight-pro" class="bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg font-medium transition">
         Highlight Pro Plan
@@ -170,6 +177,36 @@
       logBox.appendChild(line);
       logBox.scrollTop = logBox.scrollHeight;
     }
+
+    let isLiveConnected = false;
+    const btnToggleLive = document.getElementById('btn-toggle-live');
+    const liveIndicator = document.getElementById('live-indicator');
+    const liveBtnText = document.getElementById('live-btn-text');
+
+    btnToggleLive.addEventListener('click', async () => {
+      if (!isLiveConnected) {
+        liveBtnText.innerText = 'Connecting to Gemini 3.8...';
+        weborient.options.endpoint = 'ws://localhost:8088';
+        try {
+          await weborient.start();
+          isLiveConnected = true;
+          liveIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-ping';
+          liveBtnText.innerText = 'Listening (Speak to Assistant)';
+          btnToggleLive.className = btnToggleLive.className.replace('from-indigo-500 to-purple-600', 'from-emerald-600 to-teal-700');
+          addLog('Live Audio', 'Connected to Gemini 3.8 Live Relay on port 8088');
+        } catch (err) {
+          liveBtnText.innerText = 'Connection Failed (Start Relay)';
+          addLog('Error', `Could not connect to relay: ${err.message}`);
+        }
+      } else {
+        weborient.stop();
+        isLiveConnected = false;
+        liveIndicator.className = 'w-2 h-2 rounded-full bg-red-400';
+        liveBtnText.innerText = 'Connect Live Voice (Gemini 3.8)';
+        btnToggleLive.className = btnToggleLive.className.replace('from-emerald-600 to-teal-700', 'from-indigo-500 to-purple-600');
+        addLog('Live Audio', 'Disconnected from Gemini 3.8 Live Relay');
+      }
+    });
 
     // Attach Test Bench Buttons
     document.getElementById('btn-test-highlight-pro').addEventListener('click', async () => {
