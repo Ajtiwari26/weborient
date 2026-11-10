@@ -1,9 +1,12 @@
 /**
- * WebOrient Multi-Page Demo Shared Shell & Control Bench (v0.2.0)
- * - Injects a unified sticky Multi-Page Navigation Header across all 5 demo pages
- * - Mounts the floating WebOrient Multi-Page Control Bench with Cross-Page Workflow triggers
+ * WebOrient Multi-Page Demo Shared Shell, Session Memory Inspector & Salesperson Bench (v0.3.0)
+ * - Injects unified sticky Multi-Page Navigation Header with "Oriented ✓" badges on visited pages
+ * - Mounts the floating WebOrient Co-Pilot & Salesperson Bench featuring:
+ *   1. "▶ Start Synchronized Multi-Page Salesperson Pitch" (Show & Describe Simultaneously)
+ *   2. Native Language Selector (English, Hinglish, Hindi, Español) persisted across pages
+ *   3. User Goal / Want input persisted across pages
+ *   4. Live "Already Oriented" vs "What Else to Describe" Session Memory tracker
  * - Persists the Closed-Loop Event Log across page navigations via sessionStorage
- * - Wires page-specific interactive widgets (tabs, carousels, switches, ROI calculators, forms)
  */
 import { WebOrient } from '../src/sdk/weborient.js';
 
@@ -13,7 +16,7 @@ const PAGES = [
   { id: 'home', file: 'test-demo.html', route: '/', label: 'Overview Hub', badge: 'Home' },
   { id: 'features', file: 'features.html', route: '/features', label: 'Architecture & Benchmarks', badge: '5 Layers' },
   { id: 'pricing', file: 'pricing.html', route: '/pricing', label: 'Pricing & ROI Calculator', badge: 'Interactive' },
-  { id: 'docs', file: 'docs.html', route: '/docs', label: 'Developer Docs & API', badge: '10 Tools' },
+  { id: 'docs', file: 'docs.html', route: '/docs', label: 'Developer Docs & API', badge: '12 Tools' },
   { id: 'contact', file: 'contact.html', route: '/contact', label: 'Enterprise Intake Form', badge: 'Voice Fill' }
 ];
 
@@ -24,10 +27,10 @@ export function initMultiPageDemo(pageConfig = {}) {
   // 1. Mount Sticky Multi-Page Top Navigation Header
   mountGlobalHeader(activePage, pageConfig.sectionLinks || []);
 
-  // 2. Mount Floating Control Bench
+  // 2. Mount Floating Salesperson & Memory Control Bench
   mountControlBench(activePage);
 
-  // 3. Initialize WebOrient SDK
+  // 3. Initialize WebOrient SDK v0.3.0
   const weborient = new WebOrient({
     themeColor: '#6366f1',
     accentColor: '#ec4899',
@@ -36,12 +39,19 @@ export function initMultiPageDemo(pageConfig = {}) {
     onEvent: (type, detail) => {
       if (type === 'toolCall') {
         addPersistentLog(detail.name, formatArgsSummary(detail.args));
+      } else if (type === 'speechSync' && detail.status === 'speaking') {
+        addPersistentLog('Salesperson Voice', `“${detail.text.slice(0, 68)}...”`);
       } else if (type === 'transcript') {
-        addPersistentLog('Voice AI', detail.text);
+        addPersistentLog('Live Voice AI', detail.text);
       } else if (type === 'interrupted') {
-        addPersistentLog('Barge-In', 'Audio & active tour interrupted by user');
+        addPersistentLog('Barge-In', 'Audio & active pitch interrupted by user');
       } else if (type === 'status') {
         syncLiveButtonState(detail.status === 'connected');
+      } else if (type === 'memoryUpdate') {
+        renderSessionMemoryUI(detail);
+        updateHeaderVisitedBadges(detail);
+      } else if (type === 'pitchStatus') {
+        syncPitchButtonState(detail.running, detail.remaining);
       }
     }
   });
@@ -51,6 +61,9 @@ export function initMultiPageDemo(pageConfig = {}) {
   wireGenericTabs();
   wireGenericCarousels();
   wireControlBenchActions(weborient, activePage, pageConfig);
+  renderSessionMemoryUI(weborient.memory.getState());
+  updateHeaderVisitedBadges(weborient.memory.getState());
+  syncPitchButtonState(weborient.memory.state.isPitchRunning, weborient.memory.state.activePitchQueue.length);
   renderStoredLogs();
 
   return weborient;
@@ -64,13 +77,13 @@ function mountGlobalHeader(activePage, sectionLinks) {
   const navItemsHtml = PAGES.map(p => {
     const isCurrent = p.id === activePage.id;
     return `
-      <a href="${p.file}" id="nav-link-${p.id}" class="px-3.5 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 ${
+      <a href="${p.file}" id="nav-link-${p.id}" data-page-file="${p.file}" class="px-3.5 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 ${
         isCurrent
           ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25'
           : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
       }">
         <span>${p.label}</span>
-        <span class="text-[10px] px-1.5 py-0.5 rounded-full ${
+        <span data-visit-badge="${p.file}" class="text-[10px] px-1.5 py-0.5 rounded-full ${
           isCurrent ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-800 text-slate-400'
         }">${p.badge}</span>
       </a>
@@ -101,9 +114,9 @@ function mountGlobalHeader(activePage, sectionLinks) {
         <div>
           <div class="font-extrabold text-sm tracking-tight text-white flex items-center gap-2">
             <span>Acme WebOrient</span>
-            <span class="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full">Multi-Page v0.2</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full">Session-Aware v0.3</span>
           </div>
-          <div class="text-[10px] text-slate-400">Voice Co-Browsing &amp; Ghost Cursor Platform</div>
+          <div class="text-[10px] text-slate-400">Synchronized Salesperson Show-and-Describe</div>
         </div>
       </a>
       <nav aria-label="Primary Multi-Page Navigation" class="flex flex-wrap items-center gap-1.5">
@@ -116,89 +129,117 @@ function mountGlobalHeader(activePage, sectionLinks) {
   document.body.prepend(header);
 }
 
+function updateHeaderVisitedBadges(memState) {
+  if (!memState || !Array.isArray(memState.visitedPages)) return;
+  for (const pageFile of memState.visitedPages) {
+    const badge = document.querySelector(`[data-visit-badge="${pageFile}"]`);
+    if (badge && !badge.textContent.includes('✓')) {
+      badge.textContent = `${badge.textContent} ✓`;
+    }
+  }
+}
+
 function mountControlBench(activePage) {
   const bench = document.createElement('aside');
   bench.id = 'test-toolbar';
   bench.setAttribute('data-agent-ignore', 'true');
-  bench.className = 'fixed bottom-4 right-4 z-50 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 p-4 rounded-2xl shadow-2xl max-w-sm w-full max-h-[88vh] overflow-y-auto';
+  bench.className = 'fixed bottom-4 right-4 z-50 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 p-3.5 rounded-2xl shadow-2xl max-w-sm w-full max-h-[90vh] overflow-y-auto';
 
   bench.innerHTML = `
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center gap-2">
         <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-        <h3 class="font-bold text-xs tracking-wider text-white uppercase">WebOrient Co-Pilot Bench</h3>
+        <h3 class="font-bold text-xs tracking-wider text-white uppercase">Salesperson &amp; Memory Bench</h3>
       </div>
       <span class="text-[10px] text-indigo-300 font-mono bg-indigo-500/15 px-2 py-0.5 rounded-full border border-indigo-500/30">${activePage.file}</span>
     </div>
 
-    <!-- Live Voice Connection -->
-    <div class="mb-2">
-      <button id="btn-toggle-live" class="w-full py-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-lg font-semibold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20">
+    <!-- PRIMARY FEATURE: Synchronized Show & Describe Salesperson Pitch -->
+    <div class="mb-2.5 p-2.5 bg-gradient-to-br from-indigo-950/90 via-slate-900 to-pink-950/60 border border-indigo-500/50 rounded-xl space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-pink-300 font-semibold">✨ Show &amp; Say in Sync</span>
+        <label class="flex items-center gap-1 text-[10px] text-slate-300 cursor-pointer">
+          <input type="checkbox" id="chk-mute-tts" class="accent-pink-500">
+          <span>Mute TTS</span>
+        </label>
+      </div>
+      <button id="btn-salesperson-pitch" class="w-full py-2.5 bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg font-bold text-xs transition shadow-lg shadow-pink-600/25 flex items-center justify-center gap-1.5">
+        <span id="pitch-btn-text">▶ Start Multi-Page Salesperson Pitch</span>
+      </button>
+      <div class="grid grid-cols-2 gap-1.5 pt-0.5">
+        <div>
+          <label class="block text-[9px] font-mono uppercase text-slate-400 mb-0.5">User Native Language</label>
+          <select id="mem-lang-select" class="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-white">
+            <option value="en-IN">English (India/Global)</option>
+            <option value="hinglish">Hinglish (Hindi + Eng)</option>
+            <option value="hi-IN">Hindi (हिन्दी)</option>
+            <option value="es-ES">Español (Spanish)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[9px] font-mono uppercase text-slate-400 mb-0.5">User Goal / Want</label>
+          <input id="mem-goal-input" type="text" class="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-white" placeholder="e.g. Boost SaaS signups">
+        </div>
+      </div>
+    </div>
+
+    <!-- CROSS-PAGE CONSISTENT SESSION MEMORY LEDGER -->
+    <div class="mb-2.5 p-2.5 bg-slate-950/90 border border-slate-800 rounded-xl space-y-1.5">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-semibold">🧠 Cross-Page Session Memory</span>
+        <button id="btn-reset-memory" class="text-[9px] text-slate-400 hover:text-rose-400 underline">Reset Memory</button>
+      </div>
+      <div class="text-[10px] text-slate-300 flex justify-between">
+        <span>Oriented So Far: <strong id="mem-oriented-count" class="text-emerald-400">0</strong></span>
+        <span>Left to Describe: <strong id="mem-pending-count" class="text-amber-400">0</strong></span>
+      </div>
+      <div id="mem-oriented-pills" class="text-[10px] font-mono text-slate-400 truncate"></div>
+      <div id="mem-next-up" class="text-[10px] font-mono text-indigo-300 truncate"></div>
+    </div>
+
+    <!-- Live Gemini 3.8 Bidirectional Microphone Connection -->
+    <div class="mb-2 flex gap-1.5">
+      <button id="btn-toggle-live" class="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg font-semibold text-[11px] transition flex items-center justify-center gap-1.5">
         <span class="w-2 h-2 rounded-full bg-red-400" id="live-indicator"></span>
-        <span id="live-btn-text">Connect Live Voice (Gemini 3.8)</span>
+        <span id="live-btn-text">Connect Gemini 3.8 Mic</span>
       </button>
     </div>
 
     <!-- Text Command Input -->
-    <div class="flex gap-1.5 mb-3">
-      <input id="live-text-prompt" type="text" placeholder="Type command or route (e.g. /pricing)..." class="flex-1 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+    <div class="flex gap-1.5 mb-2.5">
+      <input id="live-text-prompt" type="text" placeholder="Ask or navigate (e.g. /pricing, tour)..." class="flex-1 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
       <button id="btn-send-prompt" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition">
         Run
       </button>
     </div>
 
-    <!-- Cross-Page Multi-Step Workflows -->
-    <div class="mb-2.5">
-      <div class="text-[10px] font-mono uppercase tracking-wider text-indigo-400 mb-1.5">Cross-Page Autonomous Workflows</div>
-      <div class="grid grid-cols-2 gap-1.5 text-[11px]">
-        <button id="btn-xpage-pricing" class="bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 p-2 rounded-lg font-medium transition text-left">
-          ↳ Go Pricing + Annual + Pro
-        </button>
-        <button id="btn-xpage-features" class="bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 p-2 rounded-lg font-medium transition text-left">
-          ↳ Go Architecture + Swipe
-        </button>
-        <button id="btn-xpage-docs" class="bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 p-2 rounded-lg font-medium transition text-left">
-          ↳ Go Docs + Next.js Tab
-        </button>
-        <button id="btn-xpage-contact" class="bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 p-2 rounded-lg font-medium transition text-left">
-          ↳ Go Contact + Fill 9 Fields
-        </button>
-      </div>
-    </div>
-
     <!-- Current Page Local Actions -->
     <div class="mb-2">
-      <div class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 mb-1.5">Current Page Actions (${activePage.badge})</div>
+      <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-1">Page Actions (${activePage.badge})</div>
       <div class="grid grid-cols-2 gap-1.5 text-[11px]">
-        <button id="btn-local-highlight" class="bg-indigo-600 hover:bg-indigo-500 text-white p-1.5 rounded-lg font-medium transition">
-          Highlight + Explain
+        <button id="btn-local-highlight" class="bg-indigo-600/90 hover:bg-indigo-500 text-white p-1.5 rounded-lg font-medium transition">
+          Show &amp; Describe Here
         </button>
-        <button id="btn-local-tour" class="bg-purple-600 hover:bg-purple-500 text-white p-1.5 rounded-lg font-medium transition">
-          3-Stop Page Tour
+        <button id="btn-local-tour" class="bg-purple-600/90 hover:bg-purple-500 text-white p-1.5 rounded-lg font-medium transition">
+          Synced Voice Tour
         </button>
-        <button id="btn-local-tab" class="bg-sky-600 hover:bg-sky-500 text-white p-1.5 rounded-lg font-medium transition">
+        <button id="btn-local-tab" class="bg-sky-600/90 hover:bg-sky-500 text-white p-1.5 rounded-lg font-medium transition">
           Swap Tab / View
         </button>
-        <button id="btn-local-swipe" class="bg-amber-600 hover:bg-amber-500 text-white p-1.5 rounded-lg font-medium transition">
+        <button id="btn-local-swipe" class="bg-amber-600/90 hover:bg-amber-500 text-white p-1.5 rounded-lg font-medium transition">
           Swipe / Toggle Widget
         </button>
-        <button id="btn-local-qa" class="bg-slate-800 hover:bg-slate-700 text-slate-200 p-1.5 rounded-lg font-medium transition">
-          Read Page Q&amp;A
+        <button id="btn-xpage-pricing" class="bg-slate-800 hover:bg-slate-700 text-indigo-300 p-1.5 rounded-lg font-medium transition">
+          ↳ Pricing + Annual
         </button>
-        <button id="btn-local-scan" class="bg-slate-800 hover:bg-slate-700 text-slate-200 p-1.5 rounded-lg font-medium transition">
-          Scan Page DOM
-        </button>
-        <button id="btn-local-scroll-top" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg font-medium transition">
-          Scroll Top
-        </button>
-        <button id="btn-local-scroll-bottom" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg font-medium transition">
-          Scroll Bottom
+        <button id="btn-xpage-contact" class="bg-slate-800 hover:bg-slate-700 text-emerald-300 p-1.5 rounded-lg font-medium transition">
+          ↳ Contact + Fill 11
         </button>
       </div>
     </div>
 
     <!-- Persistent Cross-Page Console Log -->
-    <div class="mt-2.5 pt-2 border-t border-slate-800">
+    <div class="mt-2 pt-2 border-t border-slate-800">
       <div class="text-[10px] font-mono text-slate-400 mb-1 flex justify-between items-center">
         <span>Cross-Page Event Trail</span>
         <div class="flex items-center gap-2">
@@ -206,29 +247,114 @@ function mountControlBench(activePage) {
           <button id="btn-clear-logs" class="text-[10px] text-slate-500 hover:text-slate-300 underline">Clear</button>
         </div>
       </div>
-      <div id="action-log" class="bg-black/70 p-2 rounded-lg text-[10px] font-mono text-emerald-400 h-24 overflow-y-auto space-y-1"></div>
+      <div id="action-log" class="bg-black/70 p-2 rounded-lg text-[10px] font-mono text-emerald-400 h-20 overflow-y-auto space-y-1"></div>
     </div>
   `;
 
   document.body.appendChild(bench);
 }
 
-function wireControlBenchActions(weborient, activePage, pageConfig) {
-  let isLiveConnected = false;
-  const btnToggleLive = document.getElementById('btn-toggle-live');
+function renderSessionMemoryUI(memState) {
+  if (!memState) return;
+  const langSelect = document.getElementById('mem-lang-select');
+  const goalInput = document.getElementById('mem-goal-input');
+  const orientedCountEl = document.getElementById('mem-oriented-count');
+  const pendingCountEl = document.getElementById('mem-pending-count');
+  const orientedPillsEl = document.getElementById('mem-oriented-pills');
+  const nextUpEl = document.getElementById('mem-next-up');
 
-  btnToggleLive.addEventListener('click', async () => {
+  if (langSelect && document.activeElement !== langSelect) {
+    langSelect.value = memState.userLanguage || 'en-IN';
+  }
+  if (goalInput && document.activeElement !== goalInput) {
+    goalInput.value = memState.userIntent?.goal || '';
+  }
+  if (orientedCountEl) {
+    orientedCountEl.textContent = `${(memState.orientedHistory || []).length} items`;
+  }
+  if (pendingCountEl) {
+    pendingCountEl.textContent = `${(memState.pendingToDescribe || []).length} items`;
+  }
+  if (orientedPillsEl) {
+    const recent = (memState.orientedHistory || []).slice(-3).map(i => `✓ ${i.title || i.selector}`).join(' • ');
+    orientedPillsEl.textContent = recent || '✓ Nothing oriented yet (ready for pitch)';
+  }
+  if (nextUpEl) {
+    const nextItem = (memState.pendingToDescribe || [])[0];
+    nextUpEl.textContent = nextItem
+      ? `Next to describe: ${nextItem.title} (${nextItem.page})`
+      : '🎉 All multi-page sections oriented!';
+  }
+}
+
+function syncPitchButtonState(isRunning, remainingCount = 0) {
+  const btn = document.getElementById('btn-salesperson-pitch');
+  const txt = document.getElementById('pitch-btn-text');
+  if (!btn || !txt) return;
+
+  if (isRunning) {
+    txt.textContent = `⏹ Stop Salesperson Pitch (${remainingCount} left)`;
+    btn.className = 'w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-xs transition shadow-lg flex items-center justify-center gap-1.5';
+  } else {
+    txt.textContent = '▶ Start Multi-Page Salesperson Pitch';
+    btn.className = 'w-full py-2.5 bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg font-bold text-xs transition shadow-lg shadow-pink-600/25 flex items-center justify-center gap-1.5';
+  }
+}
+
+function wireControlBenchActions(weborient, activePage, pageConfig) {
+  // 1. Synchronized Multi-Page Salesperson Pitch Button
+  document.getElementById('btn-salesperson-pitch').addEventListener('click', async () => {
+    if (weborient.memory.state.isPitchRunning) {
+      weborient.stopSalespersonDemo();
+      addPersistentLog('Salesperson', 'Paused multi-page pitch (memory preserved)');
+    } else {
+      const chosenLang = document.getElementById('mem-lang-select').value;
+      const chosenGoal = document.getElementById('mem-goal-input').value.trim();
+      addPersistentLog('Salesperson', `Starting synchronized pitch (${chosenLang})`);
+      await weborient.startSalespersonDemo({
+        language: chosenLang,
+        goal: chosenGoal || undefined
+      });
+    }
+  });
+
+  // Mute TTS checkbox
+  document.getElementById('chk-mute-tts').addEventListener('change', (e) => {
+    weborient.speechSync.muted = e.target.checked;
+  });
+
+  // Language & Goal Memory Inputs
+  document.getElementById('mem-lang-select').addEventListener('change', (e) => {
+    weborient.memory.setLanguage(e.target.value);
+    addPersistentLog('Memory', `Language set to ${e.target.value}`);
+  });
+
+  document.getElementById('mem-goal-input').addEventListener('change', (e) => {
+    weborient.memory.updateUserIntent({ goal: e.target.value.trim() });
+    addPersistentLog('Memory', `User goal updated: "${e.target.value.trim()}"`);
+  });
+
+  document.getElementById('btn-reset-memory').addEventListener('click', () => {
+    weborient.stopSalespersonDemo();
+    const fresh = weborient.memory.reset();
+    renderSessionMemoryUI(fresh);
+    addPersistentLog('Memory', 'Reset oriented history & restored full pitch queue');
+  });
+
+  // 2. Live Gemini 3.8 Microphone Connection
+  let isLiveConnected = false;
+  document.getElementById('btn-toggle-live').addEventListener('click', async () => {
     if (!isLiveConnected) {
-      document.getElementById('live-btn-text').innerText = 'Connecting to Gemini 3.8...';
+      document.getElementById('live-btn-text').innerText = 'Connecting...';
       weborient.options.endpoint = 'ws://localhost:8088';
       try {
         await weborient.start();
         isLiveConnected = true;
         syncLiveButtonState(true);
-        addPersistentLog('Live Audio', `Connected on ${activePage.file}`);
+        addPersistentLog('Live Audio', `Connected on ${activePage.file} with Session Memory`);
       } catch (err) {
-        document.getElementById('live-btn-text').innerText = 'Connection Failed (Run Relay)';
-        addPersistentLog('Error', err.message);
+        document.getElementById('live-btn-text').innerText = 'Relay Offline (Use Pitch Above)';
+        addPersistentLog('Notice', 'Relay not running on :8088; use Salesperson Pitch for offline voice');
       }
     } else {
       weborient.stop();
@@ -238,21 +364,27 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
     }
   });
 
-  // Text prompt / quick command runner (works both offline for route/tool commands and online with Live API)
+  // 3. Text Command Runner
   const promptInput = document.getElementById('live-text-prompt');
   const runPromptCommand = async () => {
     const val = promptInput.value.trim();
     if (!val) return;
     promptInput.value = '';
 
+    // Update user goal in memory if they state what they want
+    if (val.toLowerCase().startsWith('i want') || val.toLowerCase().startsWith('goal:')) {
+      weborient.memory.updateUserIntent({ goal: val });
+    }
+
     if (weborient.sendTextPrompt(val)) {
       addPersistentLog('Prompt -> AI', val);
       return;
     }
 
-    // Local smart intent fallback when testing without the Python relay running
     const lower = val.toLowerCase();
-    if (lower.includes('pricing') || lower === '/pricing') {
+    if (lower.includes('pitch') || lower.includes('sales') || lower.includes('demo')) {
+      document.getElementById('btn-salesperson-pitch').click();
+    } else if (lower.includes('pricing') || lower === '/pricing') {
       await weborient.handleToolCall('navigate_route', { path: '/pricing' });
     } else if (lower.includes('feature') || lower.includes('arch') || lower === '/features') {
       await weborient.handleToolCall('navigate_route', { path: '/features' });
@@ -262,15 +394,14 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
       await weborient.handleToolCall('navigate_route', { path: '/contact' });
     } else if (lower.includes('home') || lower === '/') {
       await weborient.handleToolCall('navigate_route', { path: '/' });
-    } else if (lower.includes('tour')) {
-      document.getElementById('btn-local-tour').click();
     } else {
       const res = await weborient.handleToolCall('read_page_content', { query: val });
       const matched = res.matchingSections?.[0];
       if (matched) {
-        await weborient.handleToolCall('move_and_highlight', {
+        await weborient.handleToolCall('show_and_describe', {
           selector: matched.selector,
-          explanation: `${matched.heading}: ${matched.summary.slice(0, 90)}...`
+          explanation: matched.heading,
+          spokenText: matched.summary.slice(0, 140)
         });
       }
     }
@@ -281,12 +412,19 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
     if (e.key === 'Enter') runPromptCommand();
   });
 
-  // Cross-Page Multi-Step Workflows
+  // 4. Cross-Page Quick Workflows
   document.getElementById('btn-xpage-pricing').addEventListener('click', async () => {
-    addPersistentLog('Workflow', 'Navigating to Pricing -> Toggle Annual -> Highlight Pro');
+    addPersistentLog('Workflow', 'Go Pricing -> Toggle Annual + Describe Pro Plan');
     const postActions = [
-      { name: 'swipe_or_swap', args: { selector: '#billing-toggle', action: 'toggle' } },
-      { name: 'move_and_highlight', args: { selector: '#plan-pro', explanation: 'Pro Co-Pilot with 20% Annual Discount Applied ($64/mo)' } }
+      {
+        name: 'show_and_describe',
+        args: {
+          selector: '#plan-pro',
+          explanation: 'Pro Co-Pilot with 20% Annual Discount ($64/mo)',
+          spokenText: 'Here on the Pricing page, I am toggling Annual billing so you save 20 percent on the Pro Co-Pilot plan.',
+          inlineAction: { type: 'swipe_or_swap', selector: '#billing-toggle', action: 'toggle' }
+        }
+      }
     ];
     if (activePage.id === 'pricing') {
       for (const act of postActions) await weborient.handleToolCall(act.name, act.args);
@@ -296,61 +434,32 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
     }
   });
 
-  document.getElementById('btn-xpage-features').addEventListener('click', async () => {
-    addPersistentLog('Workflow', 'Navigating to Architecture -> Swap Subsystem Tab -> Swipe Industry Slide');
-    const postActions = [
-      { name: 'swipe_or_swap', args: { selector: '#subsystem-tabs', action: 'select', targetValue: 'bezier' } },
-      { name: 'swipe_or_swap', args: { selector: '#industry-carousel', action: 'next' } },
-      { name: 'move_and_highlight', args: { selector: '#benchmark-table', explanation: 'Sub-350ms Voice-to-Action Latency vs Legacy Agents' } }
-    ];
-    if (activePage.id === 'features') {
-      for (const act of postActions) await weborient.handleToolCall(act.name, act.args);
-    } else {
-      weborient.queuePostNavigationActions(postActions);
-      await weborient.handleToolCall('navigate_route', { path: 'features.html' });
-    }
-  });
-
-  document.getElementById('btn-xpage-docs').addEventListener('click', async () => {
-    addPersistentLog('Workflow', 'Navigating to Docs -> Select Next.js Snippet -> Highlight Tools Spec');
-    const postActions = [
-      { name: 'swipe_or_swap', args: { selector: '#docs-framework-tabs', action: 'select', targetValue: 'nextjs' } },
-      { name: 'move_and_highlight', args: { selector: '#tools-reference-section', explanation: '10 Built-in Gemini Live API Tool Declarations' } }
-    ];
-    if (activePage.id === 'docs') {
-      for (const act of postActions) await weborient.handleToolCall(act.name, act.args);
-    } else {
-      weborient.queuePostNavigationActions(postActions);
-      await weborient.handleToolCall('navigate_route', { path: 'docs.html' });
-    }
-  });
-
   document.getElementById('btn-xpage-contact').addEventListener('click', async () => {
-    addPersistentLog('Workflow', 'Navigating to Enterprise Contact -> Batch Filling 9 Controls');
+    addPersistentLog('Workflow', 'Go Contact -> Show & Describe 11-Field Batch Form Fill');
+    const facts = weborient.memory.state.formFacts;
     const postActions = [
       {
-        name: 'fill_form_batch',
+        name: 'show_and_describe',
         args: {
-          fields: [
-            { selector: '#contact-name', value: 'Ajay Tiwari' },
-            { selector: '#contact-email', value: 'ajay at deploymate dot in' },
-            { selector: '#contact-phone', value: '+91 98765 43210' },
-            { selector: '#contact-company', value: 'DeployMate AI Labs' },
-            { selector: '#contact-website', value: 'https://deploymate.in' },
-            { selector: '#contact-framework', value: 'Next.js / React' },
-            { selector: '#contact-plan', value: 'Pro Co-Pilot' },
-            { selector: '#contact-team-size', value: '65' },
-            { selector: '#contact-priority', value: 'true' },
-            { selector: '#contact-hipaa', value: 'true' },
-            { selector: '#contact-message', value: 'Deploying multi-page voice co-browsing across our customer onboarding and checkout flows.' }
-          ]
-        }
-      },
-      {
-        name: 'move_and_highlight',
-        args: {
-          selector: '#btn-submit-contact',
-          explanation: 'All 11 Enterprise fields validated! Ready to submit.'
+          selector: '#contact-form',
+          explanation: 'Filling 11 Enterprise Controls from Session Memory',
+          spokenText: `I am filling out the consultation form for ${facts.fullName} at ${facts.company} while keeping the password field untouched.`,
+          inlineAction: {
+            type: 'fill_form_batch',
+            fields: [
+              { selector: '#contact-name', value: facts.fullName },
+              { selector: '#contact-email', value: 'ajay at deploymate dot in' },
+              { selector: '#contact-phone', value: facts.phone },
+              { selector: '#contact-company', value: facts.company },
+              { selector: '#contact-website', value: facts.website },
+              { selector: '#contact-framework', value: 'Next.js / React' },
+              { selector: '#contact-plan', value: 'Pro Co-Pilot' },
+              { selector: '#contact-team-size', value: facts.teamSize },
+              { selector: '#contact-priority', value: 'true' },
+              { selector: '#contact-hipaa', value: 'true' },
+              { selector: '#contact-message', value: `Goal: ${weborient.memory.state.userIntent.goal}` }
+            ]
+          }
         }
       }
     ];
@@ -362,17 +471,20 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
     }
   });
 
-  // Page-Local Action Buttons
+  // 5. Current Page Local Actions (with Synchronized Show & Describe!)
   document.getElementById('btn-local-highlight').addEventListener('click', async () => {
     const target = pageConfig.highlightTarget || { selector: 'h1', explanation: `Active Page: ${document.title}` };
-    await weborient.handleToolCall('move_and_highlight', target);
+    await weborient.handleToolCall('show_and_describe', {
+      selector: target.selector,
+      explanation: target.explanation,
+      spokenText: target.spokenText || target.explanation
+    });
   });
 
   document.getElementById('btn-local-tour').addEventListener('click', async () => {
     const steps = pageConfig.tourSteps || [
       { selector: 'h1', explanation: '1. Page Headline & Context', dwellMs: 900 },
-      { selector: 'section:nth-of-type(2)', explanation: '2. Primary Interactive Module', dwellMs: 900 },
-      { selector: '#global-site-header nav', explanation: '3. Multi-Page Navigation Header', dwellMs: 900 }
+      { selector: 'section:nth-of-type(2)', explanation: '2. Primary Interactive Module', dwellMs: 900 }
     ];
     await weborient.handleToolCall('guide_tour', { steps });
   });
@@ -391,27 +503,6 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
     const el = document.querySelector(swipeTarget);
     const action = el?.getAttribute('role') === 'switch' ? 'toggle' : 'next';
     await weborient.handleToolCall('swipe_or_swap', { selector: swipeTarget, action });
-  });
-
-  document.getElementById('btn-local-qa').addEventListener('click', async () => {
-    const qaTarget = pageConfig.qaTarget || { query: 'security' };
-    const res = await weborient.handleToolCall('read_page_content', qaTarget);
-    const preview = res.text || res.matchingSections?.[0]?.summary || 'Extracted page knowledge';
-    addPersistentLog('Q&A Grounding', preview.slice(0, 75) + '...');
-  });
-
-  document.getElementById('btn-local-scan').addEventListener('click', async () => {
-    const res = await weborient.handleToolCall('scan_visible_elements', { includeOffscreen: true });
-    addPersistentLog('DOM Scanner', `Indexed ${res.elements.length} controls on ${activePage.file}`);
-    console.table(res.elements);
-  });
-
-  document.getElementById('btn-local-scroll-top').addEventListener('click', async () => {
-    await weborient.handleToolCall('scroll_page', { direction: 'top' });
-  });
-
-  document.getElementById('btn-local-scroll-bottom').addEventListener('click', async () => {
-    await weborient.handleToolCall('scroll_page', { direction: 'bottom' });
   });
 
   document.getElementById('btn-clear-logs').addEventListener('click', () => {
@@ -474,10 +565,10 @@ function syncLiveButtonState(connected) {
   if (!liveIndicator || !liveBtnText) return;
   if (connected) {
     liveIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-ping';
-    liveBtnText.innerText = 'Listening (Speak or Type Command)';
+    liveBtnText.innerText = 'Listening (Gemini 3.8 Live)';
   } else {
     liveIndicator.className = 'w-2 h-2 rounded-full bg-red-400';
-    liveBtnText.innerText = 'Connect Live Voice (Gemini 3.8)';
+    liveBtnText.innerText = 'Connect Gemini 3.8 Mic';
   }
 }
 
@@ -522,7 +613,7 @@ function renderStoredLogs() {
 
   logCountEl.innerText = `${logs.length} events`;
   if (logs.length === 0) {
-    logBox.innerHTML = `<div class="text-slate-500">Ready! Click any workflow or page action...</div>`;
+    logBox.innerHTML = `<div class="text-slate-500">Click "▶ Start Multi-Page Salesperson Pitch" above!</div>`;
     return;
   }
 

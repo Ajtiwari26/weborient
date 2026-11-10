@@ -1,11 +1,13 @@
 {
   "name": "weborient",
-  "version": "0.2.0",
-  "description": "Generative UI & Voice Co-Browsing Agent SDK featuring a Cubic Bézier Ghost Cursor, real-time Gemini Multimodal Live Audio, semantic DOM grounding, and closed-loop DOM actuation.",
+  "version": "0.3.0",
+  "description": "Session-Aware Voice Co-Browsing & Synchronized Salesperson Agent SDK featuring a Cubic Bézier Ghost Cursor, Cross-Page Memory, Multilingual Speech Sync, and Closed-Loop DOM Actuation.",
   "main": "src/sdk/weborient.js",
   "type": "module",
   "scripts": {
     "start": "npx serve .",
+    "build": "node scripts/bundle.js",
+    "crawl": "python3 src/crawler/generate_manifest.py testscript/ --output config/generated-manifest.json",
     "relay": "python3 src/relay/weborient_relay.py",
     "test:live": "python3 testscript/test_gemini38_live.py",
     "test:demo": "open testscript/test-demo.html"
@@ -14,10 +16,10 @@
     "voice-agent",
     "ghost-cursor",
     "gemini-live",
-    "webrtc",
+    "salesperson-ai",
+    "session-memory",
     "dom-interaction",
-    "co-browsing",
-    "generative-ui"
+    "co-browsing"
   ],
   "author": "Ajay Tiwari",
   "license": "MIT"

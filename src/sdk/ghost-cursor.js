@@ -1,8 +1,9 @@
 /**
- * WebOrient Ghost Cursor & Deterministic UI Actuator (v0.2.0)
+ * WebOrient Ghost Cursor & Deterministic UI Actuator (v0.3.0 — Synchronized Salesperson Edition)
  * - True Cubic Bézier + Fitts's Law human-like 60fps cursor trajectory
- * - Scroll-locked element spotlight with floating glassmorphic explanation badge
- * - Multi-step guided tour engine (`guideTour`)
+ * - Scroll-locked element spotlight + floating glassmorphic explanation coachmark
+ * - Live Synchronized Salesperson Teleprompter Bubble (`showSpeechBubble`) attached to cursor
+ * - Salesperson deictic emphasis gesture (`pulseEmphasis`) while speaking
  * - React/Vue/Angular compatible form filling (`HTMLInputElement.prototype.value` setter)
  * - Spoken input normalization (emails, numbers, booleans) & live validation feedback
  * - Smart viewport & nested container scrolling (`up`, `down`, `top`, `bottom`, `targetSelector`)
@@ -32,7 +33,6 @@ export class GhostCursor {
     const existing = document.getElementById('weborient-overlay');
     if (existing) existing.remove();
 
-    // Fixed non-blocking overlay root
     this.container = document.createElement('div');
     this.container.id = 'weborient-overlay';
     this.container.setAttribute('data-agent-ignore', 'true');
@@ -52,7 +52,7 @@ export class GhostCursor {
       position: fixed;
       border: 2px solid ${this.primaryColor};
       border-radius: 10px;
-      box-shadow: 0 0 24px ${this.primaryColor}88, inset 0 0 12px ${this.primaryColor}33;
+      box-shadow: 0 0 26px ${this.primaryColor}88, inset 0 0 12px ${this.primaryColor}33;
       pointer-events: none;
       opacity: 0;
       transition: opacity 0.25s ease, top 0.15s ease-out, left 0.15s ease-out, width 0.2s ease-out, height 0.2s ease-out;
@@ -64,18 +64,18 @@ export class GhostCursor {
     this.tooltip.id = 'weborient-tooltip';
     this.tooltip.style.cssText = `
       position: fixed;
-      max-width: 300px;
-      padding: 8px 12px;
-      background: rgba(15, 23, 42, 0.94);
-      backdrop-filter: blur(8px);
+      max-width: 340px;
+      padding: 8px 13px;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(10px);
       border: 1px solid ${this.primaryColor};
       border-radius: 10px;
       color: #f8fafc;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 12px;
-      line-height: 1.4;
+      line-height: 1.45;
       font-weight: 500;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px ${this.primaryColor}44;
+      box-shadow: 0 12px 28px -5px rgba(0, 0, 0, 0.6), 0 0 16px ${this.primaryColor}44;
       pointer-events: none;
       opacity: 0;
       transform: translateY(4px);
@@ -104,7 +104,7 @@ export class GhostCursor {
     this.trailPath.style.transition = 'opacity 0.35s ease';
     this.trailSvg.appendChild(this.trailPath);
 
-    // Ghost Cursor Pointer
+    // Ghost Cursor Pointer + Live Synchronized Speech Bubble
     this.cursor = document.createElement('div');
     this.cursor.id = 'weborient-cursor';
     this.cursor.innerHTML = `
@@ -120,12 +120,31 @@ export class GhostCursor {
         "></div>
         <div class="weborient-badge" style="
           position: absolute; top: 20px; left: 16px;
-          background: ${this.primaryColor}; color: #fff;
+          background: linear-gradient(135deg, ${this.primaryColor}, ${this.accentColor});
+          color: #fff;
           font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
-          padding: 2px 6px; border-radius: 999px;
-          white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+          padding: 2px 7px; border-radius: 999px;
+          white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.35);
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-        ">AI Co-Pilot</div>
+          display: flex; align-items: center; gap: 4px;
+        ">
+          <span class="wo-speaking-dot" style="width:5px;height:5px;border-radius:50%;background:#34d399;display:inline-block;"></span>
+          <span class="wo-badge-label">AI Sales Co-Pilot</span>
+        </div>
+        <div class="weborient-speech-bubble" style="
+          position: absolute; top: 40px; left: 16px;
+          width: 250px; padding: 7px 10px;
+          background: rgba(15, 23, 42, 0.96);
+          border-left: 3px solid ${this.accentColor};
+          border-radius: 8px;
+          color: #e2e8f0;
+          font-size: 11px; line-height: 1.35;
+          font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+          box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+          opacity: 0; transform: translateY(4px);
+          transition: opacity 0.2s ease, transform 0.2s ease;
+          pointer-events: none;
+        "></div>
       </div>
     `;
     this.cursor.style.cssText = `
@@ -143,10 +162,47 @@ export class GhostCursor {
     this.container.appendChild(this.cursor);
     document.body.appendChild(this.container);
 
-    // Keep spotlight and tooltip locked onto target element during scroll or resize
     this._boundSyncPosition = () => this._syncSpotlightPosition();
     window.addEventListener('scroll', this._boundSyncPosition, { passive: true, capture: true });
     window.addEventListener('resize', this._boundSyncPosition, { passive: true });
+  }
+
+  /**
+   * Displays synchronized live speech subtitles right underneath the Ghost Cursor while speaking
+   */
+  showSpeechBubble(text, badgeLabel = 'Speaking Live...') {
+    if (!this.cursor) return;
+    const bubble = this.cursor.querySelector('.weborient-speech-bubble');
+    const label = this.cursor.querySelector('.wo-badge-label');
+    if (label && badgeLabel) label.textContent = badgeLabel;
+    if (bubble) {
+      bubble.textContent = `“${text}”`;
+      bubble.style.opacity = '1';
+      bubble.style.transform = 'translateY(0)';
+    }
+  }
+
+  hideSpeechBubble() {
+    if (!this.cursor) return;
+    const bubble = this.cursor.querySelector('.weborient-speech-bubble');
+    const label = this.cursor.querySelector('.wo-badge-label');
+    if (label) label.textContent = 'AI Sales Co-Pilot';
+    if (bubble) {
+      bubble.style.opacity = '0';
+      bubble.style.transform = 'translateY(4px)';
+    }
+  }
+
+  /**
+   * Subtle salesperson pointing/circling gesture on the active element while speaking
+   */
+  async performSpeakingGesture(el) {
+    if (!el || !document.body.contains(el)) return;
+    const rect = el.getBoundingClientRect();
+    const baseX = Math.max(20, Math.min(window.innerWidth - 280, rect.left + rect.width * 0.35));
+    const baseY = Math.max(20, Math.min(window.innerHeight - 100, rect.top + Math.min(48, rect.height * 0.4)));
+    await this.moveTo(baseX + 26, baseY - 6, 320);
+    await this.moveTo(baseX, baseY, 320);
   }
 
   _resolve(selectorOrElement) {
@@ -166,33 +222,34 @@ export class GhostCursor {
   /**
    * Moves cursor along a human-like Cubic Bézier trajectory with Fitts's Law easing
    */
-  async moveTo(targetX, targetY, durationMs = 520) {
+  async moveTo(targetX, targetY, durationMs = 500) {
     if (this._rafId) cancelAnimationFrame(this._rafId);
+
+    // Keep cursor within visible screen bounds so the speech bubble stays readable
+    const clampedX = Math.max(16, Math.min(window.innerWidth - 40, targetX));
+    const clampedY = Math.max(16, Math.min(window.innerHeight - 40, targetY));
 
     const startX = this.currentPosition.x;
     const startY = this.currentPosition.y;
-    const dx = targetX - startX;
-    const dy = targetY - startY;
+    const dx = clampedX - startX;
+    const dy = clampedY - startY;
     const distance = Math.hypot(dx, dy);
 
     if (distance < 2) {
-      this.currentPosition = { x: targetX, y: targetY };
-      this.cursor.style.transform = `translate3d(${targetX}px, ${targetY}px, 0)`;
+      this.currentPosition = { x: clampedX, y: clampedY };
+      this.cursor.style.transform = `translate3d(${clampedX}px, ${clampedY}px, 0)`;
       return;
     }
 
-    // Scale duration naturally with distance using Fitts's Law index of difficulty
-    const scaledDuration = Math.min(850, Math.max(240, durationMs * (0.55 + Math.log2(distance / 60 + 1) * 0.22)));
+    const scaledDuration = Math.min(820, Math.max(220, durationMs * (0.55 + Math.log2(distance / 60 + 1) * 0.22)));
 
-    // Perpendicular unit vector for natural arc control points P1, P2
     const nx = -dy / distance;
     const ny = dx / distance;
-    const arcRadius = Math.min(110, distance * 0.22) * (Math.random() > 0.5 ? 1 : -1);
+    const arcRadius = Math.min(100, distance * 0.22) * (Math.random() > 0.5 ? 1 : -1);
 
     const p1x = startX + dx * 0.28 + nx * arcRadius;
     const p1y = startY + dy * 0.28 + ny * arcRadius;
 
-    // Slight Fitts's law overshoot on longer jumps (> 180px)
     const overshoot = distance > 180 ? 4 : 0;
     const p2x = startX + dx * 0.76 + nx * (arcRadius * 0.35) + (dx / distance) * overshoot;
     const p2y = startY + dy * 0.76 + ny * (arcRadius * 0.35) + (dy / distance) * overshoot;
@@ -206,20 +263,18 @@ export class GhostCursor {
       const step = (now) => {
         const elapsed = now - startTime;
         const rawT = Math.min(1, elapsed / scaledDuration);
-        // Ease-out cubic timing
         const t = 1 - Math.pow(1 - rawT, 3);
         const u = 1 - t;
 
-        // Cubic Bézier evaluation B(t)
         const x = (u * u * u) * startX +
                   3 * (u * u) * t * p1x +
                   3 * u * (t * t) * p2x +
-                  (t * t * t) * targetX;
+                  (t * t * t) * clampedX;
 
         const y = (u * u * u) * startY +
                   3 * (u * u) * t * p1y +
                   3 * u * (t * t) * p2y +
-                  (t * t * t) * targetY;
+                  (t * t * t) * clampedY;
 
         this.currentPosition = { x, y };
         this.cursor.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
@@ -228,8 +283,8 @@ export class GhostCursor {
           this._rafId = requestAnimationFrame(step);
         } else {
           this.isMoving = false;
-          this.currentPosition = { x: targetX, y: targetY };
-          this.cursor.style.transform = `translate3d(${targetX}px, ${targetY}px, 0)`;
+          this.currentPosition = { x: clampedX, y: clampedY };
+          this.cursor.style.transform = `translate3d(${clampedX}px, ${clampedY}px, 0)`;
           resolve();
         }
       };
@@ -238,9 +293,6 @@ export class GhostCursor {
     });
   }
 
-  /**
-   * Synchronizes spotlight and explanation tooltip with the active target element's bounding box
-   */
   _syncSpotlightPosition() {
     if (!this.activeTarget || !document.body.contains(this.activeTarget)) {
       this.hideSpotlight();
@@ -267,10 +319,9 @@ export class GhostCursor {
           <span>${this._escapeHtml(this.activeExplanation)}</span>
         </div>
       `;
-      // Place tooltip above element if space permits, otherwise below
       const placeAbove = rect.top > 70;
       const topPos = placeAbove ? Math.max(12, rect.top - 48) : Math.min(window.innerHeight - 56, rect.bottom + 12);
-      const leftPos = Math.max(12, Math.min(window.innerWidth - 312, rect.left));
+      const leftPos = Math.max(12, Math.min(window.innerWidth - 350, rect.left));
 
       this.tooltip.style.top = `${topPos}px`;
       this.tooltip.style.left = `${leftPos}px`;
@@ -281,9 +332,6 @@ export class GhostCursor {
     }
   }
 
-  /**
-   * Scrolls element into view if needed, moves cursor to it, highlights it, and shows optional explanation
-   */
   async moveToElement(selector, highlight = true, explanation = null) {
     const el = this._resolve(selector);
     if (!el) {
@@ -291,17 +339,16 @@ export class GhostCursor {
       return { success: false, elementFound: false, error: `Element not found: ${selector}` };
     }
 
-    // Check if element is outside comfortable viewport zone
     const initialRect = el.getBoundingClientRect();
-    const outOfView = initialRect.top < 60 || initialRect.bottom > window.innerHeight - 60;
+    const outOfView = initialRect.top < 70 || initialRect.bottom > window.innerHeight - 70;
     if (outOfView) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       await this._sleep(360);
     }
 
     const rect = el.getBoundingClientRect();
-    const targetX = Math.max(12, Math.min(window.innerWidth - 20, rect.left + rect.width / 2));
-    const targetY = Math.max(12, Math.min(window.innerHeight - 20, rect.top + rect.height / 2));
+    const targetX = Math.max(16, Math.min(window.innerWidth - 260, rect.left + Math.min(rect.width / 2, 180)));
+    const targetY = Math.max(16, Math.min(window.innerHeight - 90, rect.top + Math.min(rect.height / 2, 60)));
 
     await this.moveTo(targetX, targetY);
 
@@ -318,16 +365,14 @@ export class GhostCursor {
     return {
       success: true,
       elementFound: true,
+      element: el,
       selector: typeof selector === 'string' ? selector : (el.id ? `#${el.id}` : el.tagName.toLowerCase()),
       label: el.innerText?.trim()?.slice(0, 80) || el.getAttribute('aria-label') || null,
       explanation: explanation || null
     };
   }
 
-  /**
-   * Runs a multi-step visual guided tour across a list of elements
-   */
-  async guideTour(steps = []) {
+  async guideTour(steps = [], speechSync = null) {
     if (!Array.isArray(steps) || steps.length === 0) {
       return { success: false, error: 'No tour steps provided' };
     }
@@ -342,14 +387,23 @@ export class GhostCursor {
       const step = steps[i];
       const badgeText = `[${i + 1}/${steps.length}] ${step.explanation || 'Tour Stop'}`;
       const res = await this.moveToElement(step.selector, true, badgeText);
+
+      if (speechSync && (step.spokenText || step.explanation)) {
+        const textToSpeak = step.spokenText || step.explanation;
+        this.showSpeechBubble(textToSpeak, `Step ${i + 1} of ${steps.length}`);
+        await speechSync.speakSynchronized(textToSpeak);
+        this.hideSpeechBubble();
+      } else {
+        const dwell = Math.min(4000, Math.max(600, step.dwellMs || 1200));
+        await this._sleep(dwell);
+      }
+
       completedSteps.push({
         step: i + 1,
         selector: step.selector,
         success: res.success,
         explanation: step.explanation
       });
-      const dwell = Math.min(4000, Math.max(600, step.dwellMs || 1400));
-      await this._sleep(dwell);
     }
 
     return {
@@ -359,9 +413,6 @@ export class GhostCursor {
     };
   }
 
-  /**
-   * Performs an animated click ripple and dispatches the full pointer & mouse click event sequence
-   */
   async click(selector, explanation = null) {
     const el = this._resolve(selector);
     if (!el) {
@@ -371,7 +422,6 @@ export class GhostCursor {
     const res = await this.moveToElement(el, true, explanation);
     if (!res.success) return res;
 
-    // Visual click ripple & pointer press animation
     const ring = this.cursor.querySelector('.weborient-ring');
     const pointer = this.cursor.querySelector('.weborient-pointer');
     if (ring) {
@@ -395,7 +445,6 @@ export class GhostCursor {
     const cy = rect.top + rect.height / 2;
     const eventInit = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
 
-    // Correct W3C event dispatch order: pointerdown -> mousedown -> focus -> pointerup -> mouseup -> click
     el.dispatchEvent(new PointerEvent('pointerdown', eventInit));
     el.dispatchEvent(new MouseEvent('mousedown', eventInit));
     if (typeof el.focus === 'function') el.focus({ preventScroll: true });
@@ -417,11 +466,7 @@ export class GhostCursor {
     };
   }
 
-  /**
-   * Fills or sets any form control (text, email, tel, number, textarea, select, checkbox, radio, range)
-   * with voice normalization, React/Vue native prototype setters, and validation readback
-   */
-  async typeIntoField(selector, rawValue, charDelayMs = 24) {
+  async typeIntoField(selector, rawValue, charDelayMs = 22) {
     const el = this._resolve(selector);
     if (!el) {
       return { success: false, elementFound: false, error: `Form field not found: ${selector}` };
@@ -436,7 +481,6 @@ export class GhostCursor {
     const tag = el.tagName.toLowerCase();
     const type = (el.type || '').toLowerCase();
 
-    // 1. Handle <select> dropdowns
     if (tag === 'select') {
       const targetStr = String(normalizedValue).toLowerCase().trim();
       const matchedOption = Array.from(el.options).find(
@@ -451,7 +495,6 @@ export class GhostCursor {
       return this._buildFieldResult(el, selector);
     }
 
-    // 2. Handle Checkbox or Radio controls
     if (type === 'checkbox' || type === 'radio') {
       const shouldCheck = this._parseBooleanIntent(normalizedValue, !el.checked);
       if (el.checked !== shouldCheck) {
@@ -465,7 +508,6 @@ export class GhostCursor {
       return this._buildFieldResult(el, selector);
     }
 
-    // 3. Handle Range sliders
     if (type === 'range') {
       const numVal = parseFloat(String(normalizedValue).replace(/[^0-9.-]/g, ''));
       const finalRangeVal = Number.isFinite(numVal) ? String(numVal) : String(normalizedValue);
@@ -475,13 +517,11 @@ export class GhostCursor {
       return this._buildFieldResult(el, selector);
     }
 
-    // 4. Handle standard text, email, tel, number, search, url, textarea, or contenteditable
     const textToType = String(normalizedValue);
     this._setNativeValue(el, '');
     el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
 
-    // Adaptive delay so long paragraphs finish quickly while short inputs animate smoothly
-    const delay = textToType.length > 40 ? Math.min(12, charDelayMs) : charDelayMs;
+    const delay = textToType.length > 40 ? Math.min(10, charDelayMs) : charDelayMs;
     let currentStr = '';
 
     for (const char of textToType) {
@@ -503,9 +543,6 @@ export class GhostCursor {
     return this._buildFieldResult(el, selector);
   }
 
-  /**
-   * Fills multiple form fields sequentially in a single batch call
-   */
   async fillFormBatch(fields = []) {
     if (!Array.isArray(fields) || fields.length === 0) {
       return { success: false, error: 'No fields provided for batch fill' };
@@ -514,7 +551,7 @@ export class GhostCursor {
     const results = [];
     for (const item of fields) {
       if (!item || !item.selector) continue;
-      const res = await this.typeIntoField(item.selector, item.value ?? '', 14);
+      const res = await this.typeIntoField(item.selector, item.value ?? '', 12);
       results.push(res);
     }
 
@@ -528,9 +565,6 @@ export class GhostCursor {
     };
   }
 
-  /**
-   * Smoothly scrolls the page or a scrollable container up, down, top, bottom, or to a target selector
-   */
   async scroll(direction = 'down', targetSelector = null, amount = 'page') {
     if (targetSelector) {
       const targetEl = this._resolve(targetSelector);
@@ -564,9 +598,6 @@ export class GhostCursor {
     };
   }
 
-  /**
-   * Swipes carousels/sliders, swaps active tabs, toggles switches, or sets range sliders
-   */
   async swipeOrSwap(selector, action = 'next', targetValue = null) {
     const el = this._resolve(selector);
     if (!el) {
@@ -575,7 +606,6 @@ export class GhostCursor {
 
     const act = String(action || 'next').toLowerCase();
 
-    // Case 1: Range Slider
     if (el.tagName === 'INPUT' && el.type === 'range') {
       const min = parseFloat(el.min || '0');
       const max = parseFloat(el.max || '100');
@@ -593,12 +623,10 @@ export class GhostCursor {
       return await this.typeIntoField(el, String(nextVal));
     }
 
-    // Case 2: Toggle Switch (`[role="switch"]` or checkbox toggle)
     if (el.getAttribute('role') === 'switch' || (el.tagName === 'INPUT' && el.type === 'checkbox')) {
       return await this.click(el, `Toggled switch`);
     }
 
-    // Case 3: Tab Bar or Individual Tab (`[role="tablist"]`, `[role="tab"]`, `[data-tab]`)
     if (
       el.getAttribute('role') === 'tablist' ||
       el.getAttribute('role') === 'tab' ||
@@ -637,7 +665,6 @@ export class GhostCursor {
       }
     }
 
-    // Case 4: Carousel or Swipeable Container
     await this.moveToElement(el, true, `Swiping ${act}`);
     const rect = el.getBoundingClientRect();
     const cy = rect.top + rect.height / 2;
@@ -645,10 +672,8 @@ export class GhostCursor {
     const startX = isLeftSwipe ? rect.left + rect.width * 0.75 : rect.left + rect.width * 0.25;
     const endX = isLeftSwipe ? rect.left + rect.width * 0.25 : rect.left + rect.width * 0.75;
 
-    // Render visual swipe trail & animate pointer drag
     await this._animateSwipeGesture(el, startX, cy, endX, cy);
 
-    // Also trigger explicit carousel next/prev buttons or data-carousel-slide logic if present
     const btnSelector = isLeftSwipe
       ? '[data-carousel-next], .carousel-next, [aria-label*="Next" i]'
       : '[data-carousel-prev], .carousel-prev, [aria-label*="Prev" i]';
@@ -675,7 +700,6 @@ export class GhostCursor {
   }
 
   async _animateSwipeGesture(el, startX, startY, endX, endY) {
-    // Draw dashed swipe trajectory
     if (this.trailPath) {
       this.trailPath.setAttribute('d', `M ${startX} ${startY} Q ${(startX + endX) / 2} ${startY - 22} ${endX} ${endY}`);
       this.trailPath.style.opacity = '0.9';
@@ -707,9 +731,6 @@ export class GhostCursor {
     }
   }
 
-  /**
-   * Uses native HTML prototype value setters so React, Vue, and Angular controlled inputs detect changes
-   */
   _setNativeValue(el, value) {
     if (el.isContentEditable) {
       el.innerText = value;
@@ -726,9 +747,6 @@ export class GhostCursor {
     }
   }
 
-  /**
-   * Normalizes spoken voice dictation for emails, phone numbers, and numbers
-   */
   _normalizeVoiceInput(el, rawValue) {
     if (rawValue === null || rawValue === undefined) return '';
     let val = String(rawValue).trim();
@@ -781,6 +799,7 @@ export class GhostCursor {
       cancelAnimationFrame(this._rafId);
       this._rafId = null;
     }
+    this.hideSpeechBubble();
     this.isMoving = false;
   }
 

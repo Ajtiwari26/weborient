@@ -1,0 +1,292 @@
+{
+  "siteName": "Acme AI Multi-Page Demo",
+  "baseUrl": "http://localhost:3000",
+  "theme": {
+    "primaryColor": "#6366f1",
+    "accentColor": "#ec4899",
+    "cursorStyle": "modern-glow"
+  },
+  "knowledgeBase": [
+    {
+      "topic": "docs",
+      "question": "Why do standard scripts fail on React controlled inputs, and how does WebOrient solve it?",
+      "answer": "React overrides the instance input.value setter to track synthetic state. WebOrient calls Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, val) before dispatching bubbling InputEvent('input') and Event('change') events."
+    },
+    {
+      "topic": "docs",
+      "question": "Can WebOrient target elements inside Web Components / Open Shadow DOM?",
+      "answer": "Yes. DOMScanner._querySelectorAllDeep() recursively traverses open el.shadowRoot trees when indexing and resolving targets."
+    },
+    {
+      "topic": "pricing",
+      "question": "How does the 14-day money-back guarantee work?",
+      "answer": "If WebOrient doesn't measurably improve user engagement or form completion within 14 days, click cancel in your dashboard for an automatic 100% refund\u2014no questions asked."
+    },
+    {
+      "topic": "pricing",
+      "question": "What happens if our website exceeds our monthly voice minutes?",
+      "answer": "Your widget never abruptly shuts off mid-conversation. Additional usage is billed at $0.015 per active voice minute, or you can switch tiers anytime."
+    }
+  ],
+  "pages": [
+    {
+      "route": "/contact",
+      "file": "contact.html",
+      "title": "Enterprise Contact & 11-Field Voice Intake Portal \u2014 Acme WebOrient",
+      "summary": "Auto-discovered page (3 sections, 1 forms).",
+      "keywords": [
+        "contact",
+        "contact"
+      ],
+      "sections": [
+        {
+          "id": "intake-form-section",
+          "selector": "#intake-form-section",
+          "title": "Intake Form Section",
+          "description": "Section #intake-form-section"
+        },
+        {
+          "id": "offices-section",
+          "selector": "#offices-section",
+          "title": "Offices Section",
+          "description": "Section #offices-section"
+        },
+        {
+          "id": "sla-section",
+          "selector": "#sla-section",
+          "title": "Sla Section",
+          "description": "Section #sla-section"
+        }
+      ],
+      "forms": [
+        {
+          "formSelector": "#contact-form",
+          "description": "Form #contact-form",
+          "fields": [
+            {
+              "name": "fullName",
+              "selector": "#contact-name",
+              "label": "Ajay Tiwari",
+              "type": "text",
+              "required": true
+            },
+            {
+              "name": "email",
+              "selector": "#contact-email",
+              "label": "ajay@deploymate.in",
+              "type": "email",
+              "required": true
+            },
+            {
+              "name": "phone",
+              "selector": "#contact-phone",
+              "label": "+91 98765 43210",
+              "type": "tel",
+              "required": false
+            },
+            {
+              "name": "company",
+              "selector": "#contact-company",
+              "label": "DeployMate AI Labs",
+              "type": "text",
+              "required": true
+            },
+            {
+              "name": "website",
+              "selector": "#contact-website",
+              "label": "https://deploymate.in",
+              "type": "url",
+              "required": false
+            },
+            {
+              "name": "framework",
+              "selector": "#contact-framework",
+              "label": "Framework",
+              "type": "select",
+              "required": false
+            },
+            {
+              "name": "plan",
+              "selector": "#contact-plan",
+              "label": "Plan",
+              "type": "select",
+              "required": false
+            },
+            {
+              "name": "teamSize",
+              "selector": "#contact-team-size",
+              "label": "Teamsize",
+              "type": "range",
+              "required": false
+            },
+            {
+              "name": "priorityOnboarding",
+              "selector": "#contact-priority",
+              "label": "Priorityonboarding",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "name": "hipaaCompliance",
+              "selector": "#contact-hipaa",
+              "label": "Hipaacompliance",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "name": "message",
+              "selector": "#contact-message",
+              "label": "Tell us about your website routes, forms, and voice goals...",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "route": "/docs",
+      "file": "docs.html",
+      "title": "Developer Docs & API Reference \u2014 Acme WebOrient",
+      "summary": "Auto-discovered page (4 sections, 0 forms).",
+      "keywords": [
+        "docs",
+        "docs"
+      ],
+      "sections": [
+        {
+          "id": "quickstart-section",
+          "selector": "#quickstart-section",
+          "title": "Quickstart Section",
+          "description": "Section #quickstart-section"
+        },
+        {
+          "id": "tools-reference-section",
+          "selector": "#tools-reference-section",
+          "title": "Tools Reference Section",
+          "description": "Section #tools-reference-section"
+        },
+        {
+          "id": "manifest-schema-section",
+          "selector": "#manifest-schema-section",
+          "title": "Manifest Schema Section",
+          "description": "Section #manifest-schema-section"
+        },
+        {
+          "id": "troubleshooting-section",
+          "selector": "#troubleshooting-section",
+          "title": "Troubleshooting Section",
+          "description": "Section #troubleshooting-section"
+        }
+      ]
+    },
+    {
+      "route": "/features",
+      "file": "features.html",
+      "title": "Product & Deep Architecture \u2014 Acme WebOrient",
+      "summary": "Auto-discovered page (4 sections, 0 forms).",
+      "keywords": [
+        "features",
+        "features"
+      ],
+      "sections": [
+        {
+          "id": "features-hero",
+          "selector": "#features-hero",
+          "title": "Features Hero",
+          "description": "Section #features-hero"
+        },
+        {
+          "id": "subsystem-tabs-section",
+          "selector": "#subsystem-tabs-section",
+          "title": "Subsystem Tabs Section",
+          "description": "Section #subsystem-tabs-section"
+        },
+        {
+          "id": "industry-carousel-section",
+          "selector": "#industry-carousel-section",
+          "title": "Industry Carousel Section",
+          "description": "Section #industry-carousel-section"
+        },
+        {
+          "id": "benchmark-section",
+          "selector": "#benchmark-section",
+          "title": "Benchmark Section",
+          "description": "Section #benchmark-section"
+        }
+      ]
+    },
+    {
+      "route": "/pricing",
+      "file": "pricing.html",
+      "title": "Pricing, Tiers & ROI Calculator \u2014 Acme WebOrient",
+      "summary": "Auto-discovered page (4 sections, 0 forms).",
+      "keywords": [
+        "pricing",
+        "pricing"
+      ],
+      "sections": [
+        {
+          "id": "pricing-tiers-section",
+          "selector": "#pricing-tiers-section",
+          "title": "Pricing Tiers Section",
+          "description": "Section #pricing-tiers-section"
+        },
+        {
+          "id": "roi-calculator-section",
+          "selector": "#roi-calculator-section",
+          "title": "Roi Calculator Section",
+          "description": "Section #roi-calculator-section"
+        },
+        {
+          "id": "comparison-table-section",
+          "selector": "#comparison-table-section",
+          "title": "Comparison Table Section",
+          "description": "Section #comparison-table-section"
+        },
+        {
+          "id": "pricing-faq-section",
+          "selector": "#pricing-faq-section",
+          "title": "Pricing Faq Section",
+          "description": "Section #pricing-faq-section"
+        }
+      ]
+    },
+    {
+      "route": "/",
+      "file": "test-demo.html",
+      "title": "Home \u2014 Acme WebOrient Multi-Page Platform",
+      "summary": "Auto-discovered page (4 sections, 0 forms).",
+      "keywords": [
+        "test-demo",
+        "home"
+      ],
+      "sections": [
+        {
+          "id": "hero-section",
+          "selector": "#hero-section",
+          "title": "Hero Section",
+          "description": "Section #hero-section"
+        },
+        {
+          "id": "workflow-section",
+          "selector": "#workflow-section",
+          "title": "Workflow Section",
+          "description": "Section #workflow-section"
+        },
+        {
+          "id": "carousel-section",
+          "selector": "#carousel-section",
+          "title": "Carousel Section",
+          "description": "Section #carousel-section"
+        },
+        {
+          "id": "security-section",
+          "selector": "#security-section",
+          "title": "Security Section",
+          "description": "Section #security-section"
+        }
+      ]
+    }
+  ]
+}
