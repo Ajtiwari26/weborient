@@ -3,567 +3,229 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebOrient v0.2.0 — Interactive Voice Co-Pilot & Ghost Cursor Playground</title>
+  <title>Home — Acme WebOrient Multi-Page Platform</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
 
-  <!-- Interactive Simulation & Live Voice Control Panel -->
-  <div id="test-toolbar" data-agent-ignore="true" class="fixed top-4 right-4 z-50 bg-slate-900/95 backdrop-blur-md border border-slate-700/70 p-4 rounded-2xl shadow-2xl max-w-sm w-full">
-    <div class="flex items-center justify-between mb-2">
-      <div class="flex items-center gap-2">
-        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-        <h3 class="font-bold text-xs tracking-wider text-white uppercase">WebOrient Control Bench</h3>
+  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20 pr-6 lg:pr-[25rem]">
+
+    <!-- 1. Hero & Live Telemetry Section -->
+    <section id="hero-section" class="space-y-8 pt-4">
+      <div class="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/30 rounded-full text-indigo-400 text-xs font-semibold">
+        <span>⚡ Multi-Page Voice Co-Browsing SDK v0.2.0</span>
+        <span class="text-slate-500">•</span>
+        <span>5 Linked Pages</span>
       </div>
-      <span class="text-[11px] text-indigo-400 font-mono bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/30">v0.2.0</span>
-    </div>
-    <p class="text-[11px] text-slate-400 mb-3">Test every Ghost Cursor capability locally or connect to Gemini 3.8 Live Audio:</p>
 
-    <!-- Live Voice Toggle -->
-    <div class="mb-2.5">
-      <button id="btn-toggle-live" class="w-full py-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-lg font-semibold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20">
-        <span class="w-2 h-2 rounded-full bg-red-400" id="live-indicator"></span>
-        <span id="live-btn-text">Connect Live Voice (Gemini 3.8)</span>
-      </button>
-    </div>
-
-    <!-- Quick Text Prompt Input for Live Session -->
-    <div class="flex gap-1.5 mb-3">
-      <input id="live-text-prompt" type="text" placeholder="Or type command to Live AI..." class="flex-1 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
-      <button id="btn-send-prompt" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg text-xs font-semibold transition">
-        Send
-      </button>
-    </div>
-
-    <!-- Action Simulation Grid -->
-    <div class="grid grid-cols-2 gap-1.5 text-[11px]">
-      <button id="btn-test-highlight-pro" class="bg-indigo-600/90 hover:bg-indigo-500 text-white p-2 rounded-lg font-medium transition">
-        Highlight + Explain
-      </button>
-      <button id="btn-test-tour" class="bg-purple-600/90 hover:bg-purple-500 text-white p-2 rounded-lg font-medium transition">
-        Multi-Step Page Tour
-      </button>
-      <button id="btn-test-swap-tab" class="bg-sky-600/90 hover:bg-sky-500 text-white p-2 rounded-lg font-medium transition">
-        Swap Feature Tab
-      </button>
-      <button id="btn-test-swipe-carousel" class="bg-amber-600/90 hover:bg-amber-500 text-white p-2 rounded-lg font-medium transition">
-        Swipe Use-Case Slide
-      </button>
-      <button id="btn-test-toggle-billing" class="bg-teal-600/90 hover:bg-teal-500 text-white p-2 rounded-lg font-medium transition">
-        Swap Annual Billing
-      </button>
-      <button id="btn-test-click" class="bg-pink-600/90 hover:bg-pink-500 text-white p-2 rounded-lg font-medium transition">
-        Click Pro Plan
-      </button>
-      <button id="btn-test-fill-form" class="bg-emerald-600/90 hover:bg-emerald-500 text-white p-2 rounded-lg font-medium transition col-span-2">
-        Smart Batch Fill Form (Text, Select, Slider, Check)
-      </button>
-      <button id="btn-test-qa" class="bg-slate-800 hover:bg-slate-700 text-slate-200 p-2 rounded-lg font-medium transition">
-        Read Page Q&A
-      </button>
-      <button id="btn-test-scan" class="bg-slate-800 hover:bg-slate-700 text-slate-200 p-2 rounded-lg font-medium transition">
-        Scan Interactive DOM
-      </button>
-      <button id="btn-test-scroll-top" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-2 rounded-lg font-medium transition">
-        Scroll to Top
-      </button>
-      <button id="btn-test-scroll-bottom" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-2 rounded-lg font-medium transition">
-        Scroll to FAQ
-      </button>
-    </div>
-
-    <!-- Live Execution Console Log -->
-    <div class="mt-3 pt-2.5 border-t border-slate-800">
-      <div class="text-[10px] font-mono text-slate-400 mb-1 flex justify-between">
-        <span>Closed-Loop Event Log</span>
-        <span id="log-count">0 calls</span>
-      </div>
-      <div id="action-log" class="bg-black/60 p-2 rounded-lg text-[10px] font-mono text-emerald-400 h-28 overflow-y-auto space-y-1">
-        <div>Ready for voice or simulated tool calls...</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Mock SaaS Website Content -->
-  <div class="max-w-5xl mx-auto px-6 py-16 space-y-24 pr-6 lg:pr-96">
-
-    <!-- 1. Hero Section -->
-    <section id="hero-section" class="text-center space-y-6 pt-8">
-      <div class="inline-block px-3 py-1 bg-indigo-500/10 border border-indigo-500/30 rounded-full text-indigo-400 text-xs font-semibold">
-        Next-Generation Multimodal Web Co-Pilot
-      </div>
-      <h1 class="text-4xl font-extrabold tracking-tight sm:text-6xl text-white">
-        Websites that <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-500">talk, explain, and act</span> for you
+      <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight text-white leading-tight">
+        Transform passive websites into <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-500">active voice co-pilots</span>
       </h1>
-      <p class="text-slate-400 max-w-2xl mx-auto text-base sm:text-lg">
-        Talk naturally to ask any question, navigate routes, highlight &amp; explain components, swipe carousels, swap tabs, and fill complex forms hands-free.
+
+      <p class="text-slate-300 text-base sm:text-lg leading-relaxed max-w-3xl">
+        WebOrient pairs Gemini 3.8 Multimodal Live Audio with a 60fps Cubic Bézier <strong>Ghost Cursor</strong> that navigates across pages, highlights sections with floating explanations, swipes carousels, swaps tabs, and fills enterprise forms as visitors speak.
       </p>
-      <div class="flex justify-center gap-4 pt-2">
-        <button id="hero-cta-demo" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 font-semibold rounded-xl text-white transition shadow-lg shadow-indigo-600/30">
-          Try Live Demo
-        </button>
-        <button id="hero-cta-docs" class="px-6 py-3 bg-slate-800 hover:bg-slate-700 font-semibold rounded-xl text-slate-200 transition">
-          Explore Architecture
-        </button>
+
+      <!-- Multi-Page Quick Jump Cards -->
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+        <a href="features.html" id="card-goto-features" class="p-4 bg-slate-900/80 hover:bg-slate-900 border border-slate-800 hover:border-indigo-500/60 rounded-2xl transition group">
+          <div class="text-xs font-mono text-indigo-400 mb-1">01 / ARCHITECTURE</div>
+          <div class="font-bold text-white group-hover:text-indigo-300 transition">5-Layer Runtime →</div>
+          <p class="text-xs text-slate-400 mt-1">Explore subsystem tabs, industry slides &amp; latency benchmarks.</p>
+        </a>
+        <a href="pricing.html" id="card-goto-pricing" class="p-4 bg-slate-900/80 hover:bg-slate-900 border border-slate-800 hover:border-pink-500/60 rounded-2xl transition group">
+          <div class="text-xs font-mono text-pink-400 mb-1">02 / PRICING &amp; ROI</div>
+          <div class="font-bold text-white group-hover:text-pink-300 transition">Plans &amp; Calculator →</div>
+          <p class="text-xs text-slate-400 mt-1">Toggle annual billing, adjust ROI sliders &amp; compare 4 tiers.</p>
+        </a>
+        <a href="docs.html" id="card-goto-docs" class="p-4 bg-slate-900/80 hover:bg-slate-900 border border-slate-800 hover:border-sky-500/60 rounded-2xl transition group">
+          <div class="text-xs font-mono text-sky-400 mb-1">03 / DEVELOPER DOCS</div>
+          <div class="font-bold text-white group-hover:text-sky-300 transition">1-Tag Setup &amp; API →</div>
+          <p class="text-xs text-slate-400 mt-1">Copy Next.js, React, Vue, Shopify snippets &amp; inspect 10 tools.</p>
+        </a>
+        <a href="contact.html" id="card-goto-contact" class="p-4 bg-slate-900/80 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/60 rounded-2xl transition group">
+          <div class="text-xs font-mono text-emerald-400 mb-1">04 / ENTERPRISE INTAKE</div>
+          <div class="font-bold text-white group-hover:text-emerald-300 transition">Voice Form Co-Pilot →</div>
+          <p class="text-xs text-slate-400 mt-1">Test 11-field batch voice filling, sliders, dropdowns &amp; validation.</p>
+        </a>
+      </div>
+
+      <!-- Live Telemetry Strip -->
+      <div id="telemetry-strip" class="grid grid-cols-2 sm:grid-cols-4 gap-4 p-5 bg-slate-900/60 border border-slate-800 rounded-2xl">
+        <div>
+          <div class="text-2xl font-black text-white">310ms</div>
+          <div class="text-xs text-slate-400">Voice-to-Cursor Latency</div>
+        </div>
+        <div>
+          <div class="text-2xl font-black text-emerald-400">&lt;50ms</div>
+          <div class="text-xs text-slate-400">Barge-In Audio Stop</div>
+        </div>
+        <div>
+          <div class="text-2xl font-black text-indigo-400">10 Tools</div>
+          <div class="text-xs text-slate-400">Closed-Loop DOM Actuators</div>
+        </div>
+        <div>
+          <div class="text-2xl font-black text-pink-400">+42%</div>
+          <div class="text-xs text-slate-400">Form Completion Lift</div>
+        </div>
       </div>
     </section>
 
-    <!-- 2. Interactive Feature Tabs Section (Tests Tab Swapping) -->
-    <section id="features-section" class="space-y-6">
+    <!-- 2. Interactive 4-Step Workflow Tabs -->
+    <section id="workflow-section" class="space-y-6">
       <div class="space-y-1">
-        <h2 class="text-2xl font-bold text-white">Interactive Platform Capabilities</h2>
-        <p class="text-sm text-slate-400">Ask the voice agent to switch tabs or explain how each subsystem works.</p>
+        <h2 class="text-2xl font-bold text-white">How the Closed-Loop Co-Pilot Operates</h2>
+        <p class="text-sm text-slate-400">Switch tabs below or ask the Ghost Cursor to walk through each stage.</p>
       </div>
 
-      <div id="feature-tabs" role="tablist" aria-label="Platform Capabilities" class="flex flex-wrap gap-2 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800">
-        <button role="tab" id="tab-voice" data-tab="voice" aria-selected="true" class="active flex-1 py-2 px-4 rounded-lg text-xs font-semibold bg-indigo-600 text-white transition">
-          1. Live Voice &amp; Q&amp;A
+      <div id="workflow-tabs" role="tablist" data-tab-group="home-workflow" class="flex flex-wrap gap-2 bg-slate-900 p-1.5 rounded-xl border border-slate-800">
+        <button role="tab" data-tab="perceive" data-target-panel="panel-perceive" aria-selected="true" class="active flex-1 py-2.5 px-4 rounded-lg text-xs font-semibold bg-indigo-600 text-white transition">
+          1. Semantic DOM Perception
         </button>
-        <button role="tab" id="tab-cursor" data-tab="cursor" aria-selected="false" class="flex-1 py-2 px-4 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
-          2. Bézier Ghost Cursor
+        <button role="tab" data-tab="stream" data-target-panel="panel-stream" aria-selected="false" class="flex-1 py-2.5 px-4 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
+          2. 16kHz/24kHz Live Stream
         </button>
-        <button role="tab" id="tab-forms" data-tab="forms" aria-selected="false" class="flex-1 py-2 px-4 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
-          3. Universal Form Co-Pilot
+        <button role="tab" data-tab="actuate" data-target-panel="panel-actuate" aria-selected="false" class="flex-1 py-2.5 px-4 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
+          3. Bézier Cursor Actuation
         </button>
-        <button role="tab" id="tab-gestures" data-tab="gestures" aria-selected="false" class="flex-1 py-2 px-4 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
-          4. Swiping &amp; Gestures
+        <button role="tab" data-tab="persist" data-target-panel="panel-persist" aria-selected="false" class="flex-1 py-2.5 px-4 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
+          4. Multi-Page Persistence
         </button>
       </div>
 
-      <div id="feature-tab-panel" class="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-2">
-        <h3 id="tab-panel-title" class="text-lg font-bold text-indigo-400">Sub-Second Bidirectional Voice &amp; Grounded Q&amp;A</h3>
-        <p id="tab-panel-desc" class="text-sm text-slate-300 leading-relaxed">
-          Streams 16kHz PCM audio to Gemini Live and plays back 24kHz gapless voice responses with instant sub-50ms barge-in interruption. Combines your Site Manifest knowledge base with real-time DOM section extraction to answer any question accurately.
-        </p>
+      <div class="p-6 bg-slate-900/70 border border-slate-800 rounded-2xl">
+        <div id="panel-perceive" data-panel-group="home-workflow" class="space-y-2">
+          <span class="text-xs font-mono text-indigo-400 uppercase">Stage 1 • DOMScanner + Site Manifest</span>
+          <h3 class="text-lg font-bold text-white">Deterministic `data-wo-id` Indexing &amp; Live Section Extraction</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Every visible button, link, input, select, tab, and carousel is tagged with a deterministic <code>data-wo-id</code> while sensitive password and payment fields are automatically masked. When users ask questions, <code>read_page_content</code> extracts live headings, tables, and FAQs on demand.
+          </p>
+        </div>
+        <div id="panel-stream" data-panel-group="home-workflow" class="hidden space-y-2">
+          <span class="text-xs font-mono text-pink-400 uppercase">Stage 2 • AudioWorklet + Gemini 3.8 Live</span>
+          <h3 class="text-lg font-bold text-white">Gapless Web Audio Playback &amp; Instant Barge-In</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Captures 16kHz mono PCM in an <code>AudioWorklet</code> and schedules incoming 24kHz PCM chunks along <code>AudioContext.currentTime</code>. If the user interrupts mid-sentence, all active <code>AudioBufferSourceNodes</code> stop in under 50ms.
+          </p>
+        </div>
+        <div id="panel-actuate" data-panel-group="home-workflow" class="hidden space-y-2">
+          <span class="text-xs font-mono text-emerald-400 uppercase">Stage 3 • GhostCursor + React/Vue Setters</span>
+          <h3 class="text-lg font-bold text-white">60fps Cubic Bézier Motion, Swipe Trails &amp; Native Form Setters</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Glides across the screen with Fitts's Law overshoot, locks a glowing spotlight and explanation badge onto the target, synthesizes pointer/touch trajectories for carousels, and invokes native prototype setters for React/Vue forms.
+          </p>
+        </div>
+        <div id="panel-persist" data-panel-group="home-workflow" class="hidden space-y-2">
+          <span class="text-xs font-mono text-sky-400 uppercase">Stage 4 • Cross-Page Session Handoff</span>
+          <h3 class="text-lg font-bold text-white">Zero-Drop Navigation Across Multi-Page Websites</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Before transitioning to a new HTML page (like <a href="pricing.html" class="text-indigo-400 underline">pricing.html</a> or <a href="contact.html" class="text-indigo-400 underline">contact.html</a>), WebOrient serializes the session and queued follow-up actions into <code>sessionStorage</code>, resuming automatically on the next page load.
+          </p>
+        </div>
       </div>
     </section>
 
-    <!-- 3. Swipeable Use-Case Carousel (Tests Carousel Swiping) -->
+    <!-- 3. Swipeable Customer Case-Study Carousel -->
     <section id="carousel-section" class="space-y-6">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-2xl font-bold text-white">Customer Use-Case Showcase</h2>
-          <p class="text-sm text-slate-400">Swipe left/right or ask the agent to cycle through industry deployments.</p>
+          <h2 class="text-2xl font-bold text-white">Production Case-Study Showcase</h2>
+          <p class="text-sm text-slate-400">Swipe or use the control bench to cycle through verified deployments.</p>
         </div>
-        <div class="flex gap-2">
-          <button id="carousel-prev-btn" data-carousel-prev class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition">
-            ← Prev
-          </button>
-          <button id="carousel-next-btn" data-carousel-next class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition">
-            Next →
-          </button>
+        <div class="flex items-center gap-2">
+          <span data-carousel-counter class="text-xs font-mono text-slate-400 mr-2">Slide 1 of 3</span>
+          <button data-carousel-prev class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition">← Prev</button>
+          <button data-carousel-next class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition">Next →</button>
         </div>
       </div>
 
-      <div id="usecase-carousel" data-carousel="true" class="relative p-8 bg-gradient-to-br from-slate-900 via-indigo-950/30 to-slate-900 border border-slate-800 rounded-2xl overflow-hidden select-none">
-        <div data-carousel-slide="0" class="carousel-slide space-y-2">
-          <span class="text-xs font-mono uppercase text-indigo-400">Slide 1 of 3 • SaaS Onboarding</span>
-          <h3 class="text-xl font-bold text-white">Guided Product Walkthroughs</h3>
-          <p class="text-sm text-slate-300">New signups can ask "How do I configure webhooks?" and watch the Ghost Cursor navigate, highlight settings, and explain each field live.</p>
+      <div id="home-case-carousel" data-carousel="true" class="p-8 bg-gradient-to-br from-slate-900 via-indigo-950/35 to-slate-900 border border-slate-800 rounded-2xl select-none">
+        <div data-carousel-slide="0" class="carousel-slide space-y-3">
+          <div class="inline-block px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-xs font-mono">Case Study 01 • CloudScale B2B SaaS</div>
+          <h3 class="text-xl font-bold text-white">Reduced Self-Serve Onboarding Drop-Off by 38%</h3>
+          <p class="text-sm text-slate-300">New trial users ask "How do I connect my AWS account and invite my team?" and watch the Ghost Cursor navigate from the dashboard to Settings, highlight the IAM role input, and fill their team roster.</p>
+          <a href="features.html#industry-carousel-section" class="inline-block text-xs font-semibold text-indigo-400 hover:text-indigo-300">See full technical breakdown on Architecture Page →</a>
         </div>
-        <div data-carousel-slide="1" class="carousel-slide hidden space-y-2">
-          <span class="text-xs font-mono uppercase text-pink-400">Slide 2 of 3 • E-Commerce Concierge</span>
-          <h3 class="text-xl font-bold text-white">Voice-Driven Product Comparison &amp; Checkout</h3>
-          <p class="text-sm text-slate-300">Shoppers compare specs, filter sizes, swap color variants, and fill shipping details completely hands-free.</p>
+        <div data-carousel-slide="1" class="carousel-slide hidden space-y-3">
+          <div class="inline-block px-2.5 py-0.5 bg-pink-500/20 text-pink-300 rounded text-xs font-mono">Case Study 02 • LuxeCart E-Commerce</div>
+          <h3 class="text-xl font-bold text-white">2.4x Higher Checkout Completion via Voice Form Co-Pilot</h3>
+          <p class="text-sm text-slate-300">Mobile shoppers ask about return policies (`read_page_content`), swap sizing tabs (`swipe_or_swap`), and dictate shipping details hands-free.</p>
+          <a href="pricing.html#roi-calculator-section" class="inline-block text-xs font-semibold text-pink-400 hover:text-pink-300">Calculate your checkout lift on the Pricing &amp; ROI Page →</a>
         </div>
-        <div data-carousel-slide="2" class="carousel-slide hidden space-y-2">
-          <span class="text-xs font-mono uppercase text-emerald-400">Slide 3 of 3 • Healthcare &amp; FinTech Intake</span>
-          <h3 class="text-xl font-bold text-white">Zero-Friction Multi-Field Form Intake</h3>
-          <p class="text-sm text-slate-300">Patients and applicants speak naturally while WebOrient normalizes emails, selects dropdowns, and validates required fields in real time.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- 4. Pricing Section with Monthly/Annual Toggle Switch -->
-    <section id="pricing-section" class="space-y-8">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div class="space-y-1">
-          <h2 class="text-3xl font-bold text-white">Simple, Transparent Pricing</h2>
-          <p class="text-sm text-slate-400">All plans include a 14-day money-back guarantee and instant cancellation.</p>
-        </div>
-
-        <!-- Billing Cycle Toggle Switch -->
-        <div class="flex items-center gap-3 bg-slate-900 px-4 py-2 rounded-xl border border-slate-800">
-          <span class="text-xs font-medium text-slate-300">Monthly</span>
-          <button id="billing-toggle" role="switch" aria-checked="false" aria-label="Toggle Annual Billing (Save 20%)" class="w-11 h-6 bg-slate-700 rounded-full relative transition-colors p-0.5">
-            <span id="billing-toggle-knob" class="block w-5 h-5 rounded-full bg-white transition-transform transform translate-x-0"></span>
-          </button>
-          <span class="text-xs font-semibold text-emerald-400">Annual (Save 20%)</span>
-        </div>
-      </div>
-
-      <div class="grid md:grid-cols-3 gap-6">
-        <!-- Starter Plan -->
-        <div id="plan-starter" class="pricing-card p-6 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-4">
-          <h3 class="text-xl font-bold">Starter</h3>
-          <div class="text-3xl font-extrabold"><span id="price-starter">$29</span><span class="text-sm font-normal text-slate-400">/mo</span></div>
-          <p class="text-sm text-slate-400">For personal portfolios, docs sites, and indie projects (up to 1,000 voice sessions/mo).</p>
-          <button id="btn-starter" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 font-medium rounded-lg text-slate-200 transition">
-            Select Starter
-          </button>
-        </div>
-
-        <!-- Pro Plan -->
-        <div id="plan-pro" class="pricing-card p-6 bg-indigo-950/40 border-2 border-indigo-500 rounded-2xl space-y-4 relative">
-          <div class="absolute -top-3 right-6 px-2.5 py-0.5 bg-indigo-500 text-white text-[10px] font-bold uppercase rounded-full tracking-wider">
-            Most Popular
-          </div>
-          <h3 class="text-xl font-bold text-white">Pro Co-Pilot</h3>
-          <div class="text-3xl font-extrabold text-white"><span id="price-pro">$79</span><span class="text-sm font-normal text-slate-400">/mo</span></div>
-          <p class="text-sm text-slate-300">Full bidirectional live voice, custom Ghost Cursor branding, form co-pilot, and 10,000 sessions/mo.</p>
-          <button id="btn-pro" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 font-medium rounded-lg text-white transition shadow-lg shadow-indigo-600/30">
-            Get Pro Now
-          </button>
-        </div>
-
-        <!-- Enterprise Plan -->
-        <div id="plan-enterprise" class="pricing-card p-6 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-4">
-          <h3 class="text-xl font-bold">Enterprise</h3>
-          <div class="text-3xl font-extrabold">Custom</div>
-          <p class="text-sm text-slate-400">Dedicated low-latency relay cluster, custom SLA, SSO, and unlimited voice co-browsing.</p>
-          <button id="btn-enterprise" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 font-medium rounded-lg text-slate-200 transition">
-            Contact Enterprise
-          </button>
+        <div data-carousel-slide="2" class="carousel-slide hidden space-y-3">
+          <div class="inline-block px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded text-xs font-mono">Case Study 03 • MedFlow Patient Portal</div>
+          <h3 class="text-xl font-bold text-white">Accessible Voice Intake for Seniors &amp; Visually Impaired Visitors</h3>
+          <p class="text-sm text-slate-300">Patients complete 10-field consultation forms purely by voice while sensitive health/payment identifiers stay protected by client-side guardrails.</p>
+          <a href="contact.html#intake-form-section" class="inline-block text-xs font-semibold text-emerald-400 hover:text-emerald-300">Try the live 11-field intake form on the Contact Page →</a>
         </div>
       </div>
     </section>
 
-    <!-- 5. Rich Contact & Consultation Form (Tests Text, Email Normalization, Select, Range Slider, Checkbox, Textarea) -->
-    <section id="contact-section" class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl space-y-6">
+    <!-- 4. Enterprise Security & Guardrails Matrix -->
+    <section id="security-section" class="space-y-6 pb-16">
       <div class="space-y-1">
-        <h2 class="text-2xl font-bold text-white">Book a Technical Consultation</h2>
-        <p class="text-sm text-slate-400">Dictate your details by voice—WebOrient normalizes spoken emails, picks dropdown options, adjusts sliders, and checks boxes automatically.</p>
+        <h2 class="text-2xl font-bold text-white">Built-In Security &amp; Privacy Guardrails</h2>
+        <p class="text-sm text-slate-400">How WebOrient keeps client websites and visitor data safe out of the box.</p>
       </div>
 
-      <form id="contact-form" class="space-y-4" onsubmit="event.preventDefault(); document.getElementById('form-status').innerText = '✅ Consultation request submitted!';">
-        <div class="grid sm:grid-cols-2 gap-4">
-          <div>
-            <label for="contact-name" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Full Name</label>
-            <input id="contact-name" name="fullName" type="text" required placeholder="Ajay Tiwari" class="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm">
-          </div>
-          <div>
-            <label for="contact-email" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Work Email</label>
-            <input id="contact-email" name="email" type="email" required placeholder="ajay@company.com" class="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm">
-          </div>
-        </div>
-
-        <div class="grid sm:grid-cols-2 gap-4 items-center">
-          <div>
-            <label for="contact-plan" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Interested Tier</label>
-            <select id="contact-plan" name="plan" class="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
-              <option value="starter">Starter ($29/mo)</option>
-              <option value="pro">Pro Co-Pilot ($79/mo)</option>
-              <option value="enterprise">Enterprise (Custom)</option>
-            </select>
-          </div>
-          <div>
-            <div class="flex justify-between text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-              <label for="contact-team-size">Team Size</label>
-              <span id="team-size-val" class="text-indigo-400 font-mono">10 seats</span>
-            </div>
-            <input id="contact-team-size" name="teamSize" type="range" min="1" max="100" value="10" class="w-full accent-indigo-500 cursor-pointer">
-          </div>
-        </div>
-
-        <div class="flex items-center gap-2.5 pt-1">
-          <input id="contact-priority" name="priorityOnboarding" type="checkbox" class="w-4 h-4 rounded accent-indigo-500">
-          <label for="contact-priority" class="text-sm text-slate-300">Include white-glove Priority Onboarding &amp; custom manifest setup</label>
-        </div>
-
-        <div>
-          <label for="contact-message" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Project Details</label>
-          <textarea id="contact-message" name="message" rows="3" placeholder="Tell us about your website interaction goals..." class="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm"></textarea>
-        </div>
-
-        <div class="flex items-center justify-between pt-2">
-          <span id="form-status" class="text-xs text-emerald-400 font-medium"></span>
-          <button id="btn-submit-contact" type="submit" class="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 font-semibold rounded-lg text-white transition">
-            Submit Consultation Request
-          </button>
-        </div>
-      </form>
-    </section>
-
-    <!-- 6. FAQ Section (Tests Q&A & Semantic Extraction) -->
-    <section id="faq-section" class="space-y-4 pb-16">
-      <div class="space-y-1">
-        <h2 class="text-2xl font-bold text-white">Frequently Asked Questions</h2>
-        <p class="text-sm text-slate-400">Ask WebOrient any question about security, refunds, or framework compatibility.</p>
-      </div>
-
-      <div class="space-y-3">
-        <details id="faq-refund" class="bg-slate-900/60 border border-slate-800 rounded-xl p-4" open>
-          <summary class="font-semibold text-sm text-white cursor-pointer">What is your refund and cancellation policy?</summary>
-          <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-            Every monthly and annual plan comes with a 14-day full money-back guarantee. You can switch tiers or cancel with one click from your billing dashboard at any time.
-          </p>
-        </details>
-        <details id="faq-security" class="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-          <summary class="font-semibold text-sm text-white cursor-pointer">How does WebOrient protect passwords and payment fields?</summary>
-          <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-            Password inputs, credit card fields (`autocomplete="cc-*"`), and any element marked with `data-agent-ignore` are strictly blacklisted at the DOM Scanner layer and never leave the browser.
-          </p>
-        </details>
-        <details id="faq-frameworks" class="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-          <summary class="font-semibold text-sm text-white cursor-pointer">Does WebOrient work with React, Next.js, Vue, and custom carousels?</summary>
-          <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-            Yes! WebOrient dispatches native HTML prototype value setters alongside synthetic Pointer, Mouse, Input, and Change events so React, Vue, Angular, and custom gesture widgets respond immediately.
-          </p>
-        </details>
+      <div class="overflow-x-auto bg-slate-900/60 border border-slate-800 rounded-2xl">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-900/90 text-slate-400 uppercase font-mono border-b border-slate-800">
+            <tr>
+              <th class="py-3.5 px-4">Guardrail Layer</th>
+              <th class="py-3.5 px-4">Mechanism in SDK</th>
+              <th class="py-3.5 px-4">Protection Provided</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/70 text-slate-300">
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Sensitive Field Blacklist</td>
+              <td class="py-3 px-4 font-mono text-indigo-300">input[type="password"], [autocomplete*="cc-"]</td>
+              <td class="py-3 px-4">Passwords and payment cards are never scanned, read, or modified by the agent.</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Submit Confirmation Gate</td>
+              <td class="py-3 px-4 font-mono text-indigo-300">requireSubmitConfirmation: true</td>
+              <td class="py-3 px-4">Agent highlights submit buttons and waits for explicit user confirmation before clicking.</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Zero Client API Key Exposure</td>
+              <td class="py-3 px-4 font-mono text-indigo-300">WebOrient Gateway Relay (WSS)</td>
+              <td class="py-3 px-4">Gemini API keys stay on the backend relay with Origin domain whitelisting.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
-  </div>
+  </main>
 
-  <!-- Interactive Page Widget Wiring + WebOrient SDK -->
   <script type="module">
-    import { WebOrient } from '../src/sdk/weborient.js';
+    import { initMultiPageDemo } from './demo-shared.js';
 
-    // 1. Wire Interactive Feature Tabs
-    const tabData = {
-      voice: {
-        title: 'Sub-Second Bidirectional Voice & Grounded Q&A',
-        desc: 'Streams 16kHz PCM audio to Gemini Live and plays back 24kHz gapless voice responses with instant sub-50ms barge-in interruption. Combines your Site Manifest knowledge base with real-time DOM section extraction to answer any question accurately.'
+    initMultiPageDemo({
+      sectionLinks: [
+        { label: 'Hero & Metrics', selector: '#hero-section' },
+        { label: '4-Step Workflow Tabs', selector: '#workflow-section' },
+        { label: 'Case-Study Carousel', selector: '#carousel-section' },
+        { label: 'Security Matrix', selector: '#security-section' }
+      ],
+      highlightTarget: {
+        selector: '#telemetry-strip',
+        explanation: '310ms voice-to-cursor latency & <50ms barge-in audio stop'
       },
-      cursor: {
-        title: 'True Cubic Bézier Trajectory & Scroll-Locked Spotlights',
-        desc: 'Moves across the viewport at 60fps along randomized cubic Bézier curves with Fitts-Law easing. Spotlights and floating glassmorphic explanation coachmarks stay locked onto target elements even during scrolling.'
-      },
-      forms: {
-        title: 'React/Vue Native Prototype Form Co-Pilot',
-        desc: 'Normalizes spoken emails ("ajay at company dot com"), selects dropdown options, interpolates range sliders, toggles checkboxes, and validates fields automatically after entry.'
-      },
-      gestures: {
-        title: 'Multi-Modal Swiping, Tab Swapping & Carousel Control',
-        desc: 'Synthesizes realistic pointer/touch trajectories with visual swipe trails to cycle carousels, flip billing switches, and switch active tabs on command.'
-      }
-    };
-
-    document.querySelectorAll('#feature-tabs [role="tab"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('#feature-tabs [role="tab"]').forEach(b => {
-          b.setAttribute('aria-selected', 'false');
-          b.classList.remove('active', 'bg-indigo-600', 'text-white');
-          b.classList.add('text-slate-400');
-        });
-        btn.setAttribute('aria-selected', 'true');
-        btn.classList.add('active', 'bg-indigo-600', 'text-white');
-        btn.classList.remove('text-slate-400');
-
-        const key = btn.getAttribute('data-tab');
-        if (tabData[key]) {
-          document.getElementById('tab-panel-title').innerText = tabData[key].title;
-          document.getElementById('tab-panel-desc').innerText = tabData[key].desc;
-        }
-      });
-    });
-
-    // 2. Wire Use-Case Carousel
-    let currentSlide = 0;
-    const slides = Array.from(document.querySelectorAll('#usecase-carousel [data-carousel-slide]'));
-    function showSlide(index) {
-      currentSlide = (index + slides.length) % slides.length;
-      slides.forEach((s, i) => {
-        s.classList.toggle('hidden', i !== currentSlide);
-      });
-    }
-    document.getElementById('carousel-next-btn').addEventListener('click', () => showSlide(currentSlide + 1));
-    document.getElementById('carousel-prev-btn').addEventListener('click', () => showSlide(currentSlide - 1));
-
-    // 3. Wire Monthly / Annual Billing Toggle Switch
-    const billingToggle = document.getElementById('billing-toggle');
-    const billingKnob = document.getElementById('billing-toggle-knob');
-    billingToggle.addEventListener('click', () => {
-      const isAnnual = billingToggle.getAttribute('aria-checked') !== 'true';
-      billingToggle.setAttribute('aria-checked', String(isAnnual));
-      billingToggle.classList.toggle('bg-indigo-600', isAnnual);
-      billingToggle.classList.toggle('bg-slate-700', !isAnnual);
-      billingKnob.style.transform = isAnnual ? 'translateX(20px)' : 'translateX(0)';
-      document.getElementById('price-starter').innerText = isAnnual ? '$24' : '$29';
-      document.getElementById('price-pro').innerText = isAnnual ? '$64' : '$79';
-    });
-
-    // 4. Wire Team Size Range Slider Display
-    const teamSlider = document.getElementById('contact-team-size');
-    const teamValLabel = document.getElementById('team-size-val');
-    teamSlider.addEventListener('input', () => {
-      teamValLabel.innerText = `${teamSlider.value} seats`;
-    });
-
-    // 5. Initialize WebOrient v0.2.0
-    const logBox = document.getElementById('action-log');
-    const logCountEl = document.getElementById('log-count');
-    let callCount = 0;
-
-    function addLog(action, details) {
-      callCount++;
-      logCountEl.innerText = `${callCount} events`;
-      const line = document.createElement('div');
-      line.innerHTML = `<span class="text-pink-400">[${action}]</span> ${details}`;
-      logBox.appendChild(line);
-      logBox.scrollTop = logBox.scrollHeight;
-    }
-
-    const weborient = new WebOrient({
-      themeColor: '#6366f1',
-      accentColor: '#ec4899',
-      cursorStyle: 'modern-glow',
-      manifestUrl: '../config/sample-manifest.json',
-      onEvent: (type, detail) => {
-        if (type === 'transcript') {
-          if (detail.role === 'user') {
-            addLog('🗣️ You Said', detail.text);
-          } else {
-            addLog('🤖 AI Spoke', detail.text);
-          }
-        } else if (type === 'interrupted') {
-          addLog('Barge-In', 'Audio & active tour interrupted by user');
-        }
-      }
-    });
-    window.weborient = weborient;
-
-    // Live Voice Connection Button
-    let isLiveConnected = false;
-    const btnToggleLive = document.getElementById('btn-toggle-live');
-    const liveIndicator = document.getElementById('live-indicator');
-    const liveBtnText = document.getElementById('live-btn-text');
-
-    btnToggleLive.addEventListener('click', async () => {
-      if (!isLiveConnected) {
-        liveBtnText.innerText = 'Connecting to Gemini 3.8...';
-        weborient.options.endpoint = 'ws://localhost:8088';
-        try {
-          await weborient.start();
-          isLiveConnected = true;
-          liveIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-ping';
-          liveBtnText.innerText = 'Listening (Speak or Type Below)';
-          addLog('Live Audio', 'Connected to Gemini 3.8 Live Relay on ws://localhost:8088');
-        } catch (err) {
-          liveBtnText.innerText = 'Connection Failed (Start Relay)';
-          addLog('Error', err.message);
-        }
-      } else {
-        weborient.stop();
-        isLiveConnected = false;
-        liveIndicator.className = 'w-2 h-2 rounded-full bg-red-400';
-        liveBtnText.innerText = 'Connect Live Voice (Gemini 3.8)';
-        addLog('Live Audio', 'Disconnected');
-      }
-    });
-
-    // Send Text Prompt to Live Session
-    document.getElementById('btn-send-prompt').addEventListener('click', () => {
-      const input = document.getElementById('live-text-prompt');
-      const val = input.value.trim();
-      if (!val) return;
-      if (weborient.sendTextPrompt(val)) {
-        addLog('Prompt -> AI', val);
-        input.value = '';
-      } else {
-        addLog('Notice', 'Connect Live Voice first to send prompts to Gemini');
-      }
-    });
-
-    // Simulation Test Bench Handlers
-    document.getElementById('btn-test-highlight-pro').addEventListener('click', async () => {
-      const res = await weborient.handleToolCall('move_and_highlight', {
-        selector: '#plan-pro',
-        explanation: 'Pro Co-Pilot ($79/mo): Full bidirectional voice + Ghost Cursor'
-      });
-      addLog('move_and_highlight', `#plan-pro (found=${res.elementFound})`);
-    });
-
-    document.getElementById('btn-test-tour').addEventListener('click', async () => {
-      addLog('guide_tour', 'Starting 3-stop visual page walkthrough...');
-      const res = await weborient.handleToolCall('guide_tour', {
-        steps: [
-          { selector: '#hero-section', explanation: '1. Real-time voice & Ghost Cursor overview', dwellMs: 900 },
-          { selector: '#feature-tabs', explanation: '2. Interactive capability tabs', dwellMs: 900 },
-          { selector: '#plan-pro', explanation: '3. Most popular Pro Co-Pilot tier', dwellMs: 900 }
-        ]
-      });
-      addLog('guide_tour', `Completed ${res.completedCount} stops`);
-    });
-
-    document.getElementById('btn-test-swap-tab').addEventListener('click', async () => {
-      const res = await weborient.handleToolCall('swipe_or_swap', {
-        selector: '#feature-tabs',
-        action: 'next'
-      });
-      addLog('swipe_or_swap (tab)', `Active tab -> ${res.activeTab}`);
-    });
-
-    document.getElementById('btn-test-swipe-carousel').addEventListener('click', async () => {
-      const res = await weborient.handleToolCall('swipe_or_swap', {
-        selector: '#usecase-carousel',
-        action: 'next'
-      });
-      addLog('swipe_or_swap (carousel)', res.activeSlideText || 'Swiped next');
-    });
-
-    document.getElementById('btn-test-toggle-billing').addEventListener('click', async () => {
-      const res = await weborient.handleToolCall('swipe_or_swap', {
-        selector: '#billing-toggle',
-        action: 'toggle'
-      });
-      addLog('swipe_or_swap (switch)', `Annual billing=${res.newState?.ariaChecked}`);
-    });
-
-    document.getElementById('btn-test-click').addEventListener('click', async () => {
-      await weborient.handleToolCall('click_element', {
-        selector: '#btn-pro',
-        explanation: 'Selecting Pro Co-Pilot Plan'
-      });
-      addLog('click_element', '#btn-pro clicked');
-    });
-
-    document.getElementById('btn-test-fill-form').addEventListener('click', async () => {
-      addLog('fill_form_batch', 'Filling 6 controls with voice normalization...');
-      const res = await weborient.handleToolCall('fill_form_batch', {
-        fields: [
-          { selector: '#contact-name', value: 'Ajay Tiwari' },
-          { selector: '#contact-email', value: 'ajay at deploymate dot in' },
-          { selector: '#contact-plan', value: 'Pro Co-Pilot' },
-          { selector: '#contact-team-size', value: '45' },
-          { selector: '#contact-priority', value: 'true' },
-          { selector: '#contact-message', value: 'Integrating WebOrient v0.2.0 across our SaaS dashboard.' }
-        ]
-      });
-      addLog('fill_form_batch', `Filled ${res.filledCount} fields (allValid=${res.allValid})`);
-    });
-
-    document.getElementById('btn-test-qa').addEventListener('click', async () => {
-      const res = await weborient.handleToolCall('read_page_content', {
-        query: 'refund',
-        selector: '#faq-refund'
-      });
-      addLog('read_page_content', `Extracted: "${(res.text || '').slice(0, 65)}..."`);
-    });
-
-    document.getElementById('btn-test-scan').addEventListener('click', async () => {
-      const res = await weborient.handleToolCall('scan_visible_elements', { includeOffscreen: true });
-      addLog('scan_elements', `Indexed ${res.elements.length} interactive controls with data-wo-id`);
-      console.log('Scanned Elements:', res.elements);
-    });
-
-    document.getElementById('btn-test-scroll-top').addEventListener('click', async () => {
-      await weborient.handleToolCall('scroll_page', { direction: 'top' });
-      addLog('scroll_page', 'Scrolled to top');
-    });
-
-    document.getElementById('btn-test-scroll-bottom').addEventListener('click', async () => {
-      await weborient.handleToolCall('navigate_route', { path: '/faq' });
-      addLog('navigate_route', 'Navigated to /faq (#faq-section)');
-    });
-
-    document.getElementById('btn-pro').addEventListener('click', () => {
-      addLog('DOM Event', 'Native click received on #btn-pro');
+      tourSteps: [
+        { selector: '#hero-section h1', explanation: '1. Multi-Page Voice Co-Pilot Hub', dwellMs: 900 },
+        { selector: '#workflow-tabs', explanation: '2. Interactive 4-Stage Workflow Explorer', dwellMs: 900 },
+        { selector: '#home-case-carousel', explanation: '3. Swipeable Production Case Studies', dwellMs: 900 },
+        { selector: '#card-goto-pricing', explanation: '4. Jump to Pricing & ROI Calculator Page', dwellMs: 900 }
+      ],
+      tabSelector: '#workflow-tabs',
+      swipeSelector: '#home-case-carousel',
+      qaTarget: { query: 'security', selector: '#security-section' }
     });
   </script>
 </body>

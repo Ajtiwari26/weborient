@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pricing, Tiers & ROI Calculator — Acme WebOrient</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20 pr-6 lg:pr-[25rem]">
+
+    <!-- 1. Pricing Header & Monthly/Annual Billing Switch -->
+    <section id="pricing-tiers-section" class="space-y-8">
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 px-3 py-1 bg-pink-500/10 border border-pink-500/30 rounded-full text-pink-300 text-xs font-semibold">
+            Page 3 of 5 • Transparent Pricing &amp; Interactive ROI Modeling
+          </div>
+          <h1 class="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">
+            Plans that scale with your <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-500">voice traffic</span>
+          </h1>
+          <p class="text-sm text-slate-400">14-day full money-back guarantee on all tiers. Flip the billing switch or adjust the ROI sliders below.</p>
+        </div>
+
+        <!-- Billing Cycle Switch -->
+        <div class="flex items-center gap-3 bg-slate-900 px-4 py-2.5 rounded-xl border border-slate-800 self-start">
+          <span class="text-xs font-medium text-slate-300">Monthly</span>
+          <button id="billing-toggle" role="switch" aria-checked="false" aria-label="Toggle Annual Billing (Save 20%)" class="w-12 h-6 bg-slate-700 rounded-full relative transition-colors p-0.5">
+            <span id="billing-toggle-knob" class="block w-5 h-5 rounded-full bg-white transition-transform transform translate-x-0"></span>
+          </button>
+          <span class="text-xs font-semibold text-emerald-400">Annual (Save 20%)</span>
+        </div>
+      </div>
+
+      <!-- 4 Pricing Cards -->
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <!-- Starter -->
+        <div id="plan-starter" class="pricing-card p-6 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-4 flex flex-col justify-between">
+          <div class="space-y-3">
+            <h3 class="text-lg font-bold text-white">Starter</h3>
+            <div class="text-3xl font-extrabold text-white"><span id="price-starter">$29</span><span class="text-xs font-normal text-slate-400">/mo</span></div>
+            <p class="text-xs text-slate-400">For personal websites, portfolios, and documentation hubs.</p>
+            <ul class="text-xs text-slate-300 space-y-1.5 pt-2">
+              <li>✓ 1,000 voice minutes/mo</li>
+              <li>✓ Branded Ghost Cursor</li>
+              <li>✓ 1 domain included</li>
+            </ul>
+          </div>
+          <button id="btn-starter" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 font-semibold rounded-lg text-xs text-slate-200 transition">
+            Select Starter
+          </button>
+        </div>
+
+        <!-- Growth -->
+        <div id="plan-growth" class="pricing-card p-6 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-4 flex flex-col justify-between">
+          <div class="space-y-3">
+            <h3 class="text-lg font-bold text-white">Growth</h3>
+            <div class="text-3xl font-extrabold text-white"><span id="price-growth">$49</span><span class="text-xs font-normal text-slate-400">/mo</span></div>
+            <p class="text-xs text-slate-400">For growing startups and e-commerce storefronts.</p>
+            <ul class="text-xs text-slate-300 space-y-1.5 pt-2">
+              <li>✓ 3,500 voice minutes/mo</li>
+              <li>✓ Auto-Crawler Manifest CLI</li>
+              <li>✓ Up to 3 domains</li>
+            </ul>
+          </div>
+          <button id="btn-growth" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 font-semibold rounded-lg text-xs text-slate-200 transition">
+            Select Growth
+          </button>
+        </div>
+
+        <!-- Pro Co-Pilot -->
+        <div id="plan-pro" class="pricing-card p-6 bg-indigo-950/45 border-2 border-indigo-500 rounded-2xl space-y-4 relative flex flex-col justify-between shadow-xl shadow-indigo-950/40">
+          <div class="absolute -top-3 right-4 px-2.5 py-0.5 bg-indigo-500 text-white text-[10px] font-bold uppercase rounded-full tracking-wider">
+            Most Popular
+          </div>
+          <div class="space-y-3">
+            <h3 class="text-lg font-bold text-white">Pro Co-Pilot</h3>
+            <div class="text-3xl font-extrabold text-white"><span id="price-pro">$79</span><span class="text-xs font-normal text-slate-400">/mo</span></div>
+            <p class="text-xs text-slate-300">Full multi-page persistence, batch form co-pilot &amp; gesture control.</p>
+            <ul class="text-xs text-slate-200 space-y-1.5 pt-2">
+              <li>✓ 10,000 voice minutes/mo</li>
+              <li>✓ All 10 Closed-Loop DOM Tools</li>
+              <li>✓ Up to 10 client domains</li>
+            </ul>
+          </div>
+          <button id="btn-pro" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 font-semibold rounded-lg text-xs text-white transition shadow-lg shadow-indigo-600/30">
+            Get Pro Co-Pilot
+          </button>
+        </div>
+
+        <!-- Enterprise -->
+        <div id="plan-enterprise" class="pricing-card p-6 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-4 flex flex-col justify-between">
+          <div class="space-y-3">
+            <h3 class="text-lg font-bold text-white">Enterprise</h3>
+            <div class="text-3xl font-extrabold text-white">Custom</div>
+            <p class="text-xs text-slate-400">Dedicated low-latency relay cluster, SOC2/HIPAA BAA &amp; white-label agency mode.</p>
+            <ul class="text-xs text-slate-300 space-y-1.5 pt-2">
+              <li>✓ Unlimited domains &amp; seats</li>
+              <li>✓ Custom Voice Cloning</li>
+              <li>✓ 99.99% Uptime SLA</li>
+            </ul>
+          </div>
+          <a href="contact.html" id="btn-enterprise" class="block text-center w-full py-2.5 bg-slate-800 hover:bg-slate-700 font-semibold rounded-lg text-xs text-slate-200 transition">
+            Book Enterprise Demo
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Interactive Voice Conversion ROI Calculator -->
+    <section id="roi-calculator-section" class="p-8 bg-slate-900/80 border border-slate-800 rounded-2xl space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-white">Interactive Conversion &amp; Revenue ROI Calculator</h2>
+          <p class="text-sm text-slate-400">Adjust the sliders or ask the Ghost Cursor to set your traffic and order value.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label for="calc-currency" class="text-xs text-slate-400 font-semibold">Currency:</label>
+          <select id="calc-currency" class="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+            <option value="USD">USD ($)</option>
+            <option value="EUR">EUR (€)</option>
+            <option value="INR">INR (₹)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-8 items-center">
+        <div class="space-y-5">
+          <div>
+            <div class="flex justify-between text-xs font-semibold mb-1.5">
+              <label for="calc-visitors-slider" class="text-slate-300">Monthly Website Visitors</label>
+              <span id="calc-visitors-label" class="text-indigo-400 font-mono">25,000 visitors/mo</span>
+            </div>
+            <input id="calc-visitors-slider" type="range" min="5000" max="200000" step="5000" value="25000" class="w-full accent-indigo-500 cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs font-semibold mb-1.5">
+              <label for="calc-aov-slider" class="text-slate-300">Average Deal / Order Value</label>
+              <span id="calc-aov-label" class="text-pink-400 font-mono">$120</span>
+            </div>
+            <input id="calc-aov-slider" type="range" min="20" max="1000" step="10" value="120" class="w-full accent-pink-500 cursor-pointer">
+          </div>
+        </div>
+
+        <div id="roi-result-card" class="p-6 bg-indigo-950/40 border border-indigo-500/40 rounded-2xl space-y-3 text-center">
+          <div class="text-xs font-mono uppercase text-indigo-300">Projected Monthly Revenue Lift (+1.2% Voice Conversion)</div>
+          <div id="roi-revenue-output" class="text-4xl font-black text-emerald-400">$36,000/mo</div>
+          <div class="text-xs text-slate-400">Estimated <span id="roi-leads-output" class="text-white font-semibold">300 additional completed forms/orders</span> per month with Pro Co-Pilot ($79/mo).</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Detailed Feature Comparison Table -->
+    <section id="comparison-table-section" class="space-y-4">
+      <h2 class="text-2xl font-bold text-white">Full Tier Feature Matrix</h2>
+      <div class="overflow-x-auto bg-slate-900/60 border border-slate-800 rounded-2xl">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-900 text-slate-400 uppercase font-mono border-b border-slate-800">
+            <tr>
+              <th class="py-3.5 px-4">Capability</th>
+              <th class="py-3.5 px-4">Starter ($29)</th>
+              <th class="py-3.5 px-4">Growth ($49)</th>
+              <th class="py-3.5 px-4 text-indigo-400">Pro Co-Pilot ($79)</th>
+              <th class="py-3.5 px-4">Enterprise</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/70 text-slate-300">
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Cubic Bézier Ghost Cursor &amp; Spotlight</td>
+              <td class="py-3 px-4">Included</td>
+              <td class="py-3 px-4">Included</td>
+              <td class="py-3 px-4 text-emerald-400 font-semibold">Included + Custom SVG</td>
+              <td class="py-3 px-4">Full White-Label</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Multi-Control Voice Form Co-Pilot</td>
+              <td class="py-3 px-4">Single field</td>
+              <td class="py-3 px-4">Batch fill</td>
+              <td class="py-3 px-4 text-emerald-400 font-semibold">Batch + Validation Loop</td>
+              <td class="py-3 px-4">Custom CRM Webhook</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Carousel Swiping &amp; Tab Swapping</td>
+              <td class="py-3 px-4">Basic clicks</td>
+              <td class="py-3 px-4">Included</td>
+              <td class="py-3 px-4 text-emerald-400 font-semibold">Full Pointer Trajectory</td>
+              <td class="py-3 px-4">Included</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Multi-Page Session Continuity</td>
+              <td class="py-3 px-4">Single page</td>
+              <td class="py-3 px-4">Included</td>
+              <td class="py-3 px-4 text-emerald-400 font-semibold">Cross-Page Action Queue</td>
+              <td class="py-3 px-4">Cross-Subdomain SSO</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 4. Billing FAQ Accordion -->
+    <section id="pricing-faq-section" class="space-y-4 pb-16">
+      <h2 class="text-2xl font-bold text-white">Billing &amp; Subscription FAQ</h2>
+      <div class="space-y-3">
+        <details id="faq-billing-refund" class="bg-slate-900/60 border border-slate-800 rounded-xl p-4" open>
+          <summary class="font-semibold text-sm text-white cursor-pointer">How does the 14-day money-back guarantee work?</summary>
+          <p class="text-xs text-slate-300 mt-2 leading-relaxed">
+            If WebOrient doesn't measurably improve user engagement or form completion within 14 days, click cancel in your dashboard for an automatic 100% refund—no questions asked.
+          </p>
+        </details>
+        <details id="faq-billing-overage" class="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+          <summary class="font-semibold text-sm text-white cursor-pointer">What happens if our website exceeds our monthly voice minutes?</summary>
+          <p class="text-xs text-slate-300 mt-2 leading-relaxed">
+            Your widget never abruptly shuts off mid-conversation. Additional usage is billed at $0.015 per active voice minute, or you can switch tiers anytime.
+          </p>
+        </details>
+      </div>
+    </section>
+
+  </main>
+
+  <script type="module">
+    import { initMultiPageDemo, addPersistentLog } from './demo-shared.js';
+
+    // 1. Wire Billing Toggle Switch
+    const billingToggle = document.getElementById('billing-toggle');
+    const billingKnob = document.getElementById('billing-toggle-knob');
+    billingToggle.addEventListener('click', () => {
+      const isAnnual = billingToggle.getAttribute('aria-checked') !== 'true';
+      billingToggle.setAttribute('aria-checked', String(isAnnual));
+      billingToggle.classList.toggle('bg-indigo-600', isAnnual);
+      billingToggle.classList.toggle('bg-slate-700', !isAnnual);
+      billingKnob.style.transform = isAnnual ? 'translateX(24px)' : 'translateX(0)';
+      document.getElementById('price-starter').innerText = isAnnual ? '$24' : '$29';
+      document.getElementById('price-growth').innerText = isAnnual ? '$39' : '$49';
+      document.getElementById('price-pro').innerText = isAnnual ? '$64' : '$79';
+    });
+
+    // 2. Wire Interactive ROI Calculator
+    const visitorsSlider = document.getElementById('calc-visitors-slider');
+    const aovSlider = document.getElementById('calc-aov-slider');
+    const currencySelect = document.getElementById('calc-currency');
+
+    function updateRoi() {
+      const visitors = parseInt(visitorsSlider.value, 10) || 25000;
+      const aov = parseInt(aovSlider.value, 10) || 120;
+      const curr = currencySelect.value;
+      const sym = curr === 'EUR' ? '€' : (curr === 'INR' ? '₹' : '$');
+      const mult = curr === 'INR' ? 84 : 1;
+
+      const extraLeads = Math.round(visitors * 0.012);
+      const lift = extraLeads * aov * mult;
+
+      document.getElementById('calc-visitors-label').innerText = `${visitors.toLocaleString()} visitors/mo`;
+      document.getElementById('calc-aov-label').innerText = `${sym}${(aov * mult).toLocaleString()}`;
+      document.getElementById('roi-leads-output').innerText = `${extraLeads.toLocaleString()} additional completed forms/orders`;
+      document.getElementById('roi-revenue-output').innerText = `${sym}${lift.toLocaleString()}/mo`;
+    }
+
+    visitorsSlider.addEventListener('input', updateRoi);
+    aovSlider.addEventListener('input', updateRoi);
+    currencySelect.addEventListener('change', updateRoi);
+
+    document.getElementById('btn-pro').addEventListener('click', () => {
+      addPersistentLog('Plan Selected', 'Pro Co-Pilot selected! Redirecting to onboarding...');
+    });
+
+    initMultiPageDemo({
+      sectionLinks: [
+        { label: 'Pricing Tiers & Switch', selector: '#pricing-tiers-section' },
+        { label: 'Voice ROI Calculator', selector: '#roi-calculator-section' },
+        { label: 'Feature Comparison Table', selector: '#comparison-table-section' },
+        { label: 'Billing FAQ', selector: '#pricing-faq-section' }
+      ],
+      highlightTarget: {
+        selector: '#plan-pro',
+        explanation: 'Pro Co-Pilot: 10,000 voice mins/mo + all 10 closed-loop DOM tools'
+      },
+      tourSteps: [
+        { selector: '#billing-toggle', explanation: '1. Monthly vs Annual Billing Switch (Save 20%)', dwellMs: 900 },
+        { selector: '#plan-pro', explanation: '2. Pro Co-Pilot Tier ($79/mo or $64/mo annual)', dwellMs: 900 },
+        { selector: '#roi-calculator-section', explanation: '3. Interactive Voice Revenue ROI Calculator', dwellMs: 900 }
+      ],
+      tabSelector: '#billing-toggle',
+      swipeSelector: '#billing-toggle',
+      onCustomSwipe: async (weborient) => {
+        await weborient.handleToolCall('swipe_or_swap', { selector: '#billing-toggle', action: 'toggle' });
+        await weborient.handleToolCall('fill_form_field', { selector: '#calc-visitors-slider', value: '75000' });
+      },
+      qaTarget: { query: 'refund', selector: '#faq-billing-refund' }
+    });
+  </script>
+</body>
+</html>

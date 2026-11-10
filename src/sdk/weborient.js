@@ -3,8 +3,8 @@
  * - Closed-loop Act -> Settle -> Diff -> Respond tool orchestration
  * - Complete 10-tool router: Q&A content extraction, visual explanation, multi-step tour,
  *   form filling, batch form filling, smart scrolling, carousel/tab/switch swiping & swapping,
- *   navigation, scanning, and clicking
- * - Cross-page session persistence via sessionStorage + SPA route resolution
+ *   multi-page navigation, scanning, and clicking
+ * - Cross-page session persistence + post-navigation pending action queue via sessionStorage
  * - Safety confirmation gate for final form submissions and sensitive buttons
  */
 import { GhostCursor } from './ghost-cursor.js';
@@ -35,10 +35,9 @@ export class WebOrient {
 
     this.client = null;
     this.manifest = null;
-
-    if (this.options.manifestUrl) {
-      this.loadManifest(this.options.manifestUrl);
-    }
+    this._manifestReadyPromise = this.options.manifestUrl
+      ? this.loadManifest(this.options.manifestUrl)
+      : Promise.resolve(null);
 
     this._checkRestoredSession();
   }
@@ -48,8 +47,10 @@ export class WebOrient {
       const res = await fetch(url);
       this.manifest = await res.json();
       console.log('[WebOrient] Loaded site manifest:', this.manifest.siteName);
+      return this.manifest;
     } catch (e) {
       console.warn('[WebOrient] Failed to load manifest:', e);
+      return null;
     }
   }
 
@@ -79,13 +80,13 @@ export class WebOrient {
     });
 
     await this.client.connect();
-    this._saveSessionState({ connected: true, endpoint: this.options.endpoint });
+    this._updateSessionStorage({ connected: true, endpoint: this.options.endpoint, timestamp: Date.now() });
 
-    // Send initial viewport & page summary so Gemini immediately knows what's on screen
+    // Send current page context so Gemini immediately knows what page & elements are active
     const initialSnapshot = this.scanner.captureStateSnapshot();
-    const initialElements = this.scanner.scan({ includeOffscreen: false }).slice(0, 25);
+    const initialElements = this.scanner.scan({ includeOffscreen: false }).slice(0, 30);
     this.client.sendText(
-      `[SYSTEM CONTEXT: User is currently on ${initialSnapshot.url}. Active section: ${initialSnapshot.activeSection || 'top'}. Visible interactive elements: ${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type })))}]`
+      `[SYSTEM CONTEXT: User is currently on page "${document.title}" (${initialSnapshot.url}). Active section: ${initialSnapshot.activeSection || 'top'}. Visible interactive elements: ${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type })))}]`
     );
   }
 
@@ -98,6 +99,16 @@ export class WebOrient {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Queues a list of tool calls to run automatically as soon as the next page finishes loading
+   */
+  queuePostNavigationActions(actions = []) {
+    this._updateSessionStorage({
+      pendingActions: actions,
+      timestamp: Date.now()
+    });
   }
 
   /**
@@ -165,7 +176,7 @@ export class WebOrient {
           break;
 
         case 'navigate_route':
-          result = await this._handleNavigation(args.path);
+          result = await this._handleNavigation(args.path, args.targetSelector, args.explanation);
           break;
 
         case 'scan_visible_elements':
@@ -177,6 +188,7 @@ export class WebOrient {
           break;
 
         case 'read_page_content':
+          await this._manifestReadyPromise;
           result = this.scanner.readPageContent({
             query: args.query || '',
             selector: args.selector || '',
@@ -213,64 +225,128 @@ export class WebOrient {
   }
 
   /**
-   * Resolves in-page anchors, manifest routes, SPA History transitions, or cross-page navigation
+   * Resolves multi-page routes, manifest page mappings, or in-page section anchors
    */
-  async _handleNavigation(rawPath) {
+  async _handleNavigation(rawPath, targetSelector = null, explanation = null) {
     if (!rawPath) {
       return { success: false, error: 'Missing navigation path' };
     }
 
+    await this._manifestReadyPromise;
     const path = String(rawPath).trim();
 
-    // 1. Check if manifest maps this route (e.g. "/pricing") to an in-page hash ("#pricing-section")
-    if (this.manifest && Array.isArray(this.manifest.pages)) {
-      const matchedPage = this.manifest.pages.find(
-        p => p.route === path ||
-             p.title?.toLowerCase() === path.toLowerCase() ||
-             (p.keywords || []).includes(path.toLowerCase())
-      );
-      if (matchedPage && matchedPage.hash) {
-        const hashTarget = document.querySelector(matchedPage.hash);
-        if (hashTarget) {
-          window.history.pushState({}, '', matchedPage.hash);
-          return await this.cursor.moveToElement(
-            matchedPage.hash,
-            true,
-            `Navigated to ${matchedPage.title}`
-          );
-        }
+    // 1. If path is an explicit in-page hash (#section) and exists on the current page, scroll to it
+    if (path.startsWith('#')) {
+      const hashEl = document.querySelector(path);
+      if (hashEl) {
+        window.history.pushState({}, '', path);
+        return await this.cursor.moveToElement(hashEl, true, explanation || `Navigated to ${path}`);
       }
     }
 
-    // 2. Check if path is an in-page hash or matching section ID (e.g. "#pricing" or "/pricing" -> "#pricing-section")
-    const slug = path.replace(/^[#/]+/, '').toLowerCase();
-    const inPageTarget =
-      (path.startsWith('#') && document.querySelector(path)) ||
-      document.getElementById(slug) ||
-      document.getElementById(`${slug}-section`);
+    // 2. Match against manifest pages (supports multi-page .html files as well as clean routes)
+    let resolvedUrl = null;
+    let matchedPage = null;
 
-    if (inPageTarget) {
-      window.history.pushState({}, '', `#${inPageTarget.id}`);
+    if (this.manifest && Array.isArray(this.manifest.pages)) {
+      const normalized = path.toLowerCase().replace(/^\/+|\/+$/g, '');
+      matchedPage = this.manifest.pages.find(p => {
+        const pRoute = (p.route || '').toLowerCase().replace(/^\/+|\/+$/g, '');
+        const pFile = (p.file || '').toLowerCase();
+        return (
+          p.route === path ||
+          pRoute === normalized ||
+          pFile === normalized ||
+          pFile === `${normalized}.html` ||
+          (p.title && p.title.toLowerCase().includes(normalized) && normalized.length > 2) ||
+          (Array.isArray(p.keywords) && p.keywords.includes(normalized))
+        );
+      });
+
+      if (matchedPage) {
+        resolvedUrl = matchedPage.file || matchedPage.route;
+      }
+    }
+
+    // 3. Fallback multi-page route resolution for common page names
+    if (!resolvedUrl) {
+      const routeMap = {
+        '/': 'test-demo.html',
+        'home': 'test-demo.html',
+        '/home': 'test-demo.html',
+        'test-demo.html': 'test-demo.html',
+        '/features': 'features.html',
+        'features': 'features.html',
+        'features.html': 'features.html',
+        '/pricing': 'pricing.html',
+        'pricing': 'pricing.html',
+        'pricing.html': 'pricing.html',
+        '/docs': 'docs.html',
+        'docs': 'docs.html',
+        'documentation': 'docs.html',
+        'docs.html': 'docs.html',
+        '/contact': 'contact.html',
+        'contact': 'contact.html',
+        'contact.html': 'contact.html'
+      };
+      const key = path.toLowerCase().split('#')[0].trim();
+      resolvedUrl = routeMap[key] || path;
+    }
+
+    // Preserve any hash fragment attached to the path
+    const hashPart = path.includes('#') ? `#${path.split('#')[1]}` : '';
+    const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
+    const targetFile = resolvedUrl.split('#')[0].split('/').pop();
+
+    // If we are already on the target page file, simply move to the target section or top
+    if (targetFile === currentFile) {
+      const selectorToFocus = targetSelector || hashPart || 'h1';
       return await this.cursor.moveToElement(
-        inPageTarget,
+        selectorToFocus,
         true,
-        `Navigated to ${inPageTarget.id}`
+        explanation || `Already on ${matchedPage?.title || targetFile}`
       );
     }
 
-    // 3. Full-page navigation: persist session state to sessionStorage before navigating
-    this._saveSessionState({
+    // Animate cursor to matching header nav link before transitioning pages for visual continuity
+    const navLink = document.querySelector(`a[href*="${targetFile}"]`);
+    if (navLink) {
+      await this.cursor.moveToElement(navLink, true, `Navigating to ${matchedPage?.title || targetFile}...`);
+      await new Promise(r => setTimeout(r, 260));
+    }
+
+    // Save post-navigation action if targetSelector or hash was requested
+    const existingPending = this._readSessionStorage().pendingActions || [];
+    if (targetSelector || hashPart) {
+      existingPending.unshift({
+        name: 'move_and_highlight',
+        args: {
+          selector: targetSelector || hashPart,
+          explanation: explanation || `Arrived at ${targetSelector || hashPart}`
+        }
+      });
+    }
+
+    this._updateSessionStorage({
       connected: Boolean(this.client),
       endpoint: this.options.endpoint,
-      lastRoute: path,
+      lastRoute: resolvedUrl + hashPart,
+      pendingActions: existingPending,
       timestamp: Date.now()
     });
 
-    window.location.href = path;
+    // Resolve relative URL cleanly within testscript/ or current folder
+    const baseDir = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+    const finalHref = resolvedUrl.startsWith('http') || resolvedUrl.startsWith('/')
+      ? resolvedUrl + hashPart
+      : `${baseDir}${resolvedUrl}${hashPart}`;
+
+    window.location.href = finalHref;
     return {
       success: true,
       action: 'navigate_route',
-      navigatedTo: path
+      navigatedTo: finalHref,
+      pageTitle: matchedPage?.title || targetFile
     };
   }
 
@@ -299,25 +375,60 @@ export class WebOrient {
     });
   }
 
-  _saveSessionState(state) {
+  _readSessionStorage() {
     try {
-      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
+      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  _updateSessionStorage(patch) {
+    try {
+      const prev = this._readSessionStorage();
+      const next = Object.assign({}, prev, patch);
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(next));
     } catch (_) {}
   }
 
   _checkRestoredSession() {
-    try {
-      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
-      if (!raw) return;
-      const state = JSON.parse(raw);
-      // Auto-reconnect if navigated within the last 30 seconds
-      if (state.connected && state.endpoint && Date.now() - (state.timestamp || 0) < 30000) {
+    const runRestore = async () => {
+      const state = this._readSessionStorage();
+      if (!state || Date.now() - (state.timestamp || 0) > 60000) return;
+
+      // 1. Auto-reconnect Live Voice if it was active on the previous page
+      if (state.connected && state.endpoint && !this.client) {
         this.options.endpoint = state.endpoint;
-        window.addEventListener('DOMContentLoaded', () => {
-          this.start().catch(err => console.warn('[WebOrient] Session auto-resume skipped:', err));
-        }, { once: true });
+        try {
+          await this.start();
+        } catch (err) {
+          console.warn('[WebOrient] Auto-reconnect after page navigation skipped:', err);
+        }
       }
-    } catch (_) {}
+
+      // 2. Execute any queued cross-page actions (e.g., highlight, toggle, fill form after landing)
+      if (Array.isArray(state.pendingActions) && state.pendingActions.length > 0) {
+        const actionsToRun = [...state.pendingActions];
+        this._updateSessionStorage({ pendingActions: [] });
+
+        await new Promise(r => setTimeout(r, 350));
+        for (const act of actionsToRun) {
+          if (act && act.name) {
+            await this.handleToolCall(act.name, act.args || {});
+            await new Promise(r => setTimeout(r, 250));
+          }
+        }
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      if (document.readyState === 'loading') {
+        window.addEventListener('DOMContentLoaded', runRestore, { once: true });
+      } else {
+        setTimeout(runRestore, 80);
+      }
+    }
   }
 
   _emit(eventType, detail) {
@@ -327,7 +438,7 @@ export class WebOrient {
   }
 
   stop() {
-    this._saveSessionState({ connected: false });
+    this._updateSessionStorage({ connected: false, pendingActions: [] });
     if (this.client) this.client.stop();
     if (this.cursor) this.cursor.hideSpotlight();
   }

@@ -1,6 +1,6 @@
 {
-  "siteName": "Acme AI Cloud",
-  "baseUrl": "https://acme.example.com",
+  "siteName": "Acme AI Cloud — Multi-Page Enterprise Platform",
+  "baseUrl": "http://localhost:3000/testscript",
   "theme": {
     "primaryColor": "#6366f1",
     "accentColor": "#ec4899",
@@ -10,105 +10,107 @@
     {
       "topic": "refund-and-cancellation",
       "question": "What is your refund and cancellation policy?",
-      "answer": "All monthly and annual plans include a 14-day full money-back guarantee. You can cancel or switch tiers anytime from your billing dashboard with zero cancellation fees."
+      "answer": "Every monthly and annual plan includes a 14-day full money-back guarantee. You can switch tiers or cancel anytime from your billing dashboard with zero penalty."
     },
     {
       "topic": "security-and-privacy",
-      "question": "How does WebOrient handle sensitive user data like passwords or credit cards?",
-      "answer": "WebOrient automatically masks and ignores password fields, credit card inputs, and elements tagged with data-agent-ignore. All audio and tool calls pass through an encrypted gateway relay without exposing API keys."
+      "question": "How does WebOrient handle sensitive user data like passwords, credit cards, and HIPAA/SOC2?",
+      "answer": "WebOrient automatically masks and ignores password fields, credit card inputs (autocomplete='cc-*'), and elements marked with data-agent-ignore. Enterprise plans include SOC2 Type II, HIPAA BAA, and zero-retention audio relays."
     },
     {
       "topic": "framework-compatibility",
-      "question": "Does WebOrient work with React, Next.js, Vue, and plain HTML?",
-      "answer": "Yes. WebOrient is a zero-dependency drop-in ES module that dispatches native prototype value setters and synthetic Pointer/Input events compatible with React, Next.js, Vue, Svelte, Angular, and static sites."
+      "question": "Does WebOrient work with React, Next.js, Vue, WordPress, and Shopify?",
+      "answer": "Yes. WebOrient is a zero-dependency ES module that dispatches native HTML prototype value setters alongside synthetic Pointer, Mouse, Input, and Change events compatible with React, Next.js, Vue, Angular, WordPress, and Shopify."
+    },
+    {
+      "topic": "multi-page-continuity",
+      "question": "What happens to the voice session when navigating across multiple HTML pages?",
+      "answer": "WebOrient serializes active session state and pending multi-step tasks into sessionStorage before navigation, then automatically reconnects the WebSocket and executes queued post-navigation actions on the destination page."
     }
   ],
   "pages": [
     {
       "route": "/",
-      "title": "Home - Acme AI Co-Browsing Platform",
-      "summary": "Interactive landing page with Hero section, Feature Tabs, Use-Case Carousel, Pricing Plans (with Monthly/Annual swap toggle), Technical Consultation Form, and FAQ.",
-      "keywords": ["home", "overview", "what is acme", "start", "features", "pricing", "contact", "faq"],
+      "file": "test-demo.html",
+      "title": "Home — Acme AI Co-Browsing Overview",
+      "summary": "Main landing hub featuring live platform metrics, 4-step interactive workflow tabs, customer case-study carousel, security compliance summary table, and quick FAQ.",
+      "keywords": ["home", "overview", "start", "landing", "metrics", "workflow", "case studies"],
       "sections": [
-        {
-          "id": "hero",
-          "selector": "#hero-section",
-          "title": "Hero Showcase",
-          "description": "Introduces real-time voice co-browsing and the Ghost Cursor with live demo and documentation CTAs."
-        },
-        {
-          "id": "features",
-          "selector": "#features-section",
-          "title": "Interactive Capabilities & Feature Tabs",
-          "description": "Swappable tabs showcasing Voice Q&A, Ghost Cursor Physics, Smart Form Co-Pilot, and Gesture/Carousel Control."
-        },
-        {
-          "id": "showcase-carousel",
-          "selector": "#carousel-section",
-          "title": "Customer Use-Case Carousel",
-          "description": "Swipeable multi-slide showcase of SaaS Onboarding, E-Commerce Checkout, and Healthcare Triage."
-        },
-        {
-          "id": "pricing",
-          "selector": "#pricing-section",
-          "title": "Pricing & Plans",
-          "description": "Starter ($29/mo or $24/mo annual), Pro Co-Pilot ($79/mo or $64/mo annual), and Enterprise (Custom) tiers with a Monthly/Annual billing toggle switch."
-        },
-        {
-          "id": "contact",
-          "selector": "#contact-section",
-          "title": "Book a Technical Consultation",
-          "description": "Interactive form with Full Name, Work Email, Plan Interest dropdown, Team Size slider, Priority Support checkbox, and Project Details."
-        },
-        {
-          "id": "faq",
-          "selector": "#faq-section",
-          "title": "Frequently Asked Questions",
-          "description": "Expandable FAQ accordion covering latency, security guardrails, framework support, and pricing."
-        }
-      ],
-      "forms": [
-        {
-          "formSelector": "#contact-form",
-          "description": "Technical Consultation & Demo Booking Form",
-          "fields": [
-            { "name": "fullName", "selector": "#contact-name", "label": "Full Name", "type": "text", "required": true },
-            { "name": "email", "selector": "#contact-email", "label": "Work Email", "type": "email", "required": true },
-            { "name": "plan", "selector": "#contact-plan", "label": "Interested Tier", "type": "select", "options": ["starter", "pro", "enterprise"], "required": false },
-            { "name": "teamSize", "selector": "#contact-team-size", "label": "Team Size", "type": "range", "required": false },
-            { "name": "priorityOnboarding", "selector": "#contact-priority", "label": "Include Priority Onboarding", "type": "checkbox", "required": false },
-            { "name": "message", "selector": "#contact-message", "label": "Project Details", "type": "textarea", "required": false }
-          ]
-        }
+        { "id": "hero-section", "selector": "#hero-section", "title": "Hero & Live Metrics", "description": "Headline showcase, live latency/conversion counters, and primary navigation CTAs." },
+        { "id": "workflow-section", "selector": "#workflow-section", "title": "4-Step Interactive Workflow Tabs", "description": "Interactive tabs explaining Connect, Perceive, Actuate, and Verify stages." },
+        { "id": "carousel-section", "selector": "#carousel-section", "title": "Customer Case-Study Carousel", "description": "Swipeable showcase of SaaS, E-Commerce, and FinTech deployments." },
+        { "id": "security-section", "selector": "#security-section", "title": "Enterprise Security & Guardrails Matrix", "description": "Overview of sensitive field masking, confirmation gates, and SOC2/HIPAA compliance." }
+      ]
+    },
+    {
+      "route": "/features",
+      "file": "features.html",
+      "title": "Product & Deep Architecture — Acme AI",
+      "summary": "Deep technical breakdown of the 5-layer WebOrient runtime, interactive subsystem tabs, 4-slide industry deployment carousel, and latency benchmark table.",
+      "keywords": ["features", "product", "architecture", "benchmarks", "subsystems", "capabilities", "carousel", "tabs"],
+      "sections": [
+        { "id": "features-hero", "selector": "#features-hero", "title": "Architecture Overview", "description": "5-layer runtime summary and live architecture metrics." },
+        { "id": "subsystem-tabs-section", "selector": "#subsystem-tabs-section", "title": "5-Layer Subsystem Explorer Tabs", "description": "Swappable tabs for AudioWorklet Pipeline, Cubic Bézier Engine, DOM Scanner, Closed-Loop Verifier, and Multi-Tenant Relay." },
+        { "id": "industry-carousel-section", "selector": "#industry-carousel-section", "title": "Industry Deployment Carousel", "description": "4-slide swipeable showcase covering SaaS Onboarding, FinTech KYC, E-Commerce Concierge, and Healthcare Triage." },
+        { "id": "benchmark-section", "selector": "#benchmark-section", "title": "Latency & Accuracy Benchmark Table", "description": "Quantitative comparison of WebOrient vs. Traditional Text Chatbots vs. Headless Cloud Browsers." }
       ]
     },
     {
       "route": "/pricing",
-      "hash": "#pricing-section",
-      "title": "Pricing & Plans",
-      "summary": "Starter ($29/mo), Pro Co-Pilot ($79/mo), and Enterprise plans plus Monthly/Annual billing toggle.",
-      "keywords": ["pricing", "cost", "plans", "subscription", "starter", "pro", "enterprise", "annual", "monthly"]
+      "file": "pricing.html",
+      "title": "Pricing, Plans & ROI Calculator — Acme AI",
+      "summary": "Monthly/Annual billing toggle switch, 4 pricing tiers (Starter $29, Growth $49, Pro Co-Pilot $79, Enterprise Custom), interactive ROI calculator with sliders, 12-row comparison table, and billing FAQ.",
+      "keywords": ["pricing", "cost", "plans", "roi", "calculator", "billing", "annual", "monthly", "starter", "growth", "pro", "enterprise"],
+      "sections": [
+        { "id": "pricing-tiers-section", "selector": "#pricing-tiers-section", "title": "Pricing Tiers & Billing Switch", "description": "Monthly/Annual toggle switch (#billing-toggle) and Starter, Growth, Pro Co-Pilot (#plan-pro), and Enterprise cards." },
+        { "id": "roi-calculator-section", "selector": "#roi-calculator-section", "title": "Interactive Voice ROI Calculator", "description": "Sliders for Monthly Visitors (#calc-visitors-slider) and Order Value (#calc-aov-slider) plus Currency dropdown (#calc-currency)." },
+        { "id": "comparison-table-section", "selector": "#comparison-table-section", "title": "Full Feature Comparison Matrix", "description": "12-row feature breakdown across Starter, Growth, Pro, and Enterprise." },
+        { "id": "pricing-faq-section", "selector": "#pricing-faq-section", "title": "Billing & Refund FAQ", "description": "Expandable accordion answering billing, overage, and refund questions." }
+      ]
     },
     {
-      "route": "/features",
-      "hash": "#features-section",
-      "title": "Platform Features & Use Cases",
-      "summary": "Interactive feature tabs and swipeable customer use-case carousel.",
-      "keywords": ["features", "capabilities", "tabs", "carousel", "use cases", "how it works"]
+      "route": "/docs",
+      "file": "docs.html",
+      "title": "Developer Documentation & API Reference — Acme AI",
+      "summary": "5-minute integration guide, framework code tabs (HTML/CDN, Next.js/React, Vue, Shopify/WordPress), site-manifest.json schema reference, and 10-tool Live API specification table.",
+      "keywords": ["docs", "documentation", "api", "sdk", "install", "setup", "plugin", "react", "nextjs", "shopify", "wordpress", "tools", "manifest"],
+      "sections": [
+        { "id": "quickstart-section", "selector": "#quickstart-section", "title": "5-Minute Client Quickstart & Framework Tabs", "description": "Swappable code snippets (#docs-framework-tabs) for HTML CDN, Next.js, Vue, and WordPress/Shopify." },
+        { "id": "tools-reference-section", "selector": "#tools-reference-section", "title": "10-Tool Gemini Live API Reference", "description": "Complete parameter and response documentation for all 10 DOM tools." },
+        { "id": "manifest-schema-section", "selector": "#manifest-schema-section", "title": "Site Manifest & Auto-Crawler Guide", "description": "How site-manifest.json maps routes, sections, forms, and knowledgeBase entries." },
+        { "id": "troubleshooting-section", "selector": "#troubleshooting-section", "title": "Troubleshooting & Guardrails FAQ", "description": "Expandable developer Q&A on Shadow DOM, CORS, and React controlled inputs." }
+      ]
     },
     {
       "route": "/contact",
-      "hash": "#contact-section",
-      "title": "Contact Sales & Consultation",
-      "summary": "Consultation booking form with text, email, dropdown, slider, checkbox, and message fields.",
-      "keywords": ["contact", "sales", "demo", "support", "book", "form", "consultation"]
-    },
-    {
-      "route": "/faq",
-      "hash": "#faq-section",
-      "title": "Frequently Asked Questions",
-      "summary": "Answers to common technical, billing, and security questions.",
-      "keywords": ["faq", "questions", "refund", "security", "latency", "help"]
+      "file": "contact.html",
+      "title": "Enterprise Contact, Demo Intake & Global Support — Acme AI",
+      "summary": "Comprehensive 10-field enterprise consultation and onboarding intake form, global office directory, and support SLA matrix.",
+      "keywords": ["contact", "sales", "demo", "form", "book", "consultation", "support", "enterprise", "intake"],
+      "sections": [
+        { "id": "intake-form-section", "selector": "#intake-form-section", "title": "Enterprise Technical Consultation Form", "description": "10-field interactive form (#contact-form) supporting voice dictation, dropdowns, slider, and checkboxes." },
+        { "id": "offices-section", "selector": "#offices-section", "title": "Global Engineering & Support Hubs", "description": "San Francisco, London, and Bengaluru office cards." },
+        { "id": "sla-section", "selector": "#sla-section", "title": "Support Response Time & SLA Matrix", "description": "Guaranteed response times by plan tier." }
+      ],
+      "forms": [
+        {
+          "formSelector": "#contact-form",
+          "description": "Enterprise Technical Consultation & Onboarding Form",
+          "fields": [
+            { "name": "fullName", "selector": "#contact-name", "label": "Full Name", "type": "text", "required": true },
+            { "name": "email", "selector": "#contact-email", "label": "Work Email", "type": "email", "required": true },
+            { "name": "phone", "selector": "#contact-phone", "label": "Phone Number", "type": "tel", "required": false },
+            { "name": "company", "selector": "#contact-company", "label": "Company Name", "type": "text", "required": true },
+            { "name": "website", "selector": "#contact-website", "label": "Website URL", "type": "url", "required": false },
+            { "name": "framework", "selector": "#contact-framework", "label": "Frontend Stack", "type": "select", "required": false },
+            { "name": "plan", "selector": "#contact-plan", "label": "Interested Tier", "type": "select", "required": false },
+            { "name": "teamSize", "selector": "#contact-team-size", "label": "Engineering Team Size", "type": "range", "required": false },
+            { "name": "priorityOnboarding", "selector": "#contact-priority", "label": "Priority White-Glove Setup", "type": "checkbox", "required": false },
+            { "name": "hipaaCompliance", "selector": "#contact-hipaa", "label": "Require HIPAA / SOC2 BAA", "type": "checkbox", "required": false },
+            { "name": "message", "selector": "#contact-message", "label": "Project Details & Goals", "type": "textarea", "required": false }
+          ]
+        }
+      ]
     }
   ]
 }

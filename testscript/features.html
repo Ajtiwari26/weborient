@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Product & Deep Architecture — Acme WebOrient</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20 pr-6 lg:pr-[25rem]">
+
+    <!-- 1. Architecture Hero -->
+    <section id="features-hero" class="space-y-4">
+      <div class="inline-flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300 text-xs font-semibold">
+        Page 2 of 5 • Deep System Architecture &amp; Benchmarks
+      </div>
+      <h1 class="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">
+        Inside the <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-500">5-Layer Co-Browsing Engine</span>
+      </h1>
+      <p class="text-slate-300 text-base max-w-3xl">
+        Explore how WebOrient combines low-latency audio streaming, deterministic DOM indexing, human-like Bézier cursor physics, and closed-loop mutation verification.
+      </p>
+    </section>
+
+    <!-- 2. 5-Layer Subsystem Explorer Tabs -->
+    <section id="subsystem-tabs-section" class="space-y-6">
+      <div class="space-y-1">
+        <h2 class="text-2xl font-bold text-white">Interactive 5-Layer Subsystem Explorer</h2>
+        <p class="text-sm text-slate-400">Click or ask the voice assistant to swap between architectural layers.</p>
+      </div>
+
+      <div id="subsystem-tabs" role="tablist" data-tab-group="arch-subsystems" class="flex flex-wrap gap-2 bg-slate-900 p-1.5 rounded-xl border border-slate-800">
+        <button role="tab" data-tab="audio" data-target-panel="sub-audio" aria-selected="true" class="active flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold bg-indigo-600 text-white transition">
+          L1: AudioWorklet Stream
+        </button>
+        <button role="tab" data-tab="bezier" data-target-panel="sub-bezier" aria-selected="false" class="flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
+          L2: Cubic Bézier Physics
+        </button>
+        <button role="tab" data-tab="scanner" data-target-panel="sub-scanner" aria-selected="false" class="flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
+          L3: DOM &amp; A11y Scanner
+        </button>
+        <button role="tab" data-tab="actuator" data-target-panel="sub-actuator" aria-selected="false" class="flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
+          L4: Form &amp; Swipe Actuator
+        </button>
+        <button role="tab" data-tab="verifier" data-target-panel="sub-verifier" aria-selected="false" class="flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
+          L5: Closed-Loop Verifier
+        </button>
+      </div>
+
+      <div class="p-6 bg-slate-900/75 border border-slate-800 rounded-2xl">
+        <div id="sub-audio" data-panel-group="arch-subsystems" class="space-y-3">
+          <div class="text-xs font-mono text-indigo-400">src/sdk/live-client.js • 16kHz In / 24kHz Out</div>
+          <h3 class="text-xl font-bold text-white">Bidirectional PCM Streaming &amp; Sub-50ms Barge-In</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Microphone audio is captured inside a dedicated <code>AudioWorkletProcessor</code> (with automatic fallback to <code>ScriptProcessorNode</code>), converted to 16-bit PCM, and streamed to the Gemini Live relay. Downstream 24kHz PCM chunks are decoded into Float32 <code>AudioBuffer</code> nodes and scheduled gaplessly along <code>nextPlayTime</code>.
+          </p>
+        </div>
+
+        <div id="sub-bezier" data-panel-group="arch-subsystems" class="hidden space-y-3">
+          <div class="text-xs font-mono text-pink-400">src/sdk/ghost-cursor.js • 60fps requestAnimationFrame</div>
+          <h3 class="text-xl font-bold text-white">Fitts's Law Trajectory &amp; Scroll-Locked Coachmarks</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Instead of robotic linear CSS transitions, the Ghost Cursor computes perpendicular control points $P_1, P_2$ proportional to travel distance, adds subtle overshoot on long jumps (&gt;180px), and locks a glowing spotlight + glassmorphic explanation tooltip onto target elements across scroll and resize events.
+          </p>
+        </div>
+
+        <div id="sub-scanner" data-panel-group="arch-subsystems" class="hidden space-y-3">
+          <div class="text-xs font-mono text-emerald-400">src/sdk/dom-scanner.js • Shadow DOM + Manifest RAG</div>
+          <h3 class="text-xl font-bold text-white">Persistent `data-wo-id` Tagging &amp; 3-Tier Q&amp;A</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Every interactive node receives a deterministic <code>data-wo-id="wo-N"</code> attribute and can be resolved by CSS selector, ID, <code>data-wo-id</code>, or fuzzy accessible label. When a user asks a domain question, <code>read_page_content</code> merges live DOM section text with <code>site-manifest.json</code> knowledge chunks.
+          </p>
+        </div>
+
+        <div id="sub-actuator" data-panel-group="arch-subsystems" class="hidden space-y-3">
+          <div class="text-xs font-mono text-amber-400">src/sdk/ghost-cursor.js • React/Vue Setters + Pointer Gestures</div>
+          <h3 class="text-xl font-bold text-white">Universal Form Co-Pilot &amp; Multi-Modal Gesture Synthesis</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Normalizes spoken email addresses (<code>"ajay at company dot com"</code> → <code>ajay@company.com</code>), invokes native <code>HTMLInputElement.prototype.value</code> setters for React/Vue compatibility, selects dropdown options, interpolates range sliders, and renders dashed SVG swipe trails while dispatching <code>PointerEvent</code> drag sequences.
+          </p>
+        </div>
+
+        <div id="sub-verifier" data-panel-group="arch-subsystems" class="hidden space-y-3">
+          <div class="text-xs font-mono text-sky-400">src/sdk/weborient.js • Act → Settle → Diff → Respond</div>
+          <h3 class="text-xl font-bold text-white">MutationObserver Settle &amp; Cross-Page Task Queue</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Every tool execution waits for DOM mutations to settle and attaches a <code>viewportSummary</code> (active section, visible element count, validation errors) to the <code>FunctionResponse</code>. Cross-page navigations preserve queued actions inside <code>sessionStorage</code>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 4-Slide Industry Deployment Carousel -->
+    <section id="industry-carousel-section" class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-2xl font-bold text-white">Industry Deployment Blueprints</h2>
+          <p class="text-sm text-slate-400">Swipe through 4 vertical architectures powered by WebOrient.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span data-carousel-counter class="text-xs font-mono text-slate-400 mr-2">Slide 1 of 4</span>
+          <button data-carousel-prev class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition">← Prev</button>
+          <button data-carousel-next class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition">Next →</button>
+        </div>
+      </div>
+
+      <div id="industry-carousel" data-carousel="true" class="p-8 bg-gradient-to-br from-slate-900 via-purple-950/30 to-slate-900 border border-slate-800 rounded-2xl select-none">
+        <div data-carousel-slide="0" class="carousel-slide space-y-2">
+          <span class="text-xs font-mono uppercase text-indigo-400">Vertical 1 of 4 • B2B SaaS Onboarding</span>
+          <h3 class="text-xl font-bold text-white">Interactive Product Tours &amp; Workspace Setup</h3>
+          <p class="text-sm text-slate-300">Walks users across multi-page dashboards, explains analytics charts with spotlights, and configures API keys and webhooks hands-free.</p>
+        </div>
+        <div data-carousel-slide="1" class="carousel-slide hidden space-y-2">
+          <span class="text-xs font-mono uppercase text-pink-400">Vertical 2 of 4 • FinTech &amp; Banking KYC</span>
+          <h3 class="text-xl font-bold text-white">Voice-Guided Loan &amp; Account Applications</h3>
+          <p class="text-sm text-slate-300">Explains APR tiers, adjusts loan calculators via sliders, and fills multi-page KYC forms while masking SSN and card fields automatically.</p>
+        </div>
+        <div data-carousel-slide="2" class="carousel-slide hidden space-y-2">
+          <span class="text-xs font-mono uppercase text-emerald-400">Vertical 3 of 4 • E-Commerce Shopping Concierge</span>
+          <h3 class="text-xl font-bold text-white">Visual Product Comparison &amp; Zero-Click Checkout</h3>
+          <p class="text-sm text-slate-300">Answers sizing and fabric questions from product tables, swipes photo galleries, and populates shipping addresses by voice.</p>
+        </div>
+        <div data-carousel-slide="3" class="carousel-slide hidden space-y-2">
+          <span class="text-xs font-mono uppercase text-amber-400">Vertical 4 of 4 • Healthcare Patient Triage</span>
+          <h3 class="text-xl font-bold text-white">Hands-Free Symptom &amp; Appointment Booking</h3>
+          <p class="text-sm text-slate-300">Guides patients to the right specialist department, reads preparation instructions aloud, and completes intake questionnaires.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Quantitative Benchmark Comparison Table -->
+    <section id="benchmark-section" class="space-y-6 pb-16">
+      <div class="space-y-1">
+        <h2 class="text-2xl font-bold text-white">Architecture Benchmark: WebOrient vs. Alternatives</h2>
+        <p class="text-sm text-slate-400">Why client-side DOM + Multimodal Live outperforms corner text bots and headless cloud browsers.</p>
+      </div>
+
+      <div id="benchmark-table" class="overflow-x-auto bg-slate-900/60 border border-slate-800 rounded-2xl">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-900 text-slate-400 uppercase font-mono border-b border-slate-800">
+            <tr>
+              <th class="py-3.5 px-4">Metric / Capability</th>
+              <th class="py-3.5 px-4 text-indigo-400">WebOrient v0.2.0</th>
+              <th class="py-3.5 px-4">Corner Text Chatbot</th>
+              <th class="py-3.5 px-4">Headless Cloud Browser (Playwright)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/70 text-slate-300">
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Voice Turn Latency</td>
+              <td class="py-3 px-4 text-emerald-400 font-bold">~310ms (Native Live PCM)</td>
+              <td class="py-3 px-4">2,800ms+ (STT → LLM → TTS)</td>
+              <td class="py-3 px-4">4,500ms+ (Screenshot → VLM loop)</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">On-Screen Visual Guidance</td>
+              <td class="py-3 px-4 text-emerald-400 font-bold">60fps Bézier Cursor + Spotlight</td>
+              <td class="py-3 px-4">None (Text links only)</td>
+              <td class="py-3 px-4">Remote video stream lag</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">React / Vue Form Filling</td>
+              <td class="py-3 px-4 text-emerald-400 font-bold">Native Prototype Setter + Validation</td>
+              <td class="py-3 px-4">User must type manually</td>
+              <td class="py-3 px-4">Breaks on client auth session</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-semibold text-white">Infrastructure Cost per User</td>
+              <td class="py-3 px-4 text-emerald-400 font-bold">Lightweight WebSocket Relay</td>
+              <td class="py-3 px-4">Low (Text tokens)</td>
+              <td class="py-3 px-4">Very High (1 container/VM per user)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="flex justify-between items-center pt-4">
+        <a href="test-demo.html" class="text-xs font-semibold text-slate-400 hover:text-white">← Back to Overview Hub</a>
+        <a href="pricing.html" id="cta-to-pricing" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition">
+          Next: Explore Pricing &amp; ROI Calculator →
+        </a>
+      </div>
+    </section>
+
+  </main>
+
+  <script type="module">
+    import { initMultiPageDemo } from './demo-shared.js';
+
+    initMultiPageDemo({
+      sectionLinks: [
+        { label: 'Architecture Hero', selector: '#features-hero' },
+        { label: '5-Layer Subsystem Tabs', selector: '#subsystem-tabs-section' },
+        { label: 'Industry Carousel', selector: '#industry-carousel-section' },
+        { label: 'Latency Benchmarks', selector: '#benchmark-section' }
+      ],
+      highlightTarget: {
+        selector: '#benchmark-table',
+        explanation: 'WebOrient achieves ~310ms voice-to-action latency without costly cloud browser VMs'
+      },
+      tourSteps: [
+        { selector: '#subsystem-tabs', explanation: '1. Five-Layer Runtime Explorer', dwellMs: 900 },
+        { selector: '#industry-carousel', explanation: '2. Swipeable Industry Deployment Blueprints', dwellMs: 900 },
+        { selector: '#benchmark-table', explanation: '3. Latency & Cost Benchmark Matrix', dwellMs: 900 }
+      ],
+      tabSelector: '#subsystem-tabs',
+      swipeSelector: '#industry-carousel',
+      qaTarget: { query: 'latency', selector: '#benchmark-section' }
+    });
+  </script>
+</body>
+</html>
