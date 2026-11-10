@@ -88,11 +88,11 @@ export class SessionMemory {
       }
     };
 
-    this._persist(freshState);
+    this._persist(freshState, false);
     return freshState;
   }
 
-  _persist(nextState = this.state) {
+  _persist(nextState = this.state, notify = true) {
     nextState.updatedAt = Date.now();
     this.state = nextState;
     try {
@@ -100,7 +100,9 @@ export class SessionMemory {
       localStorage.setItem(this.storageKey, serialized);
       sessionStorage.setItem(this.storageKey, serialized);
     } catch (_) {}
-    this.onChange(this.state);
+    if (notify && typeof this.onChange === 'function') {
+      this.onChange(this.state);
+    }
   }
 
   getState() {

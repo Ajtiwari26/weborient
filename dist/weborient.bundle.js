@@ -98,11 +98,11 @@ class SessionMemory {
       }
     };
 
-    this._persist(freshState);
+    this._persist(freshState, false);
     return freshState;
   }
 
-  _persist(nextState = this.state) {
+  _persist(nextState = this.state, notify = true) {
     nextState.updatedAt = Date.now();
     this.state = nextState;
     try {
@@ -110,7 +110,9 @@ class SessionMemory {
       localStorage.setItem(this.storageKey, serialized);
       sessionStorage.setItem(this.storageKey, serialized);
     } catch (_) {}
-    this.onChange(this.state);
+    if (notify && typeof this.onChange === 'function') {
+      this.onChange(this.state);
+    }
   }
 
   getState() {
@@ -2080,7 +2082,9 @@ class WebOrient {
 
     this.memory = new SessionMemory({
       endpoint: this.options.endpoint,
-      onChange: (memState) => this._emit('memoryUpdate', memState)
+      onChange: (memState) => {
+        queueMicrotask(() => this._emit('memoryUpdate', memState));
+      }
     });
 
     this.client = null;

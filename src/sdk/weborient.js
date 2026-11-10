@@ -41,7 +41,9 @@ export class WebOrient {
 
     this.memory = new SessionMemory({
       endpoint: this.options.endpoint,
-      onChange: (memState) => this._emit('memoryUpdate', memState)
+      onChange: (memState) => {
+        queueMicrotask(() => this._emit('memoryUpdate', memState));
+      }
     });
 
     this.client = null;

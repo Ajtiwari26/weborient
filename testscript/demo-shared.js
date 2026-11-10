@@ -31,6 +31,8 @@ export function initMultiPageDemo(pageConfig = {}) {
   mountGlobalHeader(activePage, pageConfig.sectionLinks || []);
   mountControlBench(activePage);
 
+  let weborientInstance = null;
+
   const weborient = new WebOrient({
     themeColor: '#6366f1',
     accentColor: '#ec4899',
@@ -52,11 +54,12 @@ export function initMultiPageDemo(pageConfig = {}) {
         syncLiveButtonState(true);
         addPersistentLog('Session Restored', `Resumed ${detail.sessionId} in ${detail.language}`);
       } else if (type === 'memoryUpdate') {
-        renderSessionMemoryUI(detail, weborient);
+        renderSessionMemoryUI(detail, weborientInstance || window.weborient);
         updateHeaderVisitedBadges(detail);
       }
     }
   });
+  weborientInstance = weborient;
   window.weborient = weborient;
 
   wireGenericTabs(weborient);
