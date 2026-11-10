@@ -250,61 +250,73 @@ async def handle_browser_client(websocket):
 
             # Task 1: Forward Gemini outputs (Audio + Transcripts + Tool calls) to browser
             async def forward_gemini_to_browser():
-                async for response in gemini_session.receive():
-                    sc = response.server_content
-                    if sc:
-                        if getattr(sc, "interrupted", False):
-                            await websocket.send(json.dumps({
-                                "serverContent": {"interrupted": True}
-                            }))
+                try:
+                    while True:
+                        async for response in gemini_session.receive():
+                            sc = response.server_content
+                            if sc:
+                                if getattr(sc, "interrupted", False):
+                                    await websocket.send(json.dumps({
+                                        "serverContent": {"interrupted": True}
+                                    }))
 
-                        if sc.input_transcription and getattr(sc.input_transcription, "text", None):
-                            await websocket.send(json.dumps({
-                                "serverContent": {
-                                    "inputTranscription": {"text": sc.input_transcription.text}
-                                }
-                            }))
-
-                        if sc.output_transcription and getattr(sc.output_transcription, "text", None):
-                            await websocket.send(json.dumps({
-                                "serverContent": {
-                                    "outputTranscription": {"text": sc.output_transcription.text}
-                                }
-                            }))
-
-                        parts = []
-                        if sc.model_turn and sc.model_turn.parts:
-                            for part in sc.model_turn.parts:
-                                if part.inline_data and part.inline_data.data:
-                                    b64_audio = base64.b64encode(part.inline_data.data).decode("utf-8")
-                                    parts.append({
-                                        "inlineData": {
-                                            "mimeType": "audio/pcm;rate=24000",
-                                            "data": b64_audio
+                                if sc.input_transcription and getattr(sc.input_transcription, "text", None):
+                                    print(f"[RELAY] 🗣️ User said: {sc.input_transcription.text}")
+                                    await websocket.send(json.dumps({
+                                        "serverContent": {
+                                            "inputTranscription": {"text": sc.input_transcription.text}
                                         }
+                                    }))
+
+                                if sc.output_transcription and getattr(sc.output_transcription, "text", None):
+                                    print(f"[RELAY] 🤖 Gemini: {sc.output_transcription.text}")
+                                    await websocket.send(json.dumps({
+                                        "serverContent": {
+                                            "outputTranscription": {"text": sc.output_transcription.text}
+                                        }
+                                    }))
+
+                                parts = []
+                                if sc.model_turn and sc.model_turn.parts:
+                                    for part in sc.model_turn.parts:
+                                        if part.inline_data and part.inline_data.data:
+                                            b64_audio = base64.b64encode(part.inline_data.data).decode("utf-8")
+                                            parts.append({
+                                                "inlineData": {
+                                                    "mimeType": "audio/pcm;rate=24000",
+                                                    "data": b64_audio
+                                                }
+                                            })
+                                        if part.text:
+                                            parts.append({"text": part.text})
+
+                                if parts:
+                                    await websocket.send(json.dumps({
+                                        "serverContent": {
+                                            "modelTurn": {"parts": parts}
+                                        }
+                                    }))
+
+                                if getattr(sc, "turn_complete", False):
+                                    print("[RELAY] Turn complete. Listening for next speech input...")
+                                    break
+
+                            if response.tool_call:
+                                calls = []
+                                for call in response.tool_call.function_calls:
+                                    calls.append({
+                                        "id": call.id,
+                                        "name": call.name,
+                                        "args": call.args
                                     })
-                                if part.text:
-                                    parts.append({"text": part.text})
-
-                        if parts:
-                            await websocket.send(json.dumps({
-                                "serverContent": {
-                                    "modelTurn": {"parts": parts}
-                                }
-                            }))
-
-                    if response.tool_call:
-                        calls = []
-                        for call in response.tool_call.function_calls:
-                            calls.append({
-                                "id": call.id,
-                                "name": call.name,
-                                "args": call.args
-                            })
-                        print(f"[RELAY] Forwarding {len(calls)} tool calls to Ghost Cursor:", [c["name"] for c in calls])
-                        await websocket.send(json.dumps({
-                            "toolCall": {"functionCalls": calls}
-                        }))
+                                print(f"[RELAY] Forwarding {len(calls)} tool calls to Ghost Cursor:", [c["name"] for c in calls])
+                                await websocket.send(json.dumps({
+                                    "toolCall": {"functionCalls": calls}
+                                }))
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+                except Exception as exc:
+                    print(f"[RELAY] Gemini receiver loop error: {exc}")
 
             # Task 2: Forward browser inputs (Audio chunks + Tool responses + Text prompts) to Gemini
             async def forward_browser_to_gemini():
