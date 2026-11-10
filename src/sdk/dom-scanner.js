@@ -1,9 +1,10 @@
 /**
- * WebOrient DOM Scanner & Semantic Grounding Engine (v0.2.0)
+ * WebOrient DOM Scanner & Semantic Grounding Engine (v0.4.0)
  * - Assigns persistent deterministic `data-wo-id` attributes to actionable & landmark elements
  * - Resolves selectors, data-wo-id, or natural accessible labels to live DOM elements
+ * - Real-time `matchElementFromSpeech(spokenText)`: maps whatever the Live Voice Agent is
+ *   currently saying to the matching DOM element on screen so the Ghost Cursor highlights it automatically!
  * - Extracts structured page content, headings, pricing cards, FAQs, and tables for Q&A
- * - Detects interactive widgets: forms, tabs, carousels, toggle switches, and scrollable containers
  * - Filters out sensitive fields (passwords, credit cards, [data-agent-ignore])
  */
 export class DOMScanner {
@@ -14,9 +15,85 @@ export class DOMScanner {
       '[data-agent-ignore]',
       '.weborient-ignore',
       '#weborient-overlay',
-      '#weborient-overlay *'
+      '#weborient-overlay *',
+      '#test-toolbar',
+      '#test-toolbar *'
     ];
     this._idCounter = 1;
+  }
+
+  /**
+   * Real-time Transcript-to-DOM Matcher:
+   * Given a phrase currently being spoken by the Gemini Live Agent, finds the best matching
+   * DOM section, card, tab, button, or form field on the active page so the Ghost Cursor
+   * automatically scrolls to and highlights whatever the agent is describing!
+   */
+  matchElementFromSpeech(spokenText, todoChecklist = []) {
+    if (!spokenText || typeof document === 'undefined') return null;
+    const text = String(spokenText).toLowerCase().trim();
+    if (text.length < 4) return null;
+
+    const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
+
+    // 1. Check current-page To-Do checklist keywords first for high-precision section matching
+    const pageTodos = (todoChecklist || []).filter(t => t.page === currentFile);
+    for (const todo of pageTodos) {
+      if (Array.isArray(todo.keywords)) {
+        const hit = todo.keywords.some(kw => text.includes(kw.toLowerCase()));
+        if (hit) {
+          const el = this.resolveElement(todo.selector);
+          if (el) {
+            return {
+              element: el,
+              selector: todo.selector,
+              title: todo.title,
+              todoId: todo.id
+            };
+          }
+        }
+      }
+    }
+
+    // 2. Match against interactive controls, cards, tabs, headings, and sections on the page
+    const candidates = this._querySelectorAllDeep(
+      'section[id], .pricing-card, [role="tab"], [role="switch"], [data-carousel], details[id], form[id], button[id], input[id], select[id], h2, h3'
+    ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
+
+    let bestEl = null;
+    let bestScore = 0;
+    let bestLabel = '';
+
+    for (const el of candidates) {
+      const label = (this._extractHeading(el) || this._getAccessibleLabel(el) || '').toLowerCase();
+      const idStr = (el.id || '').replace(/[-_]/g, ' ').toLowerCase();
+      if (!label && !idStr) continue;
+
+      let score = 0;
+      // Check significant words (>= 4 chars)
+      const words = `${label} ${idStr}`.split(/\s+/).filter(w => w.length >= 4 && !['section', 'button', 'input', 'select', 'table'].includes(w));
+      for (const w of words) {
+        if (text.includes(w)) score += 25;
+      }
+
+      if (label.length > 4 && text.includes(label)) score += 60;
+
+      if (score > bestScore && score >= 35) {
+        bestScore = score;
+        bestEl = el;
+        bestLabel = this._extractHeading(el) || this._getAccessibleLabel(el);
+      }
+    }
+
+    if (bestEl) {
+      const targetNode = bestEl.closest('section[id], .pricing-card, details[id]') || bestEl;
+      return {
+        element: targetNode,
+        selector: this._getUniqueSelector(targetNode),
+        title: bestLabel || this._extractHeading(targetNode)
+      };
+    }
+
+    return null;
   }
 
   /**
@@ -29,31 +106,24 @@ export class DOMScanner {
     const raw = String(target).trim();
     if (!raw) return null;
 
-    // 1. Direct data-wo-id shorthand (e.g. "wo-12")
     if (/^wo-\d+$/i.test(raw)) {
       const byWo = document.querySelector(`[data-wo-id="${raw.toLowerCase()}"]`);
       if (byWo && !this._isIgnored(byWo)) return byWo;
     }
 
-    // 2. Try standard CSS selector
     try {
       const el = document.querySelector(raw);
       if (el && !this._isIgnored(el)) return el;
-    } catch (_) {
-      // Not a valid CSS selector; continue to semantic resolution
-    }
+    } catch (_) {}
 
-    // 3. Try bare ID without '#'
     if (!raw.startsWith('#') && !raw.includes(' ')) {
       const byId = document.getElementById(raw);
       if (byId && !this._isIgnored(byId)) return byId;
     }
 
-    // 4. Search across open Shadow DOM roots for CSS selector
     const shadowMatch = this._queryShadowRoots(raw);
     if (shadowMatch && !this._isIgnored(shadowMatch)) return shadowMatch;
 
-    // 5. Fuzzy match by accessible label, placeholder, name, or visible text
     const needle = raw.toLowerCase();
     const candidates = this._collectAllCandidateElements();
     let bestMatch = null;
@@ -68,7 +138,7 @@ export class DOMScanner {
       let score = 0;
       if (label === needle || nameAttr === needle || idAttr === needle) {
         score = 100;
-      } else if (label.includes(needle) || needle.includes(label) && label.length > 2) {
+      } else if (label.includes(needle) || (needle.includes(label) && label.length > 2)) {
         score = 75;
       } else if (idAttr.includes(needle) || nameAttr.includes(needle)) {
         score = 60;
@@ -132,7 +202,6 @@ export class DOMScanner {
           disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true')
         };
 
-        // Include current value/state for form controls & toggles
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
           if (el.type === 'checkbox' || el.type === 'radio') {
             item.checked = Boolean(el.checked);
@@ -173,16 +242,11 @@ export class DOMScanner {
       });
   }
 
-  /**
-   * Extracts semantic page content, sections, headings, FAQs, pricing cards, and manifest knowledge
-   * so the agent can answer any question accurately.
-   */
   readPageContent(options = {}) {
     const query = (options.query || '').trim().toLowerCase();
     const targetSelector = options.selector || '';
     const manifest = options.manifest || null;
 
-    // If a specific selector was requested, extract detailed content from that node
     if (targetSelector) {
       const targetEl = this.resolveElement(targetSelector);
       if (targetEl && !this._isIgnored(targetEl)) {
@@ -197,7 +261,6 @@ export class DOMScanner {
       }
     }
 
-    // Collect semantic sections across the document
     const sectionNodes = Array.from(
       document.querySelectorAll('section, article, main, [data-section], .pricing-card, details')
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
@@ -227,7 +290,6 @@ export class DOMScanner {
         )
       : sections;
 
-    // Match manifest knowledgeBase and page definitions if available
     const manifestMatches = [];
     if (manifest) {
       if (Array.isArray(manifest.knowledgeBase)) {
@@ -244,6 +306,7 @@ export class DOMScanner {
           if (!query || hay.includes(query)) {
             manifestMatches.push({
               route: page.route,
+              file: page.file,
               title: page.title,
               summary: page.summary
             });
@@ -261,9 +324,6 @@ export class DOMScanner {
     };
   }
 
-  /**
-   * Captures a lightweight snapshot of the active viewport and widget state for closed-loop verification
-   */
   captureStateSnapshot() {
     const visibleInteractive = this.scan({ includeOffscreen: false });
     const invalidFields = visibleInteractive
@@ -274,7 +334,6 @@ export class DOMScanner {
         validationMessage: item.validationMessage
       }));
 
-    // Determine which section is most centered in the viewport
     let activeSection = null;
     const sections = Array.from(document.querySelectorAll('section[id], main[id], [data-section]'));
     const viewportCenter = window.innerHeight / 2;
@@ -329,7 +388,6 @@ export class DOMScanner {
     if (rect.width === 0 || rect.height === 0) return false;
 
     if (!includeOffscreen) {
-      // Consider visible if within or near viewport
       const margin = 100;
       if (
         rect.bottom < -margin ||
@@ -405,7 +463,7 @@ export class DOMScanner {
     if (/^H[1-6]$/.test(el.tagName)) return el.innerText.trim();
     const h = el.querySelector('h1, h2, h3, h4, summary, [data-title]');
     if (h) return h.innerText.trim();
-    return el.getAttribute('aria-label') || el.id || 'Section';
+    return el.getAttribute('aria-label') || el.id || '';
   }
 
   _cleanText(raw, maxLength = 600) {

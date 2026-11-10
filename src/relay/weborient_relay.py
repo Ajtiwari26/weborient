@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-WebOrient Live Relay Server (v0.3.0 — Session-Aware Multi-Tenant Salesperson Edition)
+WebOrient Live Relay Server (v0.4.0 — Refresh-Safe & Redirect-Safe Session Continuity)
 - Bridges browser clients (via WebSocket) with the Gemini 3.8 Live API
-- Persists server-side Session Memory keyed by `sessionId` across page changes:
-  * What has been oriented (`orientedHistory`)
-  * What remains to be described (`pendingToDescribe`)
-  * What the user wants (`userGoal` / `interestedTier`)
-  * User's native language (`userLanguage`)
-- Supports multi-tenant `?siteId=...` manifest loading
-- Registers all 12 DOM + Salesperson synchronization tools
+- Persists Session Memory to disk (`config/.session_store.json`) and memory keyed by `sessionId`
+  so page redirects, browser refreshes (F5/Cmd+R), or server restarts never lose the potential user!
+- Maintains a Non-Linear To-Do Checklist (`completedTodoIds` & `remainingTodos`) so the Live Model
+  follows the user in ANY order while knowing what has been oriented vs. what remains
+- Locks and maintains the user's native language (`userLanguage`) across the entire session
+- Forwards both `input_audio_transcription` (user speech) and `output_audio_transcription` (model speech)
 """
 import asyncio
 import base64
@@ -19,6 +18,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SESSION_CACHE_FILE = PROJECT_ROOT / "config" / ".session_store.json"
+
 env_file = PROJECT_ROOT / ".env"
 if env_file.exists():
     with open(env_file) as f:
@@ -45,8 +46,25 @@ except ImportError as e:
     print("Install with: pip install websockets google-genai")
     sys.exit(1)
 
-# In-memory cross-page session ledger keyed by sessionId
-SESSION_MEMORY_STORE = {}
+
+def load_session_store() -> dict:
+    if SESSION_CACHE_FILE.exists():
+        try:
+            return json.loads(SESSION_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_session_store(store: dict):
+    try:
+        SESSION_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SESSION_CACHE_FILE.write_text(json.dumps(store, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[WARN] Could not persist session store: {e}")
+
+
+SESSION_MEMORY_STORE = load_session_store()
 
 
 def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> dict:
@@ -57,17 +75,22 @@ def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> di
             "userLanguage": lang or "en-IN",
             "userGoal": "Explore platform capabilities, pricing ROI, and voice form co-pilot",
             "interestedTier": "Pro Co-Pilot",
+            "completedTodoIds": [],
+            "remainingTodos": [],
             "orientedHistory": [],
-            "nextToDescribe": []
+            "reconnectCount": 0
         }
-    elif lang:
-        SESSION_MEMORY_STORE[session_id]["userLanguage"] = lang
+    else:
+        SESSION_MEMORY_STORE[session_id]["reconnectCount"] = SESSION_MEMORY_STORE[session_id].get("reconnectCount", 0) + 1
+        if lang:
+            SESSION_MEMORY_STORE[session_id]["userLanguage"] = lang
+
+    save_session_store(SESSION_MEMORY_STORE)
     return SESSION_MEMORY_STORE[session_id]
 
 
 def load_system_prompt_and_manifest(site_id: str, session_mem: dict) -> str:
     prompt_file = PROJECT_ROOT / "config" / "agent-prompt.md"
-    # Support per-client manifest `config/manifests/{site_id}.json` or fallback to `config/sample-manifest.json`
     tenant_manifest = PROJECT_ROOT / "config" / "manifests" / f"{site_id}.json"
     manifest_file = tenant_manifest if tenant_manifest.exists() else (PROJECT_ROOT / "config" / "sample-manifest.json")
 
@@ -97,12 +120,12 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict) -> str:
             print(f"[WARN] Failed to parse manifest: {e}")
 
     memory_block = (
-        f"\n\n### CROSS-PAGE SESSION MEMORY (Session ID: {session_mem['sessionId']}):\n"
-        f"- User Native Language Preference: {session_mem['userLanguage']} (ALWAYS speak and explain in this language/style)\n"
-        f"- User Goal / Want: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
-        f"- Sections Already Oriented (do not repeat unless asked): {json.dumps(session_mem['orientedHistory'][-8:])}\n"
-        f"- Remaining Sections to Describe: {json.dumps(session_mem['nextToDescribe'][:6])}\n"
-        f"- CRITICAL SALESPERSON RULE: Show and describe simultaneously! Whenever you explain any element, call `show_and_describe` or `move_and_highlight` at the exact same time you speak about it."
+        f"\n\n### PERSISTENT SESSION & NON-LINEAR TO-DO MEMORY (Session ID: {session_mem['sessionId']}, Reconnects: {session_mem.get('reconnectCount', 0)}):\n"
+        f"- LOCKED NATIVE LANGUAGE: {session_mem['userLanguage']} (Maintain this language strictly across all page redirects and refreshes)\n"
+        f"- USER GOAL / WANT: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
+        f"- COMPLETED TO-DO ITEMS (Any order): {json.dumps(session_mem.get('completedTodoIds', []))}\n"
+        f"- REMAINING TO-DO ITEMS: {json.dumps(session_mem.get('remainingTodos', [])[:6])}\n"
+        f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its selector so the user sees it highlighted or clicked on screen while you speak."
     )
 
     return prompt_text + manifest_context + memory_block
@@ -113,21 +136,8 @@ def get_gemini_tools():
         types.Tool(
             function_declarations=[
                 types.FunctionDeclaration(
-                    name="show_and_describe",
-                    description="Salesperson synchronized action: glides the Ghost Cursor to an element, shows a live subtitle + spotlight badge, and optionally performs an inline action while you describe it.",
-                    parameters=types.Schema(
-                        type=types.Type.OBJECT,
-                        properties={
-                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or label of the element"),
-                            "explanation": types.Schema(type=types.Type.STRING, description="Concise visual callout badge text"),
-                            "spokenText": types.Schema(type=types.Type.STRING, description="Caption text synchronized with the visual highlight")
-                        },
-                        required=["selector", "explanation"]
-                    )
-                ),
-                types.FunctionDeclaration(
                     name="move_and_highlight",
-                    description="Smoothly glides the ghost cursor to a DOM element, highlights it with a spotlight border, and shows an on-screen explanation badge.",
+                    description="Smoothly glides the Ghost Cursor to any DOM element being described, scrolls it into view, spotlights it, and marks its To-Do item complete.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
@@ -233,7 +243,7 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="read_page_content",
-                    description="Extracts semantic text, headings, pricing details, FAQs, and manifest knowledge to answer any user question accurately.",
+                    description="Extracts semantic text, headings, pricing details, FAQs, and manifest knowledge to answer any user question accurately while spotlighting the source section.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
@@ -267,13 +277,14 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="update_session_memory",
-                    description="Updates cross-page session memory with what the user wants (goal, interested plan tier, native language, or notes).",
+                    description="Updates cross-page session memory with what the user wants (goal, interested plan tier, native language, or marking a To-Do item complete).",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
                             "goal": types.Schema(type=types.Type.STRING, description="What the user wants to achieve"),
                             "interestedTier": types.Schema(type=types.Type.STRING, description="Plan tier user is interested in"),
                             "language": types.Schema(type=types.Type.STRING, description="User's preferred language code (e.g. en-IN, hi-IN, hinglish, es-ES)"),
+                            "todoIdDone": types.Schema(type=types.Type.STRING, description="ID or selector of To-Do item completed"),
                             "note": types.Schema(type=types.Type.STRING, description="Additional preference or fact to remember across pages")
                         }
                     )
@@ -284,7 +295,6 @@ def get_gemini_tools():
 
 
 async def handle_browser_client(websocket):
-    # Parse ?siteId=...&sessionId=...&lang=... from WebSocket path
     raw_path = getattr(websocket, "path", "") or (websocket.request.path if hasattr(websocket, "request") and websocket.request else "/")
     parsed_url = urlparse(raw_path)
     qs = parse_qs(parsed_url.query)
@@ -293,7 +303,7 @@ async def handle_browser_client(websocket):
     lang = qs.get("lang", ["en-IN"])[0]
 
     session_mem = get_or_create_session_memory(session_id, site_id, lang)
-    print(f"[RELAY] Client connected | siteId={site_id} | sessionId={session_id} | lang={session_mem['userLanguage']}")
+    print(f"[RELAY] Client connected | siteId={site_id} | sessionId={session_id} | lang={session_mem['userLanguage']} | reconnects={session_mem.get('reconnectCount', 0)}")
 
     client = genai.Client(api_key=API_KEY)
     full_prompt = load_system_prompt_and_manifest(site_id, session_mem)
@@ -322,7 +332,7 @@ async def handle_browser_client(websocket):
                                         "serverContent": {"interrupted": True}
                                     }))
 
-                                if sc.input_transcription and getattr(sc.input_transcription, "text", None):
+                                if getattr(sc, "input_transcription", None) and getattr(sc.input_transcription, "text", None):
                                     print(f"[RELAY] 🗣️ User said: {sc.input_transcription.text}")
                                     await websocket.send(json.dumps({
                                         "serverContent": {
@@ -330,7 +340,7 @@ async def handle_browser_client(websocket):
                                         }
                                     }))
 
-                                if sc.output_transcription and getattr(sc.output_transcription, "text", None):
+                                if getattr(sc, "output_transcription", None) and getattr(sc.output_transcription, "text", None):
                                     print(f"[RELAY] 🤖 Gemini: {sc.output_transcription.text}")
                                     await websocket.send(json.dumps({
                                         "serverContent": {
@@ -360,7 +370,7 @@ async def handle_browser_client(websocket):
                                     }))
 
                                 if getattr(sc, "turn_complete", False):
-                                    print(f"[RELAY] Turn complete for {session_id}. Ready for next turn.")
+                                    print(f"[RELAY] Turn complete for {session_id}. Ready for next voice turn.")
                                     break
 
                             if response.tool_call:
@@ -379,6 +389,11 @@ async def handle_browser_client(websocket):
                     pass
                 except Exception as exc:
                     print(f"[RELAY] Gemini receiver loop error: {exc}")
+                finally:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
 
             async def forward_browser_to_gemini():
                 audio_count = 0
@@ -407,14 +422,15 @@ async def handle_browser_client(websocket):
                                 fn_responses = []
                                 for r in responses:
                                     out = r.get("response", {}).get("output", {})
-                                    # Synchronize server-side session memory from client digest
                                     digest = out.get("sessionMemoryDigest")
                                     if digest:
                                         session_mem["userLanguage"] = digest.get("userLanguage", session_mem["userLanguage"])
                                         session_mem["userGoal"] = digest.get("userGoal", session_mem["userGoal"])
-                                        session_mem["nextToDescribe"] = digest.get("nextToDescribe", session_mem["nextToDescribe"])
+                                        session_mem["completedTodoIds"] = digest.get("completedTodoIds", session_mem.get("completedTodoIds", []))
+                                        session_mem["remainingTodos"] = digest.get("remainingTodos", session_mem.get("remainingTodos", []))
                                     if out.get("selector"):
                                         session_mem["orientedHistory"].append(out.get("selector"))
+                                    save_session_store(SESSION_MEMORY_STORE)
 
                                     fn_responses.append(
                                         types.FunctionResponse(
@@ -439,14 +455,14 @@ async def handle_browser_client(websocket):
             await asyncio.gather(forward_gemini_to_browser(), forward_browser_to_gemini())
 
     except websockets.exceptions.ConnectionClosed:
-        print(f"[RELAY] Client {session_id} disconnected (session memory preserved for next page).")
+        print(f"[RELAY] Client {session_id} disconnected (session persisted in config/.session_store.json).")
     except Exception as exc:
         print(f"[RELAY] Session error: {exc}")
 
 
 async def main():
     print("=========================================================")
-    print(" WebOrient Live Relay Server (v0.3.0 Multi-Tenant + Memory)")
+    print(" WebOrient Live Relay Server (v0.4.0 Persistent Session)")
     print(f" Target Model : {MODEL_NAME}")
     print(f" WebSocket URI: ws://localhost:{PORT}?siteId=...&sessionId=...")
     print("=========================================================")

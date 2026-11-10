@@ -1,17 +1,21 @@
 /**
- * WebOrient: Autonomous Voice Co-Browsing, Session-Aware Memory & Synchronized Salesperson SDK (v0.3.0)
- * - Persistent Cross-Page Session Memory (`SessionMemory`: what has been oriented, what remains to describe,
- *   what the user wants, user's native language, and remembered form profile)
- * - Synchronized "Show & Describe Simultaneously" Salesperson Engine (`SpeechSyncEngine` + `GhostCursor`)
- * - Complete 12-Tool Router with Closed-Loop Act -> Settle -> Diff -> Respond verification
+ * WebOrient: Adaptive Gemini Live Voice Co-Pilot & Non-Linear To-Do Memory SDK (v0.4.0)
+ * - ZERO Browser TTS: All spoken orientation comes natively from the Gemini Live Model
+ * - Non-Linear To-Do Checklist Memory (`SessionMemory`): tracks completed vs. remaining sections
+ *   in ANY order as the user explores or asks questions
+ * - 100% Visual DOM Grounding:
+ *   1) Explicit Tool Grounding (`move_and_highlight`, `show_and_describe`, `click_element`, `swipe_or_swap`, `fill_form_field`)
+ *   2) Real-Time Transcript-to-DOM Auto-Highlighting (`_autoGroundFromModelSpeech`): whenever the Live Model
+ *      speaks about a DOM section/card/control on the page, the Ghost Cursor automatically scrolls to it,
+ *      spotlights it, displays the live spoken subtitle, and checks off its To-Do item!
+ * - Refresh-Safe & Redirect-Safe Session Management:
+ *   Persists session state, locked `userLanguage`, and To-Do checklist in `localStorage` so page redirects
+ *   and hard browser refreshes (`F5`/`Cmd+R`) automatically resume the session in the user's language.
  */
 import { GhostCursor } from './ghost-cursor.js';
 import { DOMScanner } from './dom-scanner.js';
 import { LiveClient } from './live-client.js';
 import { SessionMemory, SUPPORTED_LANGUAGES } from './session-memory.js';
-import { SpeechSyncEngine, SALESPERSON_SCRIPTS } from './speech-sync.js';
-
-const SESSION_STORAGE_KEY = 'weborient_session_state_v2';
 
 export class WebOrient {
   constructor(options = {}) {
@@ -36,29 +40,19 @@ export class WebOrient {
     });
 
     this.memory = new SessionMemory({
+      endpoint: this.options.endpoint,
       onChange: (memState) => this._emit('memoryUpdate', memState)
-    });
-
-    this.speechSync = new SpeechSyncEngine({
-      memory: this.memory,
-      onSpeechStart: (text, lang) => {
-        this.cursor.showSpeechBubble(text, `Salesperson (${lang})`);
-        this._emit('speechSync', { status: 'speaking', text, lang });
-      },
-      onSpeechEnd: (text) => {
-        this.cursor.hideSpeechBubble();
-        this._emit('speechSync', { status: 'done', text });
-      }
     });
 
     this.client = null;
     this.manifest = null;
-    this._pitchAborted = false;
+    this._modelSpeechBuffer = '';
+    this._lastAutoGroundedSelector = null;
+    this._lastExplicitToolTime = 0;
 
-    // Record current page visit in cross-page session memory
     if (typeof window !== 'undefined') {
       const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
-      this.memory.recordPageVisit(currentFile, document.title);
+      this.memory.recordPageVisit(currentFile);
     }
 
     this._manifestReadyPromise = this.options.manifestUrl
@@ -85,18 +79,19 @@ export class WebOrient {
   }
 
   /**
-   * Connects microphone audio and starts the live co-browsing session,
-   * injecting full cross-page Session Memory into the Gemini Live session.
+   * Connects microphone audio to the Gemini Live Model and injects the persistent
+   * Non-Linear To-Do Checklist, Locked Language, and Recent Conversation Continuity.
    */
   async start() {
-    if (!this.options.endpoint) {
-      console.warn('[WebOrient] No WebSocket endpoint provided. Running in local interactive mode.');
+    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint;
+    if (!endpoint) {
+      console.warn('[WebOrient] No WebSocket endpoint provided.');
       return;
     }
+    this.options.endpoint = endpoint;
 
-    // Append sessionId and siteId query params so the Relay Server links cross-page state
-    const sep = this.options.endpoint.includes('?') ? '&' : '?';
-    const wsUrl = `${this.options.endpoint}${sep}siteId=${encodeURIComponent(this.options.siteId)}&sessionId=${encodeURIComponent(this.memory.state.sessionId)}&lang=${encodeURIComponent(this.memory.state.userLanguage)}`;
+    const sep = endpoint.includes('?') ? '&' : '?';
+    const wsUrl = `${endpoint}${sep}siteId=${encodeURIComponent(this.options.siteId)}&sessionId=${encodeURIComponent(this.memory.state.sessionId)}&lang=${encodeURIComponent(this.memory.state.userLanguage)}`;
 
     this.client = new LiveClient({
       endpoint: wsUrl,
@@ -106,279 +101,136 @@ export class WebOrient {
         this._emit('status', { status });
       },
       onTranscript: (text, role) => {
-        this.cursor.showSpeechBubble(text, 'Live Voice AI');
+        this.memory.appendTranscript(role, text);
+        if (role === 'model') {
+          this.cursor.showSpeechBubble(text, `Live AI (${this.memory.state.userLanguage})`);
+          this._autoGroundFromModelSpeech(text);
+        }
         this._emit('transcript', { text, role });
       },
+      onPlaybackChange: (isPlaying) => {
+        if (!isPlaying) {
+          this._modelSpeechBuffer = '';
+          setTimeout(() => {
+            if (!this.client?.isPlaying) this.cursor.hideSpeechBubble();
+          }, 800);
+        }
+      },
       onInterrupted: () => {
-        this.stopSalespersonDemo();
+        this._modelSpeechBuffer = '';
         this.cursor.cancelActiveActions();
         this._emit('interrupted', {});
       }
     });
 
     await this.client.connect();
-    this._updateSessionStorage({ connected: true, endpoint: this.options.endpoint, timestamp: Date.now() });
+    this.memory.setLiveSessionStatus(true, endpoint);
 
-    // Send initial page + cross-page Session Memory context so Gemini knows what was already oriented
+    // Send full Non-Linear To-Do Checklist + Active Viewport Elements + Language Continuity Handoff
     const initialSnapshot = this.scanner.captureStateSnapshot();
-    const initialElements = this.scanner.scan({ includeOffscreen: false }).slice(0, 25);
+    const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 35);
     const memorySummary = this.memory.buildModelContextSummary();
 
     this.client.sendText(
-      `${memorySummary}\n[ACTIVE PAGE VIEWPORT: "${document.title}" (${initialSnapshot.url}), activeSection=${initialSnapshot.activeSection || 'top'}, visibleControls=${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag })))}]`
+      `[SESSION CONTINUITY HANDOFF]\n${memorySummary}\n` +
+      `[CURRENT PAGE DOM ("${document.title}" - ${initialSnapshot.url})]:\n` +
+      `Interactive & Section Elements on Screen: ${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type })))}`
     );
   }
 
   /**
-   * Synchronized "Show & Describe Simultaneously" action:
-   * Moves the Ghost Cursor to `selector`, highlights it with an explanation badge,
-   * optionally performs an inline action (tab swap, toggle, swipe, form fill),
-   * and simultaneously narrates `spokenText` in the user's native language!
+   * Real-Time Transcript-to-DOM Auto-Grounding:
+   * Guarantees that EVERY part of the DOM described by the Live Model is automatically
+   * scrolled into view, spotlighted, and pointed to by the Ghost Cursor—even if the model
+   * mentions a section in speech before or without emitting an explicit tool call!
    */
-  async showAndDescribe({ selector, spokenText, explanation, inlineAction = null }) {
-    const labelText = explanation || spokenText || 'Showing section';
-    const moveRes = await this.cursor.moveToElement(selector, true, labelText);
+  _autoGroundFromModelSpeech(chunk) {
+    this._modelSpeechBuffer = `${this._modelSpeechBuffer} ${chunk}`.slice(-260);
 
-    // Record in cross-page Session Memory so we know this element has been oriented
-    this.memory.markOriented({
-      selector,
-      title: moveRes.label || labelText.slice(0, 50),
-      explanation: spokenText || labelText
-    });
+    // Avoid overriding an explicit tool call that just fired within the last 1.2s
+    if (Date.now() - this._lastExplicitToolTime < 1200) return;
 
-    // Start speaking and executing any inline gesture/action simultaneously!
-    const speechPromise = spokenText
-      ? this.speechSync.speakSynchronized(spokenText)
-      : Promise.resolve();
+    const match = this.scanner.matchElementFromSpeech(
+      this._modelSpeechBuffer,
+      this.memory.state.todoChecklist
+    );
 
-    const gesturePromise = (async () => {
-      if (inlineAction && inlineAction.type) {
-        await new Promise(r => setTimeout(r, 250));
-        if (inlineAction.type === 'swipe_or_swap') {
-          await this.cursor.swipeOrSwap(
-            inlineAction.selector || selector,
-            inlineAction.action || 'next',
-            inlineAction.targetValue ?? null
-          );
-        } else if (inlineAction.type === 'fill_form_field') {
-          await this.cursor.typeIntoField(
-            inlineAction.selector || selector,
-            inlineAction.value ?? ''
-          );
-        } else if (inlineAction.type === 'fill_form_batch') {
-          await this.cursor.fillFormBatch(inlineAction.fields || []);
-        } else if (inlineAction.type === 'click_element') {
-          await this.cursor.click(inlineAction.selector || selector, labelText);
-        }
-      } else if (moveRes.element) {
-        await this.cursor.performSpeakingGesture(moveRes.element);
-      }
-    })();
-
-    await Promise.all([speechPromise, gesturePromise]);
-
-    return {
-      success: moveRes.success,
-      action: 'show_and_describe',
-      selector,
-      spokenText,
-      memoryState: {
-        orientedCount: this.memory.state.orientedHistory.length,
-        remainingCount: this.memory.state.pendingToDescribe.length
-      }
-    };
-  }
-
-  /**
-   * Launches or resumes the Autonomous Multi-Page Synchronized Salesperson Pitch!
-   * Dynamically adapts based on current page, `orientedHistory` (skips already-oriented sections
-   * unless `restart: true`), `userIntent.goal`, and `userLanguage` (`en-IN`, `hinglish`, `hi-IN`, `es-ES`).
-   */
-  async startSalespersonDemo(options = {}) {
-    this._pitchAborted = false;
-    if (options.language) this.memory.setLanguage(options.language);
-    if (options.goal) this.memory.updateUserIntent({ goal: options.goal });
-    if (options.restart) {
-      const savedLang = this.memory.state.userLanguage;
-      const savedGoal = this.memory.state.userIntent.goal;
-      this.memory.reset();
-      this.memory.setLanguage(savedLang);
-      this.memory.updateUserIntent({ goal: savedGoal });
+    if (match && match.selector && match.selector !== this._lastAutoGroundedSelector) {
+      this._lastAutoGroundedSelector = match.selector;
+      this.cursor.moveToElement(match.element || match.selector, true, match.title);
+      this.memory.markOriented({
+        selector: match.selector,
+        title: match.title,
+        explanation: this._modelSpeechBuffer.trim().slice(-120)
+      });
+      this._emit('autoGrounded', { selector: match.selector, title: match.title });
     }
-
-    const langKey = SALESPERSON_SCRIPTS[this.memory.state.userLanguage]
-      ? this.memory.state.userLanguage
-      : 'en-IN';
-    const script = SALESPERSON_SCRIPTS[langKey];
-    const goal = this.memory.state.userIntent.goal;
-    const facts = this.memory.state.formFacts;
-
-    // Full 4-page Salesperson Show-and-Tell Master Storyboard
-    const allSteps = [
-      // Page 1: test-demo.html
-      {
-        page: 'test-demo.html',
-        selector: '#telemetry-strip',
-        explanation: '310ms Voice Latency & +42% Conversion Lift',
-        spokenText: script.hero(goal)
-      },
-      {
-        page: 'test-demo.html',
-        selector: '#workflow-tabs',
-        explanation: 'Stage 3: 60fps Cubic Bézier Actuation',
-        spokenText: script.workflow(),
-        inlineAction: { type: 'swipe_or_swap', selector: '#workflow-tabs', action: 'select', targetValue: 'actuate' }
-      },
-      // Page 2: features.html
-      {
-        page: 'features.html',
-        selector: '#subsystem-tabs',
-        explanation: 'Layer 2: Cubic Bézier & Fitts-Law Cursor Physics',
-        spokenText: script.featuresTab(),
-        inlineAction: { type: 'swipe_or_swap', selector: '#subsystem-tabs', action: 'select', targetValue: 'bezier' }
-      },
-      {
-        page: 'features.html',
-        selector: '#industry-carousel',
-        explanation: 'Swiping Industry Deployment Blueprints',
-        spokenText: script.featuresSwipe(),
-        inlineAction: { type: 'swipe_or_swap', selector: '#industry-carousel', action: 'next' }
-      },
-      // Page 3: pricing.html
-      {
-        page: 'pricing.html',
-        selector: '#billing-toggle',
-        explanation: 'Annual Billing Switch (20% Instant Discount)',
-        spokenText: script.pricingToggle(),
-        inlineAction: { type: 'swipe_or_swap', selector: '#billing-toggle', action: 'toggle' }
-      },
-      {
-        page: 'pricing.html',
-        selector: '#roi-calculator-section',
-        explanation: 'Interactive Voice Conversion ROI Calculator',
-        spokenText: script.pricingRoi(),
-        inlineAction: { type: 'fill_form_field', selector: '#calc-visitors-slider', value: '75000' }
-      },
-      // Page 5: contact.html
-      {
-        page: 'contact.html',
-        selector: '#contact-form',
-        explanation: 'Synchronized Voice Form Filling (11 Controls)',
-        spokenText: script.contactFill(facts.fullName, facts.company),
-        inlineAction: {
-          type: 'fill_form_batch',
-          fields: [
-            { selector: '#contact-name', value: facts.fullName },
-            { selector: '#contact-email', value: 'ajay at deploymate dot in' },
-            { selector: '#contact-phone', value: facts.phone },
-            { selector: '#contact-company', value: facts.company },
-            { selector: '#contact-website', value: facts.website },
-            { selector: '#contact-framework', value: 'Next.js / React' },
-            { selector: '#contact-plan', value: 'Pro Co-Pilot' },
-            { selector: '#contact-team-size', value: facts.teamSize },
-            { selector: '#contact-priority', value: 'true' },
-            { selector: '#contact-hipaa', value: 'true' },
-            { selector: '#contact-message', value: `Salesperson demo completed for goal: ${goal}` }
-          ]
-        }
-      },
-      {
-        page: 'contact.html',
-        selector: '#btn-submit-contact',
-        explanation: 'All 11 Fields Validated • Awaiting User Confirmation',
-        spokenText: script.contactDone()
-      }
-    ];
-
-    // Filter out steps that were already oriented in this session (unless queued directly)
-    const remainingSteps = options.steps || allSteps.filter(
-      s => !this.memory.hasBeenOriented(s.selector, s.page)
-    );
-
-    const queue = remainingSteps.length > 0 ? remainingSteps : allSteps;
-    this.memory.setPitchQueue(queue, true);
-    this._emit('pitchStatus', { running: true, remaining: queue.length });
-
-    await this._runActivePitchLoop();
   }
 
-  async _runActivePitchLoop() {
+  /**
+   * Sends a user request or topic selection to the Live Model (or executes locally if offline)
+   */
+  async orientTopic(todoOrQuery) {
+    if (!todoOrQuery) return;
     const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
-    const langKey = SALESPERSON_SCRIPTS[this.memory.state.userLanguage]
-      ? this.memory.state.userLanguage
-      : 'en-IN';
-    const script = SALESPERSON_SCRIPTS[langKey];
 
-    while (this.memory.state.isPitchRunning && !this._pitchAborted) {
-      const nextStep = this.memory.state.activePitchQueue[0];
-      if (!nextStep) {
-        this.memory.stopPitch();
-        this._emit('pitchStatus', { running: false, remaining: 0 });
-        break;
-      }
-
-      // If the next pitch step is on a DIFFERENT page, narrate the transition and navigate!
-      if (nextStep.page && nextStep.page !== currentFile) {
-        let navSpeech = script.navFeatures();
-        if (nextStep.page === 'pricing.html') navSpeech = script.navPricing();
-        else if (nextStep.page === 'contact.html') navSpeech = script.navContact();
-
-        const navLink = document.querySelector(`a[href*="${nextStep.page}"]`);
-        if (navLink) {
-          await this.cursor.moveToElement(navLink, true, `Next Page: ${nextStep.page}`);
-        }
-        await this.speechSync.speakSynchronized(navSpeech);
-        if (this._pitchAborted) break;
-
-        // Navigate to the next page; `_checkRestoredSession` will automatically resume the pitch loop!
-        await this._handleNavigation(nextStep.page);
+    // If passed a structured To-Do item from the checklist
+    if (typeof todoOrQuery === 'object' && todoOrQuery.selector) {
+      // If it lives on another page, queue highlight + Live Model prompt and redirect
+      if (todoOrQuery.page && todoOrQuery.page !== currentFile) {
+        this.queuePostNavigationActions([
+          {
+            name: 'move_and_highlight',
+            args: { selector: todoOrQuery.selector, explanation: todoOrQuery.title }
+          }
+        ]);
+        await this._handleNavigation(todoOrQuery.page, todoOrQuery.selector, todoOrQuery.title);
         return;
       }
 
-      // Pop the step and execute Show & Describe simultaneously on the current page
-      this.memory.shiftNextPitchStep();
-      this._emit('pitchStatus', {
-        running: this.memory.state.isPitchRunning,
-        remaining: this.memory.state.activePitchQueue.length,
-        currentStep: nextStep
+      // Same page: highlight with Ghost Cursor, mark To-Do done, and ask Live Model to explain it in user's language
+      await this.handleToolCall('move_and_highlight', {
+        selector: todoOrQuery.selector,
+        explanation: todoOrQuery.title
       });
 
-      await this.showAndDescribe(nextStep);
-      if (this._pitchAborted) break;
-      await new Promise(r => setTimeout(r, 280));
+      if (this.client) {
+        const langCfg = this.memory.getLanguageConfig();
+        this.client.sendText(
+          `[USER SELECTED TOPIC]: The user wants you to explain "${todoOrQuery.title}" (${todoOrQuery.selector}) right now in ${langCfg.name}. The Ghost Cursor is already highlighting it on screen. Describe it concisely and naturally.`
+        );
+      }
+      return;
     }
 
-    this._emit('pitchStatus', { running: false, remaining: 0 });
-  }
-
-  stopSalespersonDemo() {
-    this._pitchAborted = true;
-    this.memory.stopPitch();
-    this.speechSync.stop();
-    this.cursor.cancelActiveActions();
-    this._emit('pitchStatus', { running: false, remaining: 0 });
+    // String prompt
+    if (this.client) {
+      this.memory.appendTranscript('user', String(todoOrQuery));
+      const langCfg = this.memory.getLanguageConfig();
+      this.client.sendText(
+        `[USER MESSAGE (Respond in ${langCfg.name} and call move_and_highlight/click_element/swipe_or_swap on every DOM element you describe)]: ${todoOrQuery}`
+      );
+    }
   }
 
   sendTextPrompt(text) {
-    if (this.client) {
-      this.client.sendText(text);
+    if (this.client && text) {
+      this.orientTopic(text);
       return true;
     }
     return false;
   }
 
   queuePostNavigationActions(actions = []) {
-    this._updateSessionStorage({
-      pendingActions: actions,
-      timestamp: Date.now()
-    });
+    this.memory.setPendingNavigationActions(actions);
   }
 
   /**
-   * Routes model tool calls to DOM actuators with closed-loop settle, verification & memory recording
+   * Routes model tool calls to DOM actuators with closed-loop settle, verification & To-Do completion
    */
   async handleToolCall(name, args = {}, callId = null) {
     console.log(`[WebOrient] Executing Tool Call: ${name}`, args);
+    this._lastExplicitToolTime = Date.now();
     this._emit('toolCall', { name, args, callId });
 
     let result = { success: true, action: name };
@@ -386,28 +238,19 @@ export class WebOrient {
     try {
       switch (name) {
         case 'show_and_describe':
-          result = await this.showAndDescribe({
-            selector: args.selector,
-            spokenText: args.spokenText || args.explanation,
-            explanation: args.explanation || args.spokenText,
-            inlineAction: args.inlineAction || null
-          });
-          break;
-
-        case 'move_and_highlight':
-          result = await this.cursor.moveToElement(
-            args.selector,
-            true,
-            args.explanation || null
-          );
+        case 'move_and_highlight': {
+          const explanation = args.explanation || args.spokenText || null;
+          result = await this.cursor.moveToElement(args.selector, true, explanation);
           if (result.success) {
+            this._lastAutoGroundedSelector = args.selector;
             this.memory.markOriented({
               selector: args.selector,
               title: result.label || args.selector,
-              explanation: args.explanation
+              explanation
             });
           }
           break;
+        }
 
         case 'click_element': {
           const el = this.scanner.resolveElement(args.selector);
@@ -434,11 +277,12 @@ export class WebOrient {
         case 'fill_form_field':
           result = await this.cursor.typeIntoField(args.selector, args.value ?? '');
           this.memory.markOriented({ selector: args.selector, title: `Filled ${args.selector}` });
+          this.memory.markOriented({ selector: '#intake-form-section', title: 'Enterprise Consultation Form' });
           break;
 
         case 'fill_form_batch':
           result = await this.cursor.fillFormBatch(args.fields || []);
-          this.memory.markOriented({ selector: '#contact-form', title: `Batch filled ${result.filledCount} fields` });
+          this.memory.markOriented({ selector: '#intake-form-section', title: `Batch filled ${result.filledCount} fields` });
           break;
 
         case 'scroll_page':
@@ -447,6 +291,9 @@ export class WebOrient {
             args.targetSelector || null,
             args.amount || 'page'
           );
+          if (args.targetSelector) {
+            this.memory.markOriented({ selector: args.targetSelector, title: `Scrolled to ${args.targetSelector}` });
+          }
           break;
 
         case 'swipe_or_swap':
@@ -455,7 +302,7 @@ export class WebOrient {
             args.action || 'next',
             args.targetValue ?? null
           );
-          this.memory.markOriented({ selector: args.selector, title: `Swapped/Swiped ${args.selector}` });
+          this.memory.markOriented({ selector: args.selector, title: `Interacted with ${args.selector}` });
           break;
 
         case 'navigate_route':
@@ -477,14 +324,28 @@ export class WebOrient {
             selector: args.selector || '',
             manifest: this.manifest
           });
-          if (args.selector) {
-            await this.cursor.moveToElement(args.selector, true, args.query || 'Reading section');
-            this.memory.markOriented({ selector: args.selector, title: `Read ${args.selector}` });
+          // Always visually highlight the matched section on screen when reading content!
+          const secToHighlight = args.selector || result.matchingSections?.[0]?.selector;
+          if (secToHighlight) {
+            await this.cursor.moveToElement(
+              secToHighlight,
+              true,
+              result.matchingSections?.[0]?.heading || args.query || 'Reading section'
+            );
+            this.memory.markOriented({
+              selector: secToHighlight,
+              title: result.matchingSections?.[0]?.heading || secToHighlight
+            });
           }
           break;
 
         case 'guide_tour':
-          result = await this.cursor.guideTour(args.steps || [], this.speechSync);
+          result = await this.cursor.guideTour(args.steps || []);
+          for (const st of args.steps || []) {
+            if (st.selector) {
+              this.memory.markOriented({ selector: st.selector, title: st.explanation || st.selector });
+            }
+          }
           break;
 
         case 'update_session_memory':
@@ -493,7 +354,7 @@ export class WebOrient {
             interestedTier: args.interestedTier,
             language: args.language,
             note: args.note,
-            addPendingTopic: args.addPendingTopic
+            todoIdDone: args.todoIdDone
           });
           result = {
             success: true,
@@ -513,11 +374,15 @@ export class WebOrient {
 
     await this._waitForDOMSettle(120);
     result.viewportSummary = this.scanner.captureStateSnapshot();
+
+    const doneTodos = this.memory.state.todoChecklist.filter(t => t.done).map(t => t.id);
+    const pendingTodos = this.memory.state.todoChecklist.filter(t => !t.done).map(t => ({ id: t.id, page: t.page, selector: t.selector, title: t.title }));
+
     result.sessionMemoryDigest = {
       userLanguage: this.memory.state.userLanguage,
       userGoal: this.memory.state.userIntent.goal,
-      orientedCount: this.memory.state.orientedHistory.length,
-      nextToDescribe: this.memory.state.pendingToDescribe.slice(0, 3)
+      completedTodoIds: doneTodos,
+      remainingTodos: pendingTodos.slice(0, 6)
     };
 
     if (this.client && callId) {
@@ -540,7 +405,9 @@ export class WebOrient {
       const hashEl = document.querySelector(path);
       if (hashEl) {
         window.history.pushState({}, '', path);
-        return await this.cursor.moveToElement(hashEl, true, explanation || `Navigated to ${path}`);
+        const res = await this.cursor.moveToElement(hashEl, true, explanation || `Section ${path}`);
+        this.memory.markOriented({ selector: path, title: explanation || path });
+        return res;
       }
     }
 
@@ -597,20 +464,22 @@ export class WebOrient {
 
     if (targetFile === currentFile) {
       const selectorToFocus = targetSelector || hashPart || 'h1';
-      return await this.cursor.moveToElement(
+      const res = await this.cursor.moveToElement(
         selectorToFocus,
         true,
-        explanation || `Already on ${matchedPage?.title || targetFile}`
+        explanation || `Focused ${matchedPage?.title || targetFile}`
       );
+      this.memory.markOriented({ selector: selectorToFocus, title: explanation || selectorToFocus });
+      return res;
     }
 
     const navLink = document.querySelector(`a[href*="${targetFile}"]`);
     if (navLink) {
-      await this.cursor.moveToElement(navLink, true, `Navigating to ${matchedPage?.title || targetFile}...`);
+      await this.cursor.moveToElement(navLink, true, `Redirecting to ${matchedPage?.title || targetFile}...`);
       await new Promise(r => setTimeout(r, 240));
     }
 
-    const existingPending = this._readSessionStorage().pendingActions || [];
+    const existingPending = [...(this.memory.state.pendingNavigationActions || [])];
     if (targetSelector || hashPart) {
       existingPending.unshift({
         name: 'move_and_highlight',
@@ -620,14 +489,7 @@ export class WebOrient {
         }
       });
     }
-
-    this._updateSessionStorage({
-      connected: Boolean(this.client),
-      endpoint: this.options.endpoint,
-      lastRoute: resolvedUrl + hashPart,
-      pendingActions: existingPending,
-      timestamp: Date.now()
-    });
+    this.memory.setPendingNavigationActions(existingPending);
 
     const baseDir = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
     const finalHref = resolvedUrl.startsWith('http') || resolvedUrl.startsWith('/')
@@ -668,55 +530,36 @@ export class WebOrient {
     });
   }
 
-  _readSessionStorage() {
-    try {
-      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch (_) {
-      return {};
-    }
-  }
-
-  _updateSessionStorage(patch) {
-    try {
-      const prev = this._readSessionStorage();
-      const next = Object.assign({}, prev, patch);
-      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(next));
-    } catch (_) {}
-  }
-
+  /**
+   * Automatically restores the active Gemini Live voice session AND executes any queued
+   * actions after a cross-page redirect OR a hard browser refresh (`F5` / `Cmd+R`).
+   */
   _checkRestoredSession() {
     const runRestore = async () => {
-      const state = this._readSessionStorage();
-      const recent = state && Date.now() - (state.timestamp || 0) < 120000;
+      const memState = this.memory.getState();
 
-      // 1. Auto-reconnect Live Voice if it was active on the previous page
-      if (recent && state.connected && state.endpoint && !this.client) {
-        this.options.endpoint = state.endpoint;
+      // 1. If the Live Voice session was active before the page redirect or refresh, reconnect automatically!
+      if (memState.isLiveActive && memState.liveEndpoint && !this.client) {
+        this.options.endpoint = memState.liveEndpoint;
         try {
           await this.start();
+          this._emit('sessionRestored', {
+            sessionId: memState.sessionId,
+            language: memState.userLanguage
+          });
         } catch (err) {
-          console.warn('[WebOrient] Auto-reconnect after page navigation skipped:', err);
+          console.warn('[WebOrient] Auto-reconnect after refresh/redirect skipped:', err);
         }
       }
 
-      // 2. Resume active Multi-Page Salesperson Pitch if one was in progress across page load!
-      if (this.memory.state.isPitchRunning && this.memory.state.activePitchQueue.length > 0) {
-        await new Promise(r => setTimeout(r, 420));
-        await this._runActivePitchLoop();
-        return;
-      }
-
-      // 3. Execute any queued one-off cross-page actions
-      if (recent && Array.isArray(state.pendingActions) && state.pendingActions.length > 0) {
-        const actionsToRun = [...state.pendingActions];
-        this._updateSessionStorage({ pendingActions: [] });
-
-        await new Promise(r => setTimeout(r, 350));
-        for (const act of actionsToRun) {
+      // 2. Execute any queued post-navigation DOM actions
+      const pendingActions = this.memory.consumePendingNavigationActions();
+      if (pendingActions.length > 0) {
+        await new Promise(r => setTimeout(r, 320));
+        for (const act of pendingActions) {
           if (act && act.name) {
             await this.handleToolCall(act.name, act.args || {});
-            await new Promise(r => setTimeout(r, 250));
+            await new Promise(r => setTimeout(r, 240));
           }
         }
       }
@@ -731,9 +574,6 @@ export class WebOrient {
     }
   }
 
-  /**
-   * Optional self-contained floating launcher pill for zero-code 1-tag client installs
-   */
   _mountFloatingLauncher() {
     if (document.getElementById('weborient-floating-launcher')) return;
     const launcher = document.createElement('div');
@@ -745,19 +585,19 @@ export class WebOrient {
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     `;
     launcher.innerHTML = `
-      <button id="wo-launcher-pitch" style="
+      <button id="wo-launcher-live" style="
         background: linear-gradient(135deg, ${this.options.themeColor}, ${this.options.accentColor});
         color: #fff; border: none; padding: 10px 16px; border-radius: 999px;
         font-size: 12px; font-weight: 700; cursor: pointer;
         box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
-      ">▶ Start AI Salesperson Demo</button>
+      ">🎙️ Talk to Live Co-Pilot</button>
     `;
     document.body.appendChild(launcher);
-    launcher.querySelector('#wo-launcher-pitch').addEventListener('click', () => {
-      if (this.memory.state.isPitchRunning) {
-        this.stopSalespersonDemo();
+    launcher.querySelector('#wo-launcher-live').addEventListener('click', () => {
+      if (this.client) {
+        this.stop();
       } else {
-        this.startSalespersonDemo();
+        this.start();
       }
     });
   }
@@ -769,14 +609,19 @@ export class WebOrient {
   }
 
   stop() {
-    this.stopSalespersonDemo();
-    this._updateSessionStorage({ connected: false, pendingActions: [] });
-    if (this.client) this.client.stop();
-    if (this.cursor) this.cursor.hideSpotlight();
+    this.memory.setLiveSessionStatus(false);
+    if (this.client) {
+      this.client.stop();
+      this.client = null;
+    }
+    if (this.cursor) {
+      this.cursor.hideSpeechBubble();
+      this.cursor.hideSpotlight();
+    }
   }
 }
 
-export { SUPPORTED_LANGUAGES, SALESPERSON_SCRIPTS };
+export { SUPPORTED_LANGUAGES };
 
 if (typeof window !== 'undefined') {
   window.WebOrient = WebOrient;

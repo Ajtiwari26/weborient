@@ -1,23 +1,41 @@
 /**
- * WebOrient Cross-Page Session Memory Engine (`src/sdk/session-memory.js`)
- * Maintains consistent state across hard multi-page navigations and SPA route changes:
- * 1. What has already been oriented (`orientedHistory`: pages, sections, selectors, timestamps)
- * 2. What else remains to be described (`pendingToDescribe`: ordered pitch/walkthrough queue)
- * 3. What the user wants (`userIntent`: goal, industry, budget/tier preference, questions asked)
- * 4. Native language of the user (`userLanguage`: code, label, voice locale, auto-detected or chosen)
- * 5. Collected form facts (`formFacts`: remembered name, email, company, teamSize across pages)
+ * WebOrient Persistent Session & Non-Linear To-Do Memory Engine (`src/sdk/session-memory.js`)
+ * - Uses `localStorage` (with `sessionStorage` mirror) so session state, active connection status,
+ *   user language, user goals, and orientation To-Do progress survive BOTH cross-page redirects
+ *   AND hard browser refreshes (F5 / Cmd+R) without losing the potential customer.
+ * - Non-Linear To-Do Checklist (`todoChecklist`):
+ *   Tracks every key section/feature across the website as a flexible To-Do item (`done: true | false`).
+ *   The user and Live Model can jump to ANY page or section in ANY order—whenever a section is
+ *   shown, clicked, swiped, or explained, its To-Do item is marked `done: true` automatically.
  */
 
-const MEMORY_STORAGE_KEY = 'weborient_consistent_memory_v3';
+const MEMORY_STORAGE_KEY = 'weborient_persistent_session_v4';
 
 export const SUPPORTED_LANGUAGES = {
-  'en-IN': { code: 'en-IN', name: 'English (India / Global)', voiceLang: 'en-IN', fallbackLang: 'en-US' },
-  'hi-IN': { code: 'hi-IN', name: 'Hindi (हिन्दी)', voiceLang: 'hi-IN', fallbackLang: 'hi' },
-  'hinglish': { code: 'hinglish', name: 'Hinglish (Hindi + English)', voiceLang: 'en-IN', fallbackLang: 'hi-IN' },
-  'en-US': { code: 'en-US', name: 'English (US)', voiceLang: 'en-US', fallbackLang: 'en' },
-  'es-ES': { code: 'es-ES', name: 'Español (Spanish)', voiceLang: 'es-ES', fallbackLang: 'es' },
-  'fr-FR': { code: 'fr-FR', name: 'Français (French)', voiceLang: 'fr-FR', fallbackLang: 'fr' }
+  'en-IN': { code: 'en-IN', name: 'English (India / Global)' },
+  'hi-IN': { code: 'hi-IN', name: 'Hindi (हिन्दी)' },
+  'hinglish': { code: 'hinglish', name: 'Hinglish (Hindi + English)' },
+  'en-US': { code: 'en-US', name: 'English (US)' },
+  'es-ES': { code: 'es-ES', name: 'Español (Spanish)' },
+  'fr-FR': { code: 'fr-FR', name: 'Français (French)' }
 };
+
+export const DEFAULT_TODO_CHECKLIST = [
+  { id: 'home-hero', page: 'test-demo.html', selector: '#hero-section', title: 'Platform Overview & 310ms Telemetry', keywords: ['telemetry', '310ms', 'latency', 'overview', 'hero', 'conversion lift'], done: false },
+  { id: 'home-workflow', page: 'test-demo.html', selector: '#workflow-section', title: '4-Stage Closed-Loop Workflow Tabs', keywords: ['workflow', '4-stage', 'perceive', 'actuate', 'persist'], done: false },
+  { id: 'home-cases', page: 'test-demo.html', selector: '#carousel-section', title: 'Customer Case-Study Carousel', keywords: ['case study', 'cloudscale', 'luxecart', 'medflow'], done: false },
+  { id: 'home-security', page: 'test-demo.html', selector: '#security-section', title: 'Security & Sensitive Field Guardrails', keywords: ['guardrail', 'password', 'blacklist', 'security matrix'], done: false },
+  { id: 'feat-subsystems', page: 'features.html', selector: '#subsystem-tabs-section', title: '5-Layer Subsystem Architecture Tabs', keywords: ['5-layer', 'audioworklet', 'bezier', 'cubic', 'subsystem', 'verifier'], done: false },
+  { id: 'feat-industry', page: 'features.html', selector: '#industry-carousel-section', title: 'Industry Deployment Blueprints', keywords: ['industry', 'fintech', 'kyc', 'healthcare', 'triage', 'blueprint'], done: false },
+  { id: 'feat-benchmarks', page: 'features.html', selector: '#benchmark-section', title: 'Latency & Cost Benchmark Table', keywords: ['benchmark', 'playwright', 'headless', '310ms vs'], done: false },
+  { id: 'price-tiers', page: 'pricing.html', selector: '#pricing-tiers-section', title: 'Pricing Tiers & 20% Annual Billing Switch', keywords: ['pricing', 'starter', 'growth', 'pro co-pilot', 'annual', 'billing', '$79', '$64', '$29'], done: false },
+  { id: 'price-roi', page: 'pricing.html', selector: '#roi-calculator-section', title: 'Interactive Revenue Lift ROI Calculator', keywords: ['roi', 'calculator', 'visitors', 'order value', 'revenue lift'], done: false },
+  { id: 'price-faq', page: 'pricing.html', selector: '#pricing-faq-section', title: '14-Day Refund & Billing FAQ', keywords: ['refund', 'money-back', '14-day', 'overage', 'cancel'], done: false },
+  { id: 'docs-quickstart', page: 'docs.html', selector: '#quickstart-section', title: '2-Minute Client Setup & Framework Snippets', keywords: ['quickstart', 'next.js', 'vue', 'shopify', 'wordpress', 'script tag', 'install'], done: false },
+  { id: 'docs-tools', page: 'docs.html', selector: '#tools-reference-section', title: 'Gemini Live API Tool Reference', keywords: ['tool reference', 'move_and_highlight', 'fill_form_batch', 'swipe_or_swap'], done: false },
+  { id: 'contact-form', page: 'contact.html', selector: '#intake-form-section', title: '11-Field Enterprise Consultation Form', keywords: ['consultation form', 'intake', 'full name', 'work email', 'priority onboarding', 'hipaa'], done: false },
+  { id: 'contact-sla', page: 'contact.html', selector: '#sla-section', title: 'Global Relay Regions & Enterprise SLA', keywords: ['sla', 'san francisco', 'london', 'bengaluru', 'bhopal', '15 minutes'], done: false }
+];
 
 export class SessionMemory {
   constructor(options = {}) {
@@ -28,10 +46,10 @@ export class SessionMemory {
 
   _loadOrInitialize(options = {}) {
     try {
-      const raw = sessionStorage.getItem(this.storageKey);
+      const raw = localStorage.getItem(this.storageKey) || sessionStorage.getItem(this.storageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && parsed.sessionId) {
+        if (parsed && parsed.sessionId && Array.isArray(parsed.todoChecklist)) {
           return parsed;
         }
       }
@@ -44,35 +62,29 @@ export class SessionMemory {
       sessionId: `wo_sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      isLiveActive: false,
+      liveEndpoint: options.endpoint || 'ws://localhost:8088',
       userLanguage: options.defaultLanguage || initialLang,
+      languageLocked: false,
       userIntent: {
-        goal: options.defaultGoal || 'Evaluate WebOrient for customer onboarding & voice form completion',
+        goal: options.defaultGoal || 'Explore WebOrient capabilities, pricing ROI, and setup',
         interestedTier: 'Pro Co-Pilot',
         customNotes: []
       },
       visitedPages: [],
+      todoChecklist: DEFAULT_TODO_CHECKLIST.map(item => ({ ...item, completedAt: null })),
       orientedHistory: [],
-      pendingToDescribe: [
-        { page: 'test-demo.html', selector: '#hero-section', title: 'Platform Overview & Live Telemetry' },
-        { page: 'test-demo.html', selector: '#workflow-section', title: '4-Stage Closed-Loop Architecture' },
-        { page: 'features.html', selector: '#subsystem-tabs-section', title: '5-Layer Deep Runtime & Bézier Engine' },
-        { page: 'features.html', selector: '#benchmark-section', title: '310ms Latency Benchmark vs Chatbots' },
-        { page: 'pricing.html', selector: '#pricing-tiers-section', title: 'Pricing Plans & 20% Annual Toggle' },
-        { page: 'pricing.html', selector: '#roi-calculator-section', title: 'Interactive Revenue Lift Calculator' },
-        { page: 'docs.html', selector: '#quickstart-section', title: '2-Minute Client Script Installation' },
-        { page: 'contact.html', selector: '#intake-form-section', title: '11-Field Voice Consultation Form' }
-      ],
-      activePitchQueue: [],
-      isPitchRunning: false,
+      recentTranscripts: [],
+      pendingNavigationActions: [],
       formFacts: {
-        fullName: 'Ajay Tiwari',
-        email: 'ajay@deploymate.in',
-        phone: '+91 98765 43210',
-        company: 'DeployMate AI Labs',
-        website: 'https://deploymate.in',
+        fullName: '',
+        email: '',
+        phone: '',
+        company: '',
+        website: '',
         framework: 'Next.js / React',
         plan: 'Pro Co-Pilot',
-        teamSize: '65'
+        teamSize: '25'
       }
     };
 
@@ -84,7 +96,9 @@ export class SessionMemory {
     nextState.updatedAt = Date.now();
     this.state = nextState;
     try {
-      sessionStorage.setItem(this.storageKey, JSON.stringify(nextState));
+      const serialized = JSON.stringify(nextState);
+      localStorage.setItem(this.storageKey, serialized);
+      sessionStorage.setItem(this.storageKey, serialized);
     } catch (_) {}
     this.onChange(this.state);
   }
@@ -94,9 +108,18 @@ export class SessionMemory {
   }
 
   /**
-   * Records that a specific page was visited
+   * Sets whether the Gemini Live voice session is currently active so page refreshes/redirects auto-reconnect
    */
-  recordPageVisit(pageFile, pageTitle) {
+  setLiveSessionStatus(isActive, endpoint = null) {
+    this.state.isLiveActive = Boolean(isActive);
+    if (endpoint) this.state.liveEndpoint = endpoint;
+    this._persist();
+  }
+
+  /**
+   * Records a page visit across redirects or refreshes
+   */
+  recordPageVisit(pageFile) {
     const cleanFile = String(pageFile || '').split('/').pop() || 'test-demo.html';
     if (!this.state.visitedPages.includes(cleanFile)) {
       this.state.visitedPages.push(cleanFile);
@@ -106,19 +129,41 @@ export class SessionMemory {
   }
 
   /**
-   * Records that an element or section has been visually oriented & explained to the user,
-   * and removes it from `pendingToDescribe` so the agent knows what is done vs. what's left.
+   * Non-Linear To-Do Completion:
+   * Marks any matching To-Do item (and records in `orientedHistory`) as `done = true` regardless of order!
    */
   markOriented({ page, selector, title, explanation }) {
-    const currentFile = page || (typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html');
-    const key = `${currentFile}::${selector}`;
+    const currentFile = page || (typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html') || 'test-demo.html';
+    const selStr = String(selector || '').trim();
+    if (!selStr) return null;
 
+    // 1. Check off any matching item(s) in `todoChecklist` regardless of order
+    const targetEl = typeof document !== 'undefined' ? (() => {
+      try { return document.querySelector(selStr); } catch (_) { return null; }
+    })() : null;
+
+    for (const todo of this.state.todoChecklist) {
+      if (todo.page === currentFile) {
+        const directMatch =
+          todo.selector === selStr ||
+          todo.id === selStr.replace(/^#/, '') ||
+          (targetEl && (targetEl.matches?.(todo.selector) || targetEl.closest?.(todo.selector) || document.querySelector(todo.selector)?.contains(targetEl)));
+
+        if (directMatch && !todo.done) {
+          todo.done = true;
+          todo.completedAt = Date.now();
+        }
+      }
+    }
+
+    // 2. Also record granular history entry
+    const key = `${currentFile}::${selStr}`;
     const existingIdx = this.state.orientedHistory.findIndex(item => item.key === key);
     const entry = {
       key,
       page: currentFile,
-      selector,
-      title: title || selector,
+      selector: selStr,
+      title: title || selStr,
       explanation: explanation || null,
       timestamp: Date.now()
     };
@@ -129,34 +174,61 @@ export class SessionMemory {
       this.state.orientedHistory.push(entry);
     }
 
-    // Remove matching item from pendingToDescribe
-    this.state.pendingToDescribe = this.state.pendingToDescribe.filter(
-      item => !(item.page === currentFile && item.selector === selector) && item.selector !== selector
-    );
-
     this._persist();
     return entry;
   }
 
   /**
-   * Checks if a selector on the current page was already oriented
+   * Allows toggling or explicitly marking a To-Do checklist item by id or selector
    */
-  hasBeenOriented(selector, page = null) {
-    const currentFile = page || (typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html');
-    return this.state.orientedHistory.some(item => item.page === currentFile && item.selector === selector);
+  markTodoById(todoId, done = true) {
+    const item = this.state.todoChecklist.find(
+      t => t.id === todoId || t.selector === todoId || t.title.toLowerCase().includes(String(todoId).toLowerCase())
+    );
+    if (item) {
+      item.done = Boolean(done);
+      item.completedAt = done ? Date.now() : null;
+      this._persist();
+    }
+    return item;
   }
 
   /**
-   * Updates user's native language preference
+   * Updates and locks the user's native language throughout the entire session (surviving redirects & refreshes)
    */
-  setLanguage(langCode) {
-    if (SUPPORTED_LANGUAGES[langCode]) {
-      this.state.userLanguage = langCode;
+  setLanguage(langCode, lock = true) {
+    if (!langCode) return this.getLanguageConfig();
+    const norm = String(langCode).trim();
+    if (SUPPORTED_LANGUAGES[norm]) {
+      this.state.userLanguage = norm;
     } else {
-      this.state.userLanguage = langCode || 'en-IN';
+      const lower = norm.toLowerCase();
+      if (lower.includes('hinglish')) this.state.userLanguage = 'hinglish';
+      else if (lower.includes('hi') || lower.includes('hindi') || /[\u0900-\u097F]/.test(norm)) this.state.userLanguage = 'hi-IN';
+      else if (lower.includes('es') || lower.includes('spanish')) this.state.userLanguage = 'es-ES';
+      else if (lower.includes('fr') || lower.includes('french')) this.state.userLanguage = 'fr-FR';
+      else if (lower.includes('us')) this.state.userLanguage = 'en-US';
+      else this.state.userLanguage = 'en-IN';
     }
+    if (lock) this.state.languageLocked = true;
     this._persist();
     return this.getLanguageConfig();
+  }
+
+  /**
+   * Auto-detects language from user's spoken/typed transcript if not manually locked
+   */
+  detectLanguageFromText(text) {
+    if (!text) return;
+    // Detect Devanagari script -> Hindi
+    if (/[\u0900-\u097F]/.test(text)) {
+      this.setLanguage('hi-IN', true);
+      return;
+    }
+    // Detect common Hinglish markers
+    if (/\b(kya|kaise|dikhao|batao|chaliye|mujhe|aap|plan|karo|bhai|hai|hain|aur|mein)\b/i.test(text)) {
+      this.setLanguage('hinglish', true);
+    }
   }
 
   getLanguageConfig() {
@@ -164,23 +236,49 @@ export class SessionMemory {
   }
 
   /**
-   * Updates what the user wants (goal, interested tier, or custom preference notes)
+   * Records conversation transcript turns so after a page redirect or refresh,
+   * the Live Model remembers the exact conversation flow!
    */
-  updateUserIntent({ goal, interestedTier, note, language, addPendingTopic, formFactPatch }) {
+  appendTranscript(role, text) {
+    if (!text || !String(text).trim()) return;
+    const clean = String(text).replace(/\s+/g, ' ').trim();
+    if (role === 'user') {
+      this.detectLanguageFromText(clean);
+    }
+
+    const last = this.state.recentTranscripts[this.state.recentTranscripts.length - 1];
+    if (last && last.role === role && Date.now() - last.timestamp < 4000) {
+      last.text = `${last.text} ${clean}`.slice(-400);
+      last.timestamp = Date.now();
+    } else {
+      this.state.recentTranscripts.push({
+        role,
+        text: clean.slice(0, 300),
+        page: typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html',
+        timestamp: Date.now()
+      });
+    }
+
+    if (this.state.recentTranscripts.length > 14) {
+      this.state.recentTranscripts = this.state.recentTranscripts.slice(-14);
+    }
+    this._persist();
+  }
+
+  /**
+   * Updates what the user wants (goal, interested tier, notes, form facts)
+   */
+  updateUserIntent({ goal, interestedTier, note, language, todoIdDone, formFactPatch }) {
     if (goal) this.state.userIntent.goal = goal;
     if (interestedTier) this.state.userIntent.interestedTier = interestedTier;
     if (note && !this.state.userIntent.customNotes.includes(note)) {
       this.state.userIntent.customNotes.push(note);
     }
     if (language) {
-      this.setLanguage(language);
+      this.setLanguage(language, true);
     }
-    if (addPendingTopic && addPendingTopic.selector) {
-      this.state.pendingToDescribe.unshift({
-        page: addPendingTopic.page || (typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html'),
-        selector: addPendingTopic.selector,
-        title: addPendingTopic.title || addPendingTopic.selector
-      });
+    if (todoIdDone) {
+      this.markTodoById(todoIdDone, true);
     }
     if (formFactPatch && typeof formFactPatch === 'object') {
       Object.assign(this.state.formFacts, formFactPatch);
@@ -189,66 +287,59 @@ export class SessionMemory {
     return this.state;
   }
 
-  /**
-   * Stores or pops steps from the multi-page autonomous salesperson pitch queue
-   */
-  setPitchQueue(steps = [], isRunning = true) {
-    this.state.activePitchQueue = Array.isArray(steps) ? steps : [];
-    this.state.isPitchRunning = Boolean(isRunning && this.state.activePitchQueue.length > 0);
+  setPendingNavigationActions(actions = []) {
+    this.state.pendingNavigationActions = Array.isArray(actions) ? actions : [];
     this._persist();
   }
 
-  shiftNextPitchStep() {
-    if (!Array.isArray(this.state.activePitchQueue) || this.state.activePitchQueue.length === 0) {
-      this.state.isPitchRunning = false;
-      this._persist();
-      return null;
-    }
-    const next = this.state.activePitchQueue.shift();
-    if (this.state.activePitchQueue.length === 0) {
-      this.state.isPitchRunning = false;
-    }
+  consumePendingNavigationActions() {
+    const actions = [...(this.state.pendingNavigationActions || [])];
+    this.state.pendingNavigationActions = [];
     this._persist();
-    return next;
-  }
-
-  stopPitch() {
-    this.state.activePitchQueue = [];
-    this.state.isPitchRunning = false;
-    this._persist();
+    return actions;
   }
 
   /**
-   * Generates a structured context summary injected into Gemini Live on page load or tool response
+   * Builds the Non-Linear To-Do & Session Continuity prompt block for the Gemini Live Model
    */
   buildModelContextSummary() {
     const langCfg = this.getLanguageConfig();
-    const orientedList = this.state.orientedHistory
-      .slice(-8)
-      .map(i => `${i.page}:${i.selector} (${i.title})`)
-      .join(', ') || 'None yet';
+    const currentFile = typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || 'test-demo.html') : 'test-demo.html';
 
-    const pendingList = this.state.pendingToDescribe
-      .slice(0, 6)
-      .map(i => `${i.page}:${i.selector} (${i.title})`)
-      .join(', ') || 'All primary sections covered';
+    const doneItems = this.state.todoChecklist.filter(t => t.done);
+    const pendingOnThisPage = this.state.todoChecklist.filter(t => !t.done && t.page === currentFile);
+    const pendingOtherPages = this.state.todoChecklist.filter(t => !t.done && t.page !== currentFile);
+
+    const recentTurns = this.state.recentTranscripts
+      .slice(-6)
+      .map(t => `  [${t.role.toUpperCase()} on ${t.page}]: ${t.text}`)
+      .join('\n') || '  (Session just started)';
 
     return [
-      `[SESSION MEMORY (${this.state.sessionId})]`,
-      `- User Native Language: ${langCfg.name} (${langCfg.code}) -> Speak & explain in this language/style.`,
-      `- User Goal / Want: ${this.state.userIntent.goal} (Interested Tier: ${this.state.userIntent.interestedTier})`,
-      `- Pages Visited So Far: ${this.state.visitedPages.join(' -> ') || 'Current page'}`,
-      `- Already Oriented / Explained (DO NOT repeat unless asked): ${orientedList}`,
-      `- What Else Remains to Describe Next: ${pendingList}`,
-      `- Remembered User Form Profile: ${JSON.stringify(this.state.formFacts)}`
+      `=== PERSISTENT SESSION & NON-LINEAR TO-DO MEMORY (${this.state.sessionId}) ===`,
+      `1. LOCKED NATIVE LANGUAGE: ${langCfg.name} (code: ${langCfg.code}). You MUST speak and respond strictly in ${langCfg.name} throughout this session, across all page redirects and refreshes.`,
+      `2. USER GOAL / WANT: "${this.state.userIntent.goal}" (Interested Tier: ${this.state.userIntent.interestedTier})`,
+      `3. CURRENT ACTIVE PAGE: ${currentFile} (Pages visited so far: ${this.state.visitedPages.join(' -> ') || currentFile})`,
+      `4. NON-LINEAR ORIENTATION TO-DO CHECKLIST (Follow the user in ANY order; do NOT force a rigid sequence!):`,
+      `   - COMPLETED [x] (${doneItems.length}/${this.state.todoChecklist.length}): ${doneItems.map(i => `${i.title} (${i.page} ${i.selector})`).join(', ') || 'None yet'}`,
+      `   - REMAINING ON CURRENT PAGE [ ] (${currentFile}): ${pendingOnThisPage.map(i => `${i.title} -> selector "${i.selector}"`).join(' | ') || 'All sections on this page are done!'}`,
+      `   - REMAINING ON OTHER PAGES [ ]: ${pendingOtherPages.map(i => `${i.title} (${i.page})`).join(', ') || 'All pages complete!'}`,
+      `5. VISUAL GROUNDING RULE: Every single time you describe or mention any section, card, tab, calculator, or input field on the page, you MUST call \`move_and_highlight\`, \`click_element\`, \`swipe_or_swap\`, or \`fill_form_field\` on its selector so the user sees the Ghost Cursor highlighting or clicking it on screen while you speak!`,
+      `6. RECENT CONVERSATION CONTINUITY (Across Page Redirects / Refreshes):\n${recentTurns}`
     ].join('\n');
   }
 
   reset() {
+    const keepLang = this.state?.userLanguage || 'en-IN';
+    const wasConnected = this.state?.isLiveActive || false;
+    const endpoint = this.state?.liveEndpoint || 'ws://localhost:8088';
     try {
+      localStorage.removeItem(this.storageKey);
       sessionStorage.removeItem(this.storageKey);
     } catch (_) {}
-    this.state = this._loadOrInitialize();
+    this.state = this._loadOrInitialize({ defaultLanguage: keepLang, endpoint });
+    this.state.isLiveActive = wasConnected;
+    this._persist();
     return this.state;
   }
 }

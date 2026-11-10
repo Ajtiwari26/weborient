@@ -1,9 +1,10 @@
 /**
- * WebOrient Live Client (v0.2.0)
+ * WebOrient Live Client (v0.4.0)
  * - Captures 16kHz mono PCM microphone audio (AudioWorklet with ScriptProcessor fallback)
  * - Decodes and plays 24kHz Int16 PCM model audio streams gaplessly via Web Audio API
  * - Instant barge-in cancellation (<50ms) stopping all active AudioBufferSourceNodes
- * - Routes asynchronous tool calls and sends named FunctionResponse payloads
+ * - Forwards both User (`inputTranscription`) and Model (`outputTranscription`) speech transcripts
+ *   so WebOrient can auto-highlight described DOM elements in real time and lock user language!
  */
 export class LiveClient {
   constructor(options = {}) {
@@ -11,6 +12,7 @@ export class LiveClient {
     this.onToolCall = options.onToolCall || (() => {});
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onTranscript = options.onTranscript || (() => {});
+    this.onPlaybackChange = options.onPlaybackChange || (() => {});
     this.onInterrupted = options.onInterrupted || (() => {});
 
     this.ws = null;
@@ -25,20 +27,10 @@ export class LiveClient {
     this.isPlaying = false;
   }
 
-  /**
-   * Starts microphone capture and connects to the WebOrient WebSocket Relay
-   */
   async connect() {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     this.captureContext = new AudioCtx({ sampleRate: 16000 });
     this.playbackContext = new AudioCtx({ sampleRate: 24000 });
-
-    if (this.captureContext.state === 'suspended') {
-      await this.captureContext.resume();
-    }
-    if (this.playbackContext.state === 'suspended') {
-      await this.playbackContext.resume();
-    }
 
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -93,11 +85,10 @@ export class LiveClient {
     }
 
     const source = this.captureContext.createMediaStreamSource(this.mediaStream);
-    const silenceGain = this.captureContext.createGain();
-    silenceGain.gain.value = 0;
-    silenceGain.connect(this.captureContext.destination);
+    const zeroGain = this.captureContext.createGain();
+    zeroGain.gain.value = 0;
+    zeroGain.connect(this.captureContext.destination);
 
-    // Prefer low-latency AudioWorklet when supported
     if (this.captureContext.audioWorklet) {
       try {
         const workletCode = `
@@ -133,33 +124,26 @@ export class LiveClient {
           this._sendFloat32AudioFrame(e.data);
         };
         source.connect(this.workletNode);
-        this.workletNode.connect(silenceGain);
+        this.workletNode.connect(zeroGain);
         return;
       } catch (err) {
         console.warn('[WebOrient] AudioWorklet fallback to ScriptProcessor:', err);
       }
     }
 
-    // Fallback: ScriptProcessorNode
     this.scriptProcessor = this.captureContext.createScriptProcessor(4096, 1, 1);
     this.scriptProcessor.onaudioprocess = (e) => {
       const inputData = e.inputBuffer.getChannelData(0);
       this._sendFloat32AudioFrame(inputData);
     };
     source.connect(this.scriptProcessor);
-    this.scriptProcessor.connect(silenceGain);
+    this.scriptProcessor.connect(zeroGain);
   }
 
   _sendFloat32AudioFrame(float32Array) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const pcm16 = this._floatTo16BitPCM(float32Array);
     const base64 = this._arrayBufferToBase64(pcm16.buffer);
-
-    if (!this._sentFrames) this._sentFrames = 0;
-    this._sentFrames++;
-    if (this._sentFrames % 50 === 0) {
-      console.log(`[WebOrient] Captured & sent ${this._sentFrames} mic audio chunks`);
-    }
 
     this.ws.send(JSON.stringify({
       realtimeInput: {
@@ -176,7 +160,12 @@ export class LiveClient {
       return;
     }
 
-    // 2. Play incoming 24kHz PCM audio chunks & forward text transcripts
+    // 2. Forward user speech transcription (`inputTranscription`) for language detection & memory
+    if (msg.serverContent?.inputTranscription?.text) {
+      this.onTranscript(msg.serverContent.inputTranscription.text, 'user');
+    }
+
+    // 3. Play incoming 24kHz PCM audio chunks & forward model transcripts
     if (msg.serverContent?.modelTurn?.parts) {
       for (const part of msg.serverContent.modelTurn.parts) {
         if (part.inlineData && part.inlineData.mimeType?.startsWith('audio/pcm')) {
@@ -188,15 +177,11 @@ export class LiveClient {
       }
     }
 
-    if (msg.serverContent?.inputTranscription?.text) {
-      this.onTranscript(msg.serverContent.inputTranscription.text, 'user');
-    }
-
     if (msg.serverContent?.outputTranscription?.text) {
       this.onTranscript(msg.serverContent.outputTranscription.text, 'model');
     }
 
-    // 3. Handle model tool calls
+    // 4. Handle model tool calls
     if (msg.toolCall?.functionCalls) {
       for (const call of msg.toolCall.functionCalls) {
         this.onToolCall(call.name, call.args || {}, call.id);
@@ -204,9 +189,6 @@ export class LiveClient {
     }
   }
 
-  /**
-   * Decodes Base64 16-bit PCM into Float32 and schedules gapless playback on playbackContext
-   */
   async _scheduleAudioChunk(base64Audio, sampleRate = 24000) {
     if (!this.playbackContext || !base64Audio) return;
     if (this.playbackContext.state === 'suspended') {
@@ -232,20 +214,22 @@ export class LiveClient {
     const startAt = Math.max(now + 0.01, this.nextPlayTime);
     sourceNode.start(startAt);
     this.nextPlayTime = startAt + audioBuffer.duration;
-    this.isPlaying = true;
+
+    if (!this.isPlaying) {
+      this.isPlaying = true;
+      this.onPlaybackChange(true);
+    }
 
     this.activeSourceNodes.add(sourceNode);
     sourceNode.onended = () => {
       this.activeSourceNodes.delete(sourceNode);
       if (this.activeSourceNodes.size === 0) {
         this.isPlaying = false;
+        this.onPlaybackChange(false);
       }
     };
   }
 
-  /**
-   * Immediately halts all scheduled and currently playing audio buffers on barge-in
-   */
   _clearAudioQueue() {
     for (const node of this.activeSourceNodes) {
       try {
@@ -257,12 +241,12 @@ export class LiveClient {
     if (this.playbackContext) {
       this.nextPlayTime = this.playbackContext.currentTime;
     }
-    this.isPlaying = false;
+    if (this.isPlaying) {
+      this.isPlaying = false;
+      this.onPlaybackChange(false);
+    }
   }
 
-  /**
-   * Sends structured tool execution output back to Gemini Live session
-   */
   sendToolResponse(callId, toolName, output) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
@@ -279,9 +263,6 @@ export class LiveClient {
     }
   }
 
-  /**
-   * Sends a text message or context update into the active Gemini Live session
-   */
   sendText(text) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN && text) {
       this.ws.send(JSON.stringify({ text: String(text) }));
@@ -308,12 +289,12 @@ export class LiveClient {
 
   _base64ToInt16Array(base64) {
     const binary = window.atob(base64);
-    const alignedLen = Math.floor(binary.length / 2) * 2;
-    const bytes = new Uint8Array(alignedLen);
-    for (let i = 0; i < alignedLen; i++) {
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
-    return new Int16Array(bytes.buffer, 0, alignedLen / 2);
+    return new Int16Array(bytes.buffer);
   }
 
   stop() {

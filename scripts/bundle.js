@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * WebOrient Single-File Drop-In Bundler (`scripts/bundle.js`)
- * Concatenates all SDK modules (`session-memory.js`, `speech-sync.js`, `dom-scanner.js`,
+ * Concatenates all SDK modules (`session-memory.js`, `dom-scanner.js`,
  * `ghost-cursor.js`, `live-client.js`, `weborient.js`) into a single zero-dependency
  * browser bundle `dist/weborient.bundle.js` for 1-tag client installation.
  */
@@ -16,7 +16,6 @@ const distDir = path.join(rootDir, 'dist');
 
 const filesInOrder = [
   'session-memory.js',
-  'speech-sync.js',
   'dom-scanner.js',
   'ghost-cursor.js',
   'live-client.js',
@@ -24,15 +23,15 @@ const filesInOrder = [
 ];
 
 let combined = `/**
- * WebOrient Drop-In Single-File Bundle (v0.3.0)
+ * WebOrient Drop-In Single-File Bundle (v0.4.0)
  * Generated automatically by scripts/bundle.js
- * Includes: SessionMemory, SpeechSyncEngine, DOMScanner, GhostCursor, LiveClient, WebOrient
+ * Includes: SessionMemory (Non-Linear To-Do + Refresh-Safe), DOMScanner (Transcript-to-DOM Auto-Match),
+ * GhostCursor, LiveClient, WebOrient
  */\n(function(window) {\n'use strict';\n`;
 
 for (const file of filesInOrder) {
   const filePath = path.join(sdkDir, file);
   let code = fs.readFileSync(filePath, 'utf8');
-  // Strip ES module import/export keywords for self-contained IIFE execution
   code = code
     .replace(/^\s*import\s+.*?from\s+['"].*?['"];?\s*$/gm, '')
     .replace(/^\s*export\s+\{[^}]*\};?\s*$/gm, '')

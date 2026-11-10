@@ -1,22 +1,26 @@
 /**
- * WebOrient Multi-Page Demo Shared Shell, Session Memory Inspector & Salesperson Bench (v0.3.0)
- * - Injects unified sticky Multi-Page Navigation Header with "Oriented ✓" badges on visited pages
- * - Mounts the floating WebOrient Co-Pilot & Salesperson Bench featuring:
- *   1. "▶ Start Synchronized Multi-Page Salesperson Pitch" (Show & Describe Simultaneously)
- *   2. Native Language Selector (English, Hinglish, Hindi, Español) persisted across pages
- *   3. User Goal / Want input persisted across pages
- *   4. Live "Already Oriented" vs "What Else to Describe" Session Memory tracker
- * - Persists the Closed-Loop Event Log across page navigations via sessionStorage
+ * WebOrient Multi-Page Demo Shared Shell & Non-Linear To-Do Memory Bench (v0.4.0)
+ * - ZERO Browser TTS: Connects directly to the Gemini 3.8 Live Model for natural, adaptive orientation
+ * - Interactive Non-Linear To-Do Checklist:
+ *   Displays all 14 sections across the 5 pages (`✓ Done` vs `☐ Pending`). Clicking any item (or
+ *   asking the Live Model about any topic in any order) jumps to that section, highlights it with the
+ *   Ghost Cursor, and checks off that To-Do item regardless of order!
+ * - Real-Time Transcript-to-DOM Auto-Grounding:
+ *   Whenever the Live Model describes a DOM element in speech, the Ghost Cursor automatically scrolls
+ *   to it, highlights it, and checks off its To-Do item.
+ * - Refresh-Safe & Redirect-Safe Session Management:
+ *   Persists `sessionId`, `userLanguage`, `userGoal`, and `todoChecklist` in `localStorage` so hard
+ *   browser refreshes (`F5`/`Cmd+R`) and page redirects never lose the user or their language!
  */
 import { WebOrient } from '../src/sdk/weborient.js';
 
-const LOG_STORAGE_KEY = 'weborient_multipage_demo_logs_v2';
+const LOG_STORAGE_KEY = 'weborient_multipage_demo_logs_v4';
 
 const PAGES = [
   { id: 'home', file: 'test-demo.html', route: '/', label: 'Overview Hub', badge: 'Home' },
   { id: 'features', file: 'features.html', route: '/features', label: 'Architecture & Benchmarks', badge: '5 Layers' },
   { id: 'pricing', file: 'pricing.html', route: '/pricing', label: 'Pricing & ROI Calculator', badge: 'Interactive' },
-  { id: 'docs', file: 'docs.html', route: '/docs', label: 'Developer Docs & API', badge: '12 Tools' },
+  { id: 'docs', file: 'docs.html', route: '/docs', label: 'Developer Docs & API', badge: '11 Tools' },
   { id: 'contact', file: 'contact.html', route: '/contact', label: 'Enterprise Intake Form', badge: 'Voice Fill' }
 ];
 
@@ -24,13 +28,9 @@ export function initMultiPageDemo(pageConfig = {}) {
   const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
   const activePage = PAGES.find(p => p.file === currentFile) || PAGES[0];
 
-  // 1. Mount Sticky Multi-Page Top Navigation Header
   mountGlobalHeader(activePage, pageConfig.sectionLinks || []);
-
-  // 2. Mount Floating Salesperson & Memory Control Bench
   mountControlBench(activePage);
 
-  // 3. Initialize WebOrient SDK v0.3.0
   const weborient = new WebOrient({
     themeColor: '#6366f1',
     accentColor: '#ec4899',
@@ -39,31 +39,31 @@ export function initMultiPageDemo(pageConfig = {}) {
     onEvent: (type, detail) => {
       if (type === 'toolCall') {
         addPersistentLog(detail.name, formatArgsSummary(detail.args));
-      } else if (type === 'speechSync' && detail.status === 'speaking') {
-        addPersistentLog('Salesperson Voice', `“${detail.text.slice(0, 68)}...”`);
+      } else if (type === 'autoGrounded') {
+        addPersistentLog('Auto-Highlight', `Spoken DOM match -> ${detail.selector} (${detail.title})`);
       } else if (type === 'transcript') {
-        addPersistentLog('Live Voice AI', detail.text);
+        const prefix = detail.role === 'user' ? 'User Spoke' : 'Gemini Live';
+        addPersistentLog(prefix, detail.text);
       } else if (type === 'interrupted') {
-        addPersistentLog('Barge-In', 'Audio & active pitch interrupted by user');
+        addPersistentLog('Barge-In', 'User interrupted audio stream');
       } else if (type === 'status') {
         syncLiveButtonState(detail.status === 'connected');
+      } else if (type === 'sessionRestored') {
+        syncLiveButtonState(true);
+        addPersistentLog('Session Restored', `Resumed ${detail.sessionId} in ${detail.language}`);
       } else if (type === 'memoryUpdate') {
-        renderSessionMemoryUI(detail);
+        renderSessionMemoryUI(detail, weborient);
         updateHeaderVisitedBadges(detail);
-      } else if (type === 'pitchStatus') {
-        syncPitchButtonState(detail.running, detail.remaining);
       }
     }
   });
   window.weborient = weborient;
 
-  // 4. Wire Generic Tabs, Carousels, Switches & Control Bench Buttons
-  wireGenericTabs();
-  wireGenericCarousels();
+  wireGenericTabs(weborient);
+  wireGenericCarousels(weborient);
   wireControlBenchActions(weborient, activePage, pageConfig);
-  renderSessionMemoryUI(weborient.memory.getState());
+  renderSessionMemoryUI(weborient.memory.getState(), weborient);
   updateHeaderVisitedBadges(weborient.memory.getState());
-  syncPitchButtonState(weborient.memory.state.isPitchRunning, weborient.memory.state.activePitchQueue.length);
   renderStoredLogs();
 
   return weborient;
@@ -114,9 +114,9 @@ function mountGlobalHeader(activePage, sectionLinks) {
         <div>
           <div class="font-extrabold text-sm tracking-tight text-white flex items-center gap-2">
             <span>Acme WebOrient</span>
-            <span class="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full">Session-Aware v0.3</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full">Live-Adaptive v0.4</span>
           </div>
-          <div class="text-[10px] text-slate-400">Synchronized Salesperson Show-and-Describe</div>
+          <div class="text-[10px] text-slate-400">Non-Linear To-Do Memory &amp; Refresh-Safe Live Voice</div>
         </div>
       </a>
       <nav aria-label="Primary Multi-Page Navigation" class="flex flex-wrap items-center gap-1.5">
@@ -130,11 +130,13 @@ function mountGlobalHeader(activePage, sectionLinks) {
 }
 
 function updateHeaderVisitedBadges(memState) {
-  if (!memState || !Array.isArray(memState.visitedPages)) return;
-  for (const pageFile of memState.visitedPages) {
-    const badge = document.querySelector(`[data-visit-badge="${pageFile}"]`);
-    if (badge && !badge.textContent.includes('✓')) {
-      badge.textContent = `${badge.textContent} ✓`;
+  if (!memState || !Array.isArray(memState.todoChecklist)) return;
+  for (const page of PAGES) {
+    const pageTodos = memState.todoChecklist.filter(t => t.page === page.file);
+    const doneCount = pageTodos.filter(t => t.done).length;
+    const badge = document.querySelector(`[data-visit-badge="${page.file}"]`);
+    if (badge && pageTodos.length > 0) {
+      badge.textContent = `${doneCount}/${pageTodos.length} ✓`;
     }
   }
 }
@@ -149,79 +151,66 @@ function mountControlBench(activePage) {
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center gap-2">
         <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-        <h3 class="font-bold text-xs tracking-wider text-white uppercase">Salesperson &amp; Memory Bench</h3>
+        <h3 class="font-bold text-xs tracking-wider text-white uppercase">Live Co-Pilot &amp; To-Do Memory</h3>
       </div>
-      <span class="text-[10px] text-indigo-300 font-mono bg-indigo-500/15 px-2 py-0.5 rounded-full border border-indigo-500/30">${activePage.file}</span>
+      <span id="session-id-pill" class="text-[9px] text-indigo-300 font-mono bg-indigo-500/15 px-2 py-0.5 rounded-full border border-indigo-500/30">${activePage.file}</span>
     </div>
 
-    <!-- PRIMARY FEATURE: Synchronized Show & Describe Salesperson Pitch -->
-    <div class="mb-2.5 p-2.5 bg-gradient-to-br from-indigo-950/90 via-slate-900 to-pink-950/60 border border-indigo-500/50 rounded-xl space-y-2">
-      <div class="flex items-center justify-between">
-        <span class="text-[10px] font-mono uppercase tracking-wider text-pink-300 font-semibold">✨ Show &amp; Say in Sync</span>
-        <label class="flex items-center gap-1 text-[10px] text-slate-300 cursor-pointer">
-          <input type="checkbox" id="chk-mute-tts" class="accent-pink-500">
-          <span>Mute TTS</span>
-        </label>
-      </div>
-      <button id="btn-salesperson-pitch" class="w-full py-2.5 bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg font-bold text-xs transition shadow-lg shadow-pink-600/25 flex items-center justify-center gap-1.5">
-        <span id="pitch-btn-text">▶ Start Multi-Page Salesperson Pitch</span>
+    <!-- 1. Gemini 3.8 Live Voice Connection & Language Lock -->
+    <div class="mb-2.5 p-2.5 bg-gradient-to-br from-indigo-950/90 via-slate-900 to-purple-950/60 border border-indigo-500/50 rounded-xl space-y-2">
+      <button id="btn-toggle-live" class="w-full py-2.5 bg-gradient-to-r from-indigo-500 via-purple-600 to-pink-600 hover:from-indigo-600 hover:to-pink-700 text-white rounded-lg font-bold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/25">
+        <span class="w-2.5 h-2.5 rounded-full bg-red-400" id="live-indicator"></span>
+        <span id="live-btn-text">🎙️ Connect Gemini 3.8 Live Salesperson</span>
       </button>
+
       <div class="grid grid-cols-2 gap-1.5 pt-0.5">
         <div>
-          <label class="block text-[9px] font-mono uppercase text-slate-400 mb-0.5">User Native Language</label>
+          <label class="block text-[9px] font-mono uppercase text-indigo-300 mb-0.5">Locked Session Language</label>
           <select id="mem-lang-select" class="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-white">
             <option value="en-IN">English (India/Global)</option>
             <option value="hinglish">Hinglish (Hindi + Eng)</option>
             <option value="hi-IN">Hindi (हिन्दी)</option>
             <option value="es-ES">Español (Spanish)</option>
+            <option value="fr-FR">Français (French)</option>
           </select>
         </div>
         <div>
-          <label class="block text-[9px] font-mono uppercase text-slate-400 mb-0.5">User Goal / Want</label>
-          <input id="mem-goal-input" type="text" class="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-white" placeholder="e.g. Boost SaaS signups">
+          <label class="block text-[9px] font-mono uppercase text-indigo-300 mb-0.5">User Want / Goal</label>
+          <input id="mem-goal-input" type="text" class="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-white" placeholder="e.g. Need SaaS voice form">
         </div>
       </div>
     </div>
 
-    <!-- CROSS-PAGE CONSISTENT SESSION MEMORY LEDGER -->
+    <!-- 2. NON-LINEAR TO-DO CHECKLIST MEMORY (Any Order!) -->
     <div class="mb-2.5 p-2.5 bg-slate-950/90 border border-slate-800 rounded-xl space-y-1.5">
       <div class="flex items-center justify-between">
-        <span class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-semibold">🧠 Cross-Page Session Memory</span>
-        <button id="btn-reset-memory" class="text-[9px] text-slate-400 hover:text-rose-400 underline">Reset Memory</button>
+        <span class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-semibold">☑️ Non-Linear To-Do Memory (Any Order)</span>
+        <div class="flex items-center gap-2">
+          <span id="todo-progress-badge" class="text-[10px] font-mono text-indigo-300 font-bold">0/14</span>
+          <button id="btn-reset-memory" class="text-[9px] text-slate-400 hover:text-rose-400 underline">Reset</button>
+        </div>
       </div>
-      <div class="text-[10px] text-slate-300 flex justify-between">
-        <span>Oriented So Far: <strong id="mem-oriented-count" class="text-emerald-400">0</strong></span>
-        <span>Left to Describe: <strong id="mem-pending-count" class="text-amber-400">0</strong></span>
-      </div>
-      <div id="mem-oriented-pills" class="text-[10px] font-mono text-slate-400 truncate"></div>
-      <div id="mem-next-up" class="text-[10px] font-mono text-indigo-300 truncate"></div>
+      <p class="text-[10px] text-slate-400 leading-tight">Click any topic in any order (or ask the Live Model)—it jumps there, highlights the DOM, and checks it off:</p>
+      <div id="todo-checklist-box" class="max-h-36 overflow-y-auto space-y-1 pr-1 pt-1"></div>
     </div>
 
-    <!-- Live Gemini 3.8 Bidirectional Microphone Connection -->
-    <div class="mb-2 flex gap-1.5">
-      <button id="btn-toggle-live" class="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg font-semibold text-[11px] transition flex items-center justify-center gap-1.5">
-        <span class="w-2 h-2 rounded-full bg-red-400" id="live-indicator"></span>
-        <span id="live-btn-text">Connect Gemini 3.8 Mic</span>
-      </button>
-    </div>
-
-    <!-- Text Command Input -->
+    <!-- 3. Ask or Navigate Input -->
     <div class="flex gap-1.5 mb-2.5">
-      <input id="live-text-prompt" type="text" placeholder="Ask or navigate (e.g. /pricing, tour)..." class="flex-1 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+      <input id="live-text-prompt" type="text" placeholder="Ask Live Model or jump (e.g. ROI, SLA, /pricing)..." class="flex-1 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
       <button id="btn-send-prompt" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition">
-        Run
+        Go
       </button>
     </div>
 
-    <!-- Current Page Local Actions -->
+    <!-- 4. Instant DOM Action Triggers -->
     <div class="mb-2">
-      <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-1">Page Actions (${activePage.badge})</div>
+      <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-1">DOM Actions (${activePage.badge})</div>
       <div class="grid grid-cols-2 gap-1.5 text-[11px]">
         <button id="btn-local-highlight" class="bg-indigo-600/90 hover:bg-indigo-500 text-white p-1.5 rounded-lg font-medium transition">
-          Show &amp; Describe Here
+          Highlight Section
         </button>
         <button id="btn-local-tour" class="bg-purple-600/90 hover:bg-purple-500 text-white p-1.5 rounded-lg font-medium transition">
-          Synced Voice Tour
+          Tour Page DOM
         </button>
         <button id="btn-local-tab" class="bg-sky-600/90 hover:bg-sky-500 text-white p-1.5 rounded-lg font-medium transition">
           Swap Tab / View
@@ -238,10 +227,10 @@ function mountControlBench(activePage) {
       </div>
     </div>
 
-    <!-- Persistent Cross-Page Console Log -->
+    <!-- 5. Persistent Cross-Page & Refresh-Safe Log -->
     <div class="mt-2 pt-2 border-t border-slate-800">
       <div class="text-[10px] font-mono text-slate-400 mb-1 flex justify-between items-center">
-        <span>Cross-Page Event Trail</span>
+        <span>Session Event Trail (Survives Refresh)</span>
         <div class="flex items-center gap-2">
           <span id="log-count">0 events</span>
           <button id="btn-clear-logs" class="text-[10px] text-slate-500 hover:text-slate-300 underline">Clear</button>
@@ -254,136 +243,145 @@ function mountControlBench(activePage) {
   document.body.appendChild(bench);
 }
 
-function renderSessionMemoryUI(memState) {
+function renderSessionMemoryUI(memState, weborient) {
   if (!memState) return;
   const langSelect = document.getElementById('mem-lang-select');
   const goalInput = document.getElementById('mem-goal-input');
-  const orientedCountEl = document.getElementById('mem-oriented-count');
-  const pendingCountEl = document.getElementById('mem-pending-count');
-  const orientedPillsEl = document.getElementById('mem-oriented-pills');
-  const nextUpEl = document.getElementById('mem-next-up');
+  const progressBadge = document.getElementById('todo-progress-badge');
+  const checklistBox = document.getElementById('todo-checklist-box');
+  const sessionPill = document.getElementById('session-id-pill');
 
+  if (sessionPill && memState.sessionId) {
+    sessionPill.textContent = `${memState.sessionId.slice(0, 12)} • ${memState.userLanguage}`;
+  }
   if (langSelect && document.activeElement !== langSelect) {
     langSelect.value = memState.userLanguage || 'en-IN';
   }
   if (goalInput && document.activeElement !== goalInput) {
     goalInput.value = memState.userIntent?.goal || '';
   }
-  if (orientedCountEl) {
-    orientedCountEl.textContent = `${(memState.orientedHistory || []).length} items`;
-  }
-  if (pendingCountEl) {
-    pendingCountEl.textContent = `${(memState.pendingToDescribe || []).length} items`;
-  }
-  if (orientedPillsEl) {
-    const recent = (memState.orientedHistory || []).slice(-3).map(i => `✓ ${i.title || i.selector}`).join(' • ');
-    orientedPillsEl.textContent = recent || '✓ Nothing oriented yet (ready for pitch)';
-  }
-  if (nextUpEl) {
-    const nextItem = (memState.pendingToDescribe || [])[0];
-    nextUpEl.textContent = nextItem
-      ? `Next to describe: ${nextItem.title} (${nextItem.page})`
-      : '🎉 All multi-page sections oriented!';
-  }
-}
 
-function syncPitchButtonState(isRunning, remainingCount = 0) {
-  const btn = document.getElementById('btn-salesperson-pitch');
-  const txt = document.getElementById('pitch-btn-text');
-  if (!btn || !txt) return;
+  const todos = memState.todoChecklist || [];
+  const doneCount = todos.filter(t => t.done).length;
+  if (progressBadge) {
+    progressBadge.textContent = `${doneCount}/${todos.length} Done`;
+  }
 
-  if (isRunning) {
-    txt.textContent = `⏹ Stop Salesperson Pitch (${remainingCount} left)`;
-    btn.className = 'w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-xs transition shadow-lg flex items-center justify-center gap-1.5';
-  } else {
-    txt.textContent = '▶ Start Multi-Page Salesperson Pitch';
-    btn.className = 'w-full py-2.5 bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg font-bold text-xs transition shadow-lg shadow-pink-600/25 flex items-center justify-center gap-1.5';
+  if (checklistBox) {
+    const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
+    // Sort current page items first so user sees active page To-Dos at top, followed by other pages
+    const sorted = [...todos].sort((a, b) => {
+      const aHere = a.page === currentFile ? 0 : 1;
+      const bHere = b.page === currentFile ? 0 : 1;
+      return aHere - bHere;
+    });
+
+    checklistBox.innerHTML = sorted.map(item => {
+      const isCurrentPage = item.page === currentFile;
+      return `
+        <button data-todo-id="${item.id}" class="w-full text-left px-2 py-1 rounded flex items-center justify-between gap-1.5 text-[10px] transition ${
+          item.done
+            ? 'bg-emerald-950/40 border border-emerald-500/30 text-emerald-300'
+            : (isCurrentPage ? 'bg-slate-900 hover:bg-indigo-950/60 border border-slate-800 text-slate-200' : 'bg-slate-900/40 hover:bg-slate-800/60 text-slate-400')
+        }">
+          <span class="truncate">
+            <strong class="mr-1">${item.done ? '✓' : '☐'}</strong>
+            <span>${item.title}</span>
+          </span>
+          <span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-950/80 text-slate-400 flex-shrink-0">${item.page.replace('.html', '')}</span>
+        </button>
+      `;
+    }).join('');
+
+    checklistBox.querySelectorAll('[data-todo-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const todoId = btn.getAttribute('data-todo-id');
+        const targetTodo = todos.find(t => t.id === todoId);
+        if (targetTodo && weborient) {
+          addPersistentLog('To-Do Selected', `Jumping to "${targetTodo.title}" (${targetTodo.page})`);
+          weborient.orientTopic(targetTodo);
+        }
+      });
+    });
   }
 }
 
 function wireControlBenchActions(weborient, activePage, pageConfig) {
-  // 1. Synchronized Multi-Page Salesperson Pitch Button
-  document.getElementById('btn-salesperson-pitch').addEventListener('click', async () => {
-    if (weborient.memory.state.isPitchRunning) {
-      weborient.stopSalespersonDemo();
-      addPersistentLog('Salesperson', 'Paused multi-page pitch (memory preserved)');
-    } else {
-      const chosenLang = document.getElementById('mem-lang-select').value;
-      const chosenGoal = document.getElementById('mem-goal-input').value.trim();
-      addPersistentLog('Salesperson', `Starting synchronized pitch (${chosenLang})`);
-      await weborient.startSalespersonDemo({
-        language: chosenLang,
-        goal: chosenGoal || undefined
-      });
-    }
-  });
-
-  // Mute TTS checkbox
-  document.getElementById('chk-mute-tts').addEventListener('change', (e) => {
-    weborient.speechSync.muted = e.target.checked;
-  });
-
-  // Language & Goal Memory Inputs
-  document.getElementById('mem-lang-select').addEventListener('change', (e) => {
-    weborient.memory.setLanguage(e.target.value);
-    addPersistentLog('Memory', `Language set to ${e.target.value}`);
-  });
-
-  document.getElementById('mem-goal-input').addEventListener('change', (e) => {
-    weborient.memory.updateUserIntent({ goal: e.target.value.trim() });
-    addPersistentLog('Memory', `User goal updated: "${e.target.value.trim()}"`);
-  });
-
-  document.getElementById('btn-reset-memory').addEventListener('click', () => {
-    weborient.stopSalespersonDemo();
-    const fresh = weborient.memory.reset();
-    renderSessionMemoryUI(fresh);
-    addPersistentLog('Memory', 'Reset oriented history & restored full pitch queue');
-  });
-
-  // 2. Live Gemini 3.8 Microphone Connection
-  let isLiveConnected = false;
+  // 1. Live Gemini 3.8 Microphone Connection
   document.getElementById('btn-toggle-live').addEventListener('click', async () => {
-    if (!isLiveConnected) {
-      document.getElementById('live-btn-text').innerText = 'Connecting...';
+    if (!weborient.client) {
+      document.getElementById('live-btn-text').innerText = 'Connecting to Gemini 3.8 Live...';
       weborient.options.endpoint = 'ws://localhost:8088';
       try {
         await weborient.start();
-        isLiveConnected = true;
         syncLiveButtonState(true);
-        addPersistentLog('Live Audio', `Connected on ${activePage.file} with Session Memory`);
+        addPersistentLog('Live Audio', `Connected (${weborient.memory.state.sessionId}) in ${weborient.memory.state.userLanguage}`);
       } catch (err) {
-        document.getElementById('live-btn-text').innerText = 'Relay Offline (Use Pitch Above)';
-        addPersistentLog('Notice', 'Relay not running on :8088; use Salesperson Pitch for offline voice');
+        document.getElementById('live-btn-text').innerText = 'Relay Offline (Run npm run relay)';
+        addPersistentLog('Error', 'Start relay (`python3 src/relay/weborient_relay.py`) for live voice');
       }
     } else {
       weborient.stop();
-      isLiveConnected = false;
       syncLiveButtonState(false);
-      addPersistentLog('Live Audio', 'Disconnected');
+      addPersistentLog('Live Audio', 'Disconnected by user');
     }
   });
 
-  // 3. Text Command Runner
+  // 2. Language Lock & User Goal Persistence (Survives Redirects & Refreshes!)
+  document.getElementById('mem-lang-select').addEventListener('change', (e) => {
+    const newLang = e.target.value;
+    const cfg = weborient.memory.setLanguage(newLang, true);
+    addPersistentLog('Language Locked', `${cfg.name} (${cfg.code}) persisted across pages & refresh`);
+    if (weborient.client) {
+      weborient.client.sendText(
+        `[LANGUAGE UPDATE]: The user set their native language to ${cfg.name} (${cfg.code}). Speak strictly in ${cfg.name} from now on across all pages.`
+      );
+    }
+  });
+
+  document.getElementById('mem-goal-input').addEventListener('change', (e) => {
+    const newGoal = e.target.value.trim();
+    weborient.memory.updateUserIntent({ goal: newGoal });
+    addPersistentLog('User Goal Saved', `"${newGoal}"`);
+    if (weborient.client) {
+      weborient.client.sendText(`[USER GOAL UPDATE]: The user wants: "${newGoal}". Adapt your orientation to focus on this goal.`);
+    }
+  });
+
+  document.getElementById('btn-reset-memory').addEventListener('click', () => {
+    const fresh = weborient.memory.reset();
+    renderSessionMemoryUI(fresh, weborient);
+    addPersistentLog('Memory Reset', 'Cleared completed To-Do items; language & connection preserved');
+  });
+
+  // 3. Natural Language / Topic Jump Input (Non-Linear!)
   const promptInput = document.getElementById('live-text-prompt');
   const runPromptCommand = async () => {
     const val = promptInput.value.trim();
     if (!val) return;
     promptInput.value = '';
 
-    // Update user goal in memory if they state what they want
-    if (val.toLowerCase().startsWith('i want') || val.toLowerCase().startsWith('goal:')) {
-      weborient.memory.updateUserIntent({ goal: val });
-    }
+    // Check if the user typed a topic matching any To-Do item across the 5 pages
+    const lower = val.toLowerCase();
+    const matchedTodo = weborient.memory.state.todoChecklist.find(
+      t => t.title.toLowerCase().includes(lower) ||
+           (t.keywords || []).some(k => lower.includes(k.toLowerCase()))
+    );
 
     if (weborient.sendTextPrompt(val)) {
-      addPersistentLog('Prompt -> AI', val);
+      addPersistentLog('User -> Live AI', val);
+      if (matchedTodo && matchedTodo.page === activePage.file) {
+        await weborient.handleToolCall('move_and_highlight', {
+          selector: matchedTodo.selector,
+          explanation: matchedTodo.title
+        });
+      }
       return;
     }
 
-    const lower = val.toLowerCase();
-    if (lower.includes('pitch') || lower.includes('sales') || lower.includes('demo')) {
-      document.getElementById('btn-salesperson-pitch').click();
+    // Offline interactive fallback: jump to any matched To-Do or route in any order!
+    if (matchedTodo) {
+      await weborient.orientTopic(matchedTodo);
     } else if (lower.includes('pricing') || lower === '/pricing') {
       await weborient.handleToolCall('navigate_route', { path: '/pricing' });
     } else if (lower.includes('feature') || lower.includes('arch') || lower === '/features') {
@@ -395,15 +393,7 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
     } else if (lower.includes('home') || lower === '/') {
       await weborient.handleToolCall('navigate_route', { path: '/' });
     } else {
-      const res = await weborient.handleToolCall('read_page_content', { query: val });
-      const matched = res.matchingSections?.[0];
-      if (matched) {
-        await weborient.handleToolCall('show_and_describe', {
-          selector: matched.selector,
-          explanation: matched.heading,
-          spokenText: matched.summary.slice(0, 140)
-        });
-      }
+      await weborient.handleToolCall('read_page_content', { query: val });
     }
   };
 
@@ -414,17 +404,10 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
 
   // 4. Cross-Page Quick Workflows
   document.getElementById('btn-xpage-pricing').addEventListener('click', async () => {
-    addPersistentLog('Workflow', 'Go Pricing -> Toggle Annual + Describe Pro Plan');
+    addPersistentLog('Workflow', 'Go Pricing -> Toggle Annual + Highlight Pro');
     const postActions = [
-      {
-        name: 'show_and_describe',
-        args: {
-          selector: '#plan-pro',
-          explanation: 'Pro Co-Pilot with 20% Annual Discount ($64/mo)',
-          spokenText: 'Here on the Pricing page, I am toggling Annual billing so you save 20 percent on the Pro Co-Pilot plan.',
-          inlineAction: { type: 'swipe_or_swap', selector: '#billing-toggle', action: 'toggle' }
-        }
-      }
+      { name: 'swipe_or_swap', args: { selector: '#billing-toggle', action: 'toggle' } },
+      { name: 'move_and_highlight', args: { selector: '#plan-pro', explanation: 'Pro Co-Pilot with 20% Annual Discount ($64/mo)' } }
     ];
     if (activePage.id === 'pricing') {
       for (const act of postActions) await weborient.handleToolCall(act.name, act.args);
@@ -435,33 +418,27 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
   });
 
   document.getElementById('btn-xpage-contact').addEventListener('click', async () => {
-    addPersistentLog('Workflow', 'Go Contact -> Show & Describe 11-Field Batch Form Fill');
-    const facts = weborient.memory.state.formFacts;
+    addPersistentLog('Workflow', 'Go Contact -> Batch Fill 11 Enterprise Controls');
     const postActions = [
       {
-        name: 'show_and_describe',
+        name: 'fill_form_batch',
         args: {
-          selector: '#contact-form',
-          explanation: 'Filling 11 Enterprise Controls from Session Memory',
-          spokenText: `I am filling out the consultation form for ${facts.fullName} at ${facts.company} while keeping the password field untouched.`,
-          inlineAction: {
-            type: 'fill_form_batch',
-            fields: [
-              { selector: '#contact-name', value: facts.fullName },
-              { selector: '#contact-email', value: 'ajay at deploymate dot in' },
-              { selector: '#contact-phone', value: facts.phone },
-              { selector: '#contact-company', value: facts.company },
-              { selector: '#contact-website', value: facts.website },
-              { selector: '#contact-framework', value: 'Next.js / React' },
-              { selector: '#contact-plan', value: 'Pro Co-Pilot' },
-              { selector: '#contact-team-size', value: facts.teamSize },
-              { selector: '#contact-priority', value: 'true' },
-              { selector: '#contact-hipaa', value: 'true' },
-              { selector: '#contact-message', value: `Goal: ${weborient.memory.state.userIntent.goal}` }
-            ]
-          }
+          fields: [
+            { selector: '#contact-name', value: 'Ajay Tiwari' },
+            { selector: '#contact-email', value: 'ajay at deploymate dot in' },
+            { selector: '#contact-phone', value: '+91 98765 43210' },
+            { selector: '#contact-company', value: 'DeployMate AI Labs' },
+            { selector: '#contact-website', value: 'https://deploymate.in' },
+            { selector: '#contact-framework', value: 'Next.js / React' },
+            { selector: '#contact-plan', value: 'Pro Co-Pilot' },
+            { selector: '#contact-team-size', value: '65' },
+            { selector: '#contact-priority', value: 'true' },
+            { selector: '#contact-hipaa', value: 'true' },
+            { selector: '#contact-message', value: `Goal: ${weborient.memory.state.userIntent.goal}` }
+          ]
         }
-      }
+      },
+      { name: 'move_and_highlight', args: { selector: '#btn-submit-contact', explanation: 'All 11 Enterprise fields validated!' } }
     ];
     if (activePage.id === 'contact') {
       for (const act of postActions) await weborient.handleToolCall(act.name, act.args);
@@ -471,14 +448,10 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
     }
   });
 
-  // 5. Current Page Local Actions (with Synchronized Show & Describe!)
+  // 5. Current Page Local Actions
   document.getElementById('btn-local-highlight').addEventListener('click', async () => {
     const target = pageConfig.highlightTarget || { selector: 'h1', explanation: `Active Page: ${document.title}` };
-    await weborient.handleToolCall('show_and_describe', {
-      selector: target.selector,
-      explanation: target.explanation,
-      spokenText: target.spokenText || target.explanation
-    });
+    await weborient.handleToolCall('move_and_highlight', target);
   });
 
   document.getElementById('btn-local-tour').addEventListener('click', async () => {
@@ -506,12 +479,12 @@ function wireControlBenchActions(weborient, activePage, pageConfig) {
   });
 
   document.getElementById('btn-clear-logs').addEventListener('click', () => {
-    sessionStorage.removeItem(LOG_STORAGE_KEY);
+    localStorage.removeItem(LOG_STORAGE_KEY);
     renderStoredLogs();
   });
 }
 
-function wireGenericTabs() {
+function wireGenericTabs(weborient) {
   document.querySelectorAll('[role="tablist"]').forEach(tablist => {
     const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
     tabs.forEach(tab => {
@@ -534,12 +507,21 @@ function wireGenericTabs() {
             });
           }
         }
+
+        // Also mark enclosing section oriented when user manually interacts with tabs!
+        const parentSec = tablist.closest('section[id]');
+        if (parentSec && weborient) {
+          weborient.memory.markOriented({
+            selector: `#${parentSec.id}`,
+            title: `Interacted with ${tab.innerText.trim()}`
+          });
+        }
       });
     });
   });
 }
 
-function wireGenericCarousels() {
+function wireGenericCarousels(weborient) {
   document.querySelectorAll('[data-carousel]').forEach(carousel => {
     const slides = Array.from(carousel.querySelectorAll('[data-carousel-slide]'));
     if (slides.length === 0) return;
@@ -550,6 +532,10 @@ function wireGenericCarousels() {
       slides.forEach((s, i) => s.classList.toggle('hidden', i !== current));
       const counter = carousel.parentElement?.querySelector('[data-carousel-counter]');
       if (counter) counter.innerText = `Slide ${current + 1} of ${slides.length}`;
+      const parentSec = carousel.closest('section[id]');
+      if (parentSec && weborient) {
+        weborient.memory.markOriented({ selector: `#${parentSec.id}`, title: `Viewed carousel slide ${current + 1}` });
+      }
     };
 
     const nextBtn = carousel.parentElement?.querySelector('[data-carousel-next]') || carousel.querySelector('[data-carousel-next]');
@@ -564,11 +550,11 @@ function syncLiveButtonState(connected) {
   const liveBtnText = document.getElementById('live-btn-text');
   if (!liveIndicator || !liveBtnText) return;
   if (connected) {
-    liveIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-ping';
-    liveBtnText.innerText = 'Listening (Gemini 3.8 Live)';
+    liveIndicator.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping';
+    liveBtnText.innerText = '🟢 Live Model Connected (Speak in Any Order)';
   } else {
-    liveIndicator.className = 'w-2 h-2 rounded-full bg-red-400';
-    liveBtnText.innerText = 'Connect Gemini 3.8 Mic';
+    liveIndicator.className = 'w-2.5 h-2.5 rounded-full bg-red-400';
+    liveBtnText.innerText = '🎙️ Connect Gemini 3.8 Live Salesperson';
   }
 }
 
@@ -585,7 +571,7 @@ function formatArgsSummary(args = {}) {
 
 export function addPersistentLog(action, details) {
   try {
-    const raw = sessionStorage.getItem(LOG_STORAGE_KEY);
+    const raw = localStorage.getItem(LOG_STORAGE_KEY);
     const logs = raw ? JSON.parse(raw) : [];
     const pageName = window.location.pathname.split('/').pop() || 'home';
     logs.push({
@@ -595,7 +581,7 @@ export function addPersistentLog(action, details) {
       time: new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
     });
     const trimmed = logs.slice(-40);
-    sessionStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(trimmed));
+    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(trimmed));
   } catch (_) {}
   renderStoredLogs();
 }
@@ -607,13 +593,13 @@ function renderStoredLogs() {
 
   let logs = [];
   try {
-    const raw = sessionStorage.getItem(LOG_STORAGE_KEY);
+    const raw = localStorage.getItem(LOG_STORAGE_KEY);
     logs = raw ? JSON.parse(raw) : [];
   } catch (_) {}
 
   logCountEl.innerText = `${logs.length} events`;
   if (logs.length === 0) {
-    logBox.innerHTML = `<div class="text-slate-500">Click "▶ Start Multi-Page Salesperson Pitch" above!</div>`;
+    logBox.innerHTML = `<div class="text-slate-500">Click any To-Do item above in any order or connect Gemini Live!</div>`;
     return;
   }
 
