@@ -11,11 +11,11 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
 
-  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20 pr-6 lg:pr-[25rem]">
+  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20">
 
     <!-- 1. Pricing Header & Monthly/Annual Billing Switch -->
     <section id="pricing-tiers-section" class="space-y-8">
-      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div id="pricing-hero" class="pricing-header flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div class="space-y-2">
           <div class="inline-flex items-center gap-2 px-3 py-1 bg-pink-500/10 border border-pink-500/30 rounded-full text-pink-300 text-xs font-semibold">
             Page 3 of 5 • Transparent Pricing &amp; Interactive ROI Modeling
@@ -37,7 +37,7 @@
       </div>
 
       <!-- 4 Pricing Cards -->
-      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div id="pricing-cards-grid" class="pricing-grid grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <!-- Starter -->
         <div id="plan-starter" class="pricing-card p-6 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-4 flex flex-col justify-between">
           <div class="space-y-3">
@@ -272,10 +272,10 @@
 
     initMultiPageDemo({
       sectionLinks: [
-        { label: 'Pricing Tiers & Switch', selector: '#pricing-tiers-section' },
-        { label: 'Voice ROI Calculator', selector: '#roi-calculator-section' },
-        { label: 'Feature Comparison Table', selector: '#comparison-table-section' },
-        { label: 'Billing FAQ', selector: '#pricing-faq-section' }
+        { label: 'Pricing Tiers & Switch', selector: '#pricing-cards-grid' },
+        { label: 'Voice ROI Calculator', selector: '#roi-calculator-section .grid' },
+        { label: 'Feature Comparison Table', selector: '#comparison-table-section table' },
+        { label: 'Billing FAQ', selector: '#faq-billing-refund' }
       ],
       highlightTarget: {
         selector: '#plan-pro',

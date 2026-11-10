@@ -105,7 +105,6 @@ export class WebOrient {
       onTranscript: (text, role) => {
         this.memory.appendTranscript(role, text);
         if (role === 'model') {
-          this.cursor.showSpeechBubble(text, `Live AI (${this.memory.state.userLanguage})`);
           this._autoGroundFromModelSpeech(text);
         }
         this._emit('transcript', { text, role });
@@ -149,8 +148,8 @@ export class WebOrient {
   _autoGroundFromModelSpeech(chunk) {
     this._modelSpeechBuffer = `${this._modelSpeechBuffer} ${chunk}`.slice(-260);
 
-    // Avoid overriding an explicit tool call that just fired within the last 1.2s
-    if (Date.now() - this._lastExplicitToolTime < 1200) return;
+    // Avoid overriding an explicit tool call (like navigate_route, swipe, or click) that is currently in-flight or just fired
+    if (this._isExecutingTool || Date.now() - this._lastExplicitToolTime < 2200) return;
 
     const match = this.scanner.matchElementFromSpeech(
       this._modelSpeechBuffer,
@@ -233,6 +232,7 @@ export class WebOrient {
   async handleToolCall(name, args = {}, callId = null) {
     console.log(`[WebOrient] Executing Tool Call: ${name}`, args);
     this._lastExplicitToolTime = Date.now();
+    this._isExecutingTool = true;
     this._emit('toolCall', { name, args, callId });
 
     let result = { success: true, action: name };
@@ -372,6 +372,9 @@ export class WebOrient {
     } catch (err) {
       console.error(`[WebOrient] Tool error in ${name}:`, err);
       result = { success: false, action: name, error: err.message };
+    } finally {
+      this._isExecutingTool = false;
+      this._lastExplicitToolTime = Date.now();
     }
 
     await this._waitForDOMSettle(120);
@@ -475,10 +478,12 @@ export class WebOrient {
       return res;
     }
 
-    const navLink = document.querySelector(`a[href*="${targetFile}"]`);
+    // Complete full trajectory to the exact navigation link, spotlight it, and play click ripple BEFORE page redirect
+    const navLink = document.querySelector(`#global-site-header a[href*="${targetFile}"], a[href*="${targetFile}"]`);
     if (navLink) {
-      await this.cursor.moveToElement(navLink, true, `Redirecting to ${matchedPage?.title || targetFile}...`);
-      await new Promise(r => setTimeout(r, 240));
+      await this.cursor.moveToElement(navLink, true, `Navigating to ${matchedPage?.title || targetFile}...`);
+      await this.cursor.playClickAnimation();
+      await new Promise(r => setTimeout(r, 120));
     }
 
     const existingPending = [...(this.memory.state.pendingNavigationActions || [])];

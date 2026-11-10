@@ -11,7 +11,7 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
 
-  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20 pr-6 lg:pr-[25rem]">
+  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20">
 
     <!-- 1. Quickstart & Framework Tabs -->
     <section id="quickstart-section" class="space-y-6">
@@ -200,10 +200,10 @@ export default defineNuxtPlugin(() =&gt; {
 
     initMultiPageDemo({
       sectionLinks: [
-        { label: '5-Min Quickstart & Tabs', selector: '#quickstart-section' },
-        { label: '10-Tool API Reference', selector: '#tools-reference-section' },
+        { label: '5-Min Quickstart & Tabs', selector: '#docs-framework-tabs' },
+        { label: '10-Tool API Reference', selector: '#tools-reference-section table' },
         { label: 'Manifest Schema', selector: '#manifest-schema-section' },
-        { label: 'Troubleshooting FAQ', selector: '#troubleshooting-section' }
+        { label: 'Troubleshooting FAQ', selector: '#faq-react-state' }
       ],
       highlightTarget: {
         selector: '#tools-reference-section',

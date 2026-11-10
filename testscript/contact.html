@@ -11,7 +11,7 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
 
-  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20 pr-6 lg:pr-[25rem]">
+  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20">
 
     <!-- 1. Enterprise Intake Form Section -->
     <section id="intake-form-section" class="space-y-8">
@@ -195,9 +195,9 @@
 
     const weborient = initMultiPageDemo({
       sectionLinks: [
-        { label: '11-Field Enterprise Form', selector: '#intake-form-section' },
-        { label: 'Global Relay Offices', selector: '#offices-section' },
-        { label: 'Support SLA Matrix', selector: '#sla-section' }
+        { label: '11-Field Enterprise Form', selector: '#contact-form' },
+        { label: 'Global Relay Offices', selector: '#offices-section .grid' },
+        { label: 'Support SLA Matrix', selector: '#sla-section table' }
       ],
       highlightTarget: {
         selector: '#contact-form',
