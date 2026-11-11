@@ -224,25 +224,54 @@ export class GhostCursor {
   }
 
   /**
-   * Deterministic smooth scroll that waits until window.scrollY reaches targetScrollY
+   * Deterministic smooth scroll that waits until window.scrollY reaches targetScrollY.
+   * Works seamlessly with both native browser scrolling AND custom smooth-scroll engines (Lenis / Locomotive).
    */
   async _smoothScrollTo(targetScrollY, maxWaitMs = 680) {
     const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     const clampedTarget = Math.max(0, Math.min(maxScroll, Math.round(targetScrollY)));
+    const initialY = window.scrollY;
 
-    if (Math.abs(window.scrollY - clampedTarget) <= 8) {
+    if (Math.abs(initialY - clampedTarget) <= 8) {
       return;
     }
 
-    window.scrollTo({ top: clampedTarget, behavior: 'smooth' });
+    const hasLenis = document.documentElement.classList.contains('lenis');
+    if (!hasLenis) {
+      window.scrollTo({ top: clampedTarget, behavior: 'smooth' });
+    }
 
     return new Promise(resolve => {
       const startTime = performance.now();
       let lastY = window.scrollY;
       let settledFrames = 0;
+      let useManualTween = hasLenis;
 
-      const checkScroll = () => {
-        const now = performance.now();
+      const checkScroll = (now) => {
+        const elapsed = now - startTime;
+
+        // If native smooth scroll was intercepted or blocked by a host scroll library after 95ms, switch to direct 60fps cubic-out tween
+        if (!useManualTween && elapsed > 95 && Math.abs(window.scrollY - initialY) < 2) {
+          useManualTween = true;
+        }
+
+        if (useManualTween) {
+          const duration = Math.min(540, maxWaitMs);
+          const progress = Math.min(1, elapsed / duration);
+          const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+          const nextY = Math.round(initialY + (clampedTarget - initialY) * easeOutCubic);
+          window.scrollTo(0, nextY);
+          this._syncSpotlightPosition();
+          if (progress >= 1 || Math.abs(window.scrollY - clampedTarget) <= 3) {
+            window.scrollTo(0, clampedTarget);
+            this._syncSpotlightPosition();
+            resolve();
+            return;
+          }
+          requestAnimationFrame(checkScroll);
+          return;
+        }
+
         const currentY = window.scrollY;
         this._syncSpotlightPosition();
 
@@ -255,7 +284,7 @@ export class GhostCursor {
           return;
         }
 
-        if (delta < 0.5 && (now - startTime) > 140) {
+        if (delta < 0.5 && elapsed > 140) {
           settledFrames++;
           if (settledFrames >= 4) {
             resolve();
@@ -265,7 +294,7 @@ export class GhostCursor {
           settledFrames = 0;
         }
 
-        if (now - startTime >= maxWaitMs) {
+        if (elapsed >= maxWaitMs) {
           resolve();
           return;
         }
@@ -508,7 +537,7 @@ export class GhostCursor {
     }
 
     // 5. Interactive Calculator Sliders & Result Card
-    const calcGrid = el.querySelector('.grid:has(input[type="range"]), .grid:has(#roi-result-card)');
+    const calcGrid = el.querySelector('#roi-savings-calculator, .grid:has(input[type="range"]), .grid:has(#roi-result-card)');
     if (calcGrid) {
       return calcGrid;
     }
@@ -531,8 +560,11 @@ export class GhostCursor {
       return faqContainer;
     }
 
-    // 9. First substantive content following the title header block
-    const headerBlock = el.querySelector('div.space-y-2:has(h1), div.space-y-1:has(h2), .pricing-header, header, .grid-fine');
+    // 9. First substantive content following the title header block (unwrapping single relative z-10 containers)
+    const contentScope = el.querySelector(':scope > .relative.z-10:not(.grid)') || el;
+    const headerBlock = contentScope.querySelector(
+      ':scope > div.mb-14:has(h1, h2), :scope > div.mb-16:has(h1, h2), :scope > div.space-y-2:has(h1), :scope > div.space-y-1:has(h2), :scope > div.space-y-4:has(h2), :scope > .pricing-header, :scope > header'
+    );
     if (headerBlock && headerBlock.nextElementSibling) {
       return headerBlock.nextElementSibling;
     }

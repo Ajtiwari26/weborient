@@ -47,19 +47,42 @@ const DEFAULT_TODO_CHECKLIST = [
   { id: 'contact-sla', page: 'contact.html', selector: '#sla-section', title: 'Global Relay Regions & Enterprise SLA', keywords: ['sla', 'san francisco', 'london', 'bengaluru', 'bhopal', '15 minutes'], done: false }
 ];
 
+const DEMO_PAGES = new Set([
+  'test-demo.html',
+  'features.html',
+  'pricing.html',
+  'docs.html',
+  'contact.html',
+  'dashboard.html'
+]);
+
+function isWebOrientDemoSite() {
+  if (typeof window === 'undefined') return true;
+  const host = (window.location.hostname || '').toLowerCase();
+  const file = window.location.pathname.split('/').pop() || '';
+  if (DEMO_PAGES.has(file)) return true;
+  if (host.startsWith('weborient.')) return true;
+  return false;
+}
+
 class SessionMemory {
   constructor(options = {}) {
-    this.storageKey = options.storageKey || MEMORY_STORAGE_KEY;
+    this.storageKey = options.storageKey || `${MEMORY_STORAGE_KEY}_${options.siteKey || 'default'}`;
     this.onChange = options.onChange || (() => {});
     this.state = this._loadOrInitialize(options);
   }
 
   _loadOrInitialize(options = {}) {
+    const isDemo = isWebOrientDemoSite();
     try {
       const raw = localStorage.getItem(this.storageKey) || sessionStorage.getItem(this.storageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.sessionId && Array.isArray(parsed.todoChecklist)) {
+          // If this is a non-demo client website, strip any leftover demo-only checklist items
+          if (!isDemo && parsed.todoChecklist.some(t => t.page === 'test-demo.html')) {
+            parsed.todoChecklist = [];
+          }
           return parsed;
         }
       }
@@ -77,14 +100,19 @@ class SessionMemory {
         (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
           ? 'ws://localhost:8088'
           : 'wss://relay.deploymate.in'),
+      userLanguage: options.defaultLanguage || initialLang,
       languageLocked: false,
       userIntent: {
-        goal: options.defaultGoal || 'Explore WebOrient capabilities, pricing ROI, and setup',
-        interestedTier: 'Pro Co-Pilot',
+        goal: options.defaultGoal || (isDemo
+          ? 'Explore WebOrient capabilities, pricing ROI, and setup'
+          : `Explore ${typeof document !== 'undefined' && document.title ? document.title : 'website'} solutions, demos, and ROI`),
+        interestedTier: isDemo ? 'Pro Co-Pilot' : 'Custom AI Solution',
         customNotes: []
       },
       visitedPages: [],
-      todoChecklist: DEFAULT_TODO_CHECKLIST.map(item => ({ ...item, completedAt: null })),
+      todoChecklist: isDemo
+        ? DEFAULT_TODO_CHECKLIST.map(item => ({ ...item, completedAt: null }))
+        : [],
       orientedHistory: [],
       recentTranscripts: [],
       pendingNavigationActions: [],
@@ -102,6 +130,75 @@ class SessionMemory {
 
     this._persist(freshState, false);
     return freshState;
+  }
+
+  /**
+   * Dynamically populates `todoChecklist` from any client website's live DOM sections
+   * or manifest so 1-line `<script>` embeds get automatic non-linear orientation tracking!
+   */
+  syncDynamicDomChecklist(scanner, manifest = null) {
+    if (isWebOrientDemoSite() && this.state.todoChecklist.length > 0) {
+      return this.state.todoChecklist;
+    }
+    if (typeof document === 'undefined') return this.state.todoChecklist;
+
+    const currentRoute = window.location.pathname || '/';
+    const existingById = new Map(this.state.todoChecklist.map(item => [item.selector, item]));
+    const discovered = [];
+
+    if (manifest && Array.isArray(manifest.pages)) {
+      for (const p of manifest.pages) {
+        const pageRoute = p.file || p.route || '/';
+        for (const sec of p.sections || []) {
+          if (!sec.selector) continue;
+          const prev = existingById.get(sec.selector);
+          discovered.push({
+            id: sec.id || sec.selector.replace(/[^a-zA-Z0-9_-]/g, ''),
+            page: pageRoute,
+            selector: sec.selector,
+            title: sec.title || sec.selector,
+            keywords: sec.keywords || sec.title?.toLowerCase().split(/\s+/).filter(w => w.length > 3) || [],
+            done: prev ? Boolean(prev.done) : false,
+            completedAt: prev ? prev.completedAt : null
+          });
+        }
+      }
+    }
+
+    if (discovered.length === 0) {
+      const sectionEls = Array.from(
+        document.querySelectorAll('section[id], [id*="calculator"], [id*="sandbox"], [id*="products"], [id*="pricing"], form[id]')
+      );
+      for (const el of sectionEls) {
+        if (!el.id || el.id.startsWith('weborient') || el.hasAttribute('data-agent-ignore')) continue;
+        const selector = `#${el.id}`;
+        if (discovered.some(d => d.selector === selector)) continue;
+        const headingEl = el.querySelector('h1, h2, h3, h4');
+        const rawHeading = headingEl ? headingEl.innerText.replace(/\s+/g, ' ').trim() : '';
+        const title = rawHeading || el.id.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        const prev = existingById.get(selector);
+        const words = `${title} ${el.id.replace(/[-_]/g, ' ')}`
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter(w => w.length >= 3);
+
+        discovered.push({
+          id: el.id,
+          page: currentRoute,
+          selector,
+          title: title.slice(0, 70),
+          keywords: Array.from(new Set(words)).slice(0, 8),
+          done: prev ? Boolean(prev.done) : false,
+          completedAt: prev ? prev.completedAt : null
+        });
+      }
+    }
+
+    if (discovered.length > 0) {
+      this.state.todoChecklist = discovered;
+      this._persist(this.state, false);
+    }
+    return this.state.todoChecklist;
   }
 
   _persist(nextState = this.state, notify = true) {
@@ -1099,25 +1196,54 @@ class GhostCursor {
   }
 
   /**
-   * Deterministic smooth scroll that waits until window.scrollY reaches targetScrollY
+   * Deterministic smooth scroll that waits until window.scrollY reaches targetScrollY.
+   * Works seamlessly with both native browser scrolling AND custom smooth-scroll engines (Lenis / Locomotive).
    */
   async _smoothScrollTo(targetScrollY, maxWaitMs = 680) {
     const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     const clampedTarget = Math.max(0, Math.min(maxScroll, Math.round(targetScrollY)));
+    const initialY = window.scrollY;
 
-    if (Math.abs(window.scrollY - clampedTarget) <= 8) {
+    if (Math.abs(initialY - clampedTarget) <= 8) {
       return;
     }
 
-    window.scrollTo({ top: clampedTarget, behavior: 'smooth' });
+    const hasLenis = document.documentElement.classList.contains('lenis');
+    if (!hasLenis) {
+      window.scrollTo({ top: clampedTarget, behavior: 'smooth' });
+    }
 
     return new Promise(resolve => {
       const startTime = performance.now();
       let lastY = window.scrollY;
       let settledFrames = 0;
+      let useManualTween = hasLenis;
 
-      const checkScroll = () => {
-        const now = performance.now();
+      const checkScroll = (now) => {
+        const elapsed = now - startTime;
+
+        // If native smooth scroll was intercepted or blocked by a host scroll library after 95ms, switch to direct 60fps cubic-out tween
+        if (!useManualTween && elapsed > 95 && Math.abs(window.scrollY - initialY) < 2) {
+          useManualTween = true;
+        }
+
+        if (useManualTween) {
+          const duration = Math.min(540, maxWaitMs);
+          const progress = Math.min(1, elapsed / duration);
+          const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+          const nextY = Math.round(initialY + (clampedTarget - initialY) * easeOutCubic);
+          window.scrollTo(0, nextY);
+          this._syncSpotlightPosition();
+          if (progress >= 1 || Math.abs(window.scrollY - clampedTarget) <= 3) {
+            window.scrollTo(0, clampedTarget);
+            this._syncSpotlightPosition();
+            resolve();
+            return;
+          }
+          requestAnimationFrame(checkScroll);
+          return;
+        }
+
         const currentY = window.scrollY;
         this._syncSpotlightPosition();
 
@@ -1130,7 +1256,7 @@ class GhostCursor {
           return;
         }
 
-        if (delta < 0.5 && (now - startTime) > 140) {
+        if (delta < 0.5 && elapsed > 140) {
           settledFrames++;
           if (settledFrames >= 4) {
             resolve();
@@ -1140,7 +1266,7 @@ class GhostCursor {
           settledFrames = 0;
         }
 
-        if (now - startTime >= maxWaitMs) {
+        if (elapsed >= maxWaitMs) {
           resolve();
           return;
         }
@@ -1383,7 +1509,7 @@ class GhostCursor {
     }
 
     // 5. Interactive Calculator Sliders & Result Card
-    const calcGrid = el.querySelector('.grid:has(input[type="range"]), .grid:has(#roi-result-card)');
+    const calcGrid = el.querySelector('#roi-savings-calculator, .grid:has(input[type="range"]), .grid:has(#roi-result-card)');
     if (calcGrid) {
       return calcGrid;
     }
@@ -1406,8 +1532,11 @@ class GhostCursor {
       return faqContainer;
     }
 
-    // 9. First substantive content following the title header block
-    const headerBlock = el.querySelector('div.space-y-2:has(h1), div.space-y-1:has(h2), .pricing-header, header, .grid-fine');
+    // 9. First substantive content following the title header block (unwrapping single relative z-10 containers)
+    const contentScope = el.querySelector(':scope > .relative.z-10:not(.grid)') || el;
+    const headerBlock = contentScope.querySelector(
+      ':scope > div.mb-14:has(h1, h2), :scope > div.mb-16:has(h1, h2), :scope > div.space-y-2:has(h1), :scope > div.space-y-1:has(h2), :scope > div.space-y-4:has(h2), :scope > .pricing-header, :scope > header'
+    );
     if (headerBlock && headerBlock.nextElementSibling) {
       return headerBlock.nextElementSibling;
     }
@@ -2440,6 +2569,7 @@ class WebOrient {
     });
 
     this.memory = new SessionMemory({
+      siteKey: this.options.siteKey,
       endpoint: this.options.endpoint,
       defaultLanguage: this.options.defaultLanguage,
       onChange: (memState) => {
@@ -2460,8 +2590,9 @@ class WebOrient {
     this._isExecutingTool = false;
 
     if (typeof window !== 'undefined') {
-      const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
+      const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
       this.memory.recordPageVisit(currentFile);
+      this._prewarmRelay();
     }
 
     this._manifestReadyPromise = this.options.manifestUrl
@@ -2472,7 +2603,46 @@ class WebOrient {
       this._mountShadowAssistWidget();
     }
 
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
+      }, 650);
+    }
+
     this._checkRestoredSession();
+  }
+
+  /**
+   * Silently pre-warms the Relay HTTP `/health` endpoint on page load so cloud instances
+   * are already awake before the visitor clicks the WebOrient Assist button.
+   */
+  _prewarmRelay() {
+    try {
+      const wsEndpoint = this.options.endpoint || getDefaultRelayEndpoint();
+      const httpHealthUrl = wsEndpoint.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '') + '/health';
+      fetch(httpHealthUrl, { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+    } catch (_) {}
+  }
+
+  /**
+   * Extracts structured page metadata (meta description + JSON-LD Organization/FAQ schemas)
+   * from any client website so 1-line `<script>` embeds work with zero manual configuration.
+   */
+  _extractLiveSiteMetadata() {
+    if (typeof document === 'undefined') return '';
+    const parts = [];
+    const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute('content');
+    if (metaDesc) {
+      parts.push(`Meta Description: ${metaDesc.trim()}`);
+    }
+    const ldScripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+    for (const s of ldScripts.slice(0, 3)) {
+      try {
+        const raw = (s.textContent || '').replace(/\s+/g, ' ').trim();
+        if (raw) parts.push(`JSON-LD Structured Data: ${raw.slice(0, 1400)}`);
+      } catch (_) {}
+    }
+    return parts.join('\n');
   }
 
   async loadManifest(url) {
@@ -2480,6 +2650,7 @@ class WebOrient {
       const res = await fetch(url);
       this.manifest = await res.json();
       console.log('[WebOrient] Loaded site manifest:', this.manifest.siteName);
+      this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
       return this.manifest;
     } catch (e) {
       console.warn('[WebOrient] Failed to load manifest:', e);
@@ -2538,14 +2709,20 @@ class WebOrient {
     this.memory.setLiveSessionStatus(true, endpoint);
     this._syncShadowWidgetState(true, 'listening');
 
+    this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
     const initialSnapshot = this.scanner.captureStateSnapshot();
-    const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 35);
+    const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 45);
+    const pageContent = this.scanner.readPageContent({ manifest: this.manifest });
+    const liveMetadata = this._extractLiveSiteMetadata();
     const memorySummary = this.memory.buildModelContextSummary();
 
     this.client.sendText(
       `[SESSION CONTINUITY HANDOFF]\n${memorySummary}\n` +
-      `[CURRENT PAGE DOM ("${document.title}" - ${initialSnapshot.url})]:\n` +
-      `Interactive & Section Elements on Screen: ${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type })))}`
+      (liveMetadata ? `[CLIENT WEBSITE METADATA & FAQ]:\n${liveMetadata}\n` : '') +
+      `[CURRENT PAGE SECTIONS ("${document.title}" - ${initialSnapshot.url})]:\n` +
+      `${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 180) })))}\n` +
+      `[INTERACTIVE DOM CONTROLS ON SCREEN]:\n` +
+      `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type })))}`
     );
   }
 
@@ -2967,8 +3144,8 @@ class WebOrient {
   }
 
   /**
-   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave inside the
-   * isolated Shadow DOM (`#weborient-shadow-host`) so 1-line `<script>` embeds
+   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave + Right-Click Language Popover
+   * inside the isolated Shadow DOM (`#weborient-shadow-host`) so 1-line `<script>` embeds
    * work on any external website with zero CSS leakage or collision.
    */
   _mountShadowAssistWidget() {
@@ -2992,24 +3169,32 @@ class WebOrient {
           0%, 100% { transform: scaleY(0.28); opacity: 0.65; }
           50% { transform: scaleY(1); opacity: 1; }
         }
+        @keyframes wo-pulse-dot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.45; transform: scale(1.25); }
+        }
         .wo-pill-btn {
           display: flex;
           align-items: center;
-          gap: 11px;
-          padding: 10px 18px;
+          gap: 12px;
+          padding: 10px 16px;
           border-radius: 999px;
           background: #0A0A0A;
           color: #FFFFFF;
-          border: 2px solid ${this.options.themeColor};
-          box-shadow: 0 14px 34px rgba(10, 10, 10, 0.35);
+          border: 1.5px solid #0A0A0A;
+          box-shadow: 0 18px 38px rgba(10, 10, 10, 0.38), 0 0 0 1px rgba(255, 255, 255, 0.14);
           cursor: pointer;
-          transition: transform 0.2s cubic-bezier(0.215, 0.61, 0.355, 1), background 0.2s ease;
+          transition: transform 0.22s cubic-bezier(0.215, 0.61, 0.355, 1), background 0.2s ease, border-color 0.2s ease;
         }
         .wo-pill-btn:hover {
-          transform: translateY(-2px);
+          background: #181818;
+          transform: scale(1.04);
         }
         .wo-pill-btn:active {
           transform: scale(0.96);
+        }
+        .wo-pill-btn.wo-active {
+          border: 2px solid ${this.options.themeColor};
         }
         .wo-mic-circle {
           width: 28px;
@@ -3030,28 +3215,32 @@ class WebOrient {
           padding: 0 2px;
         }
         .wo-bar {
-          width: 3.5px;
+          width: 3px;
           height: 20px;
           border-radius: 999px;
           background: ${this.options.themeColor};
-          animation: wo-siri-wave 1s ease-in-out infinite;
+          animation: wo-siri-wave 1.05s ease-in-out infinite;
         }
-        .wo-bar:nth-child(2) { animation-delay: 0.15s; height: 24px; background: #FFFFFF; }
-        .wo-bar:nth-child(3) { animation-delay: 0.3s; height: 28px; background: ${this.options.themeColor}; }
-        .wo-bar:nth-child(4) { animation-delay: 0.45s; height: 22px; background: #FFFFFF; }
-        .wo-bar:nth-child(5) { animation-delay: 0.6s; height: 16px; background: ${this.options.themeColor}; }
+        .wo-bar:nth-child(2) { animation-delay: 0.15s; height: 25px; background: #FF6B4A; }
+        .wo-bar:nth-child(3) { animation-delay: 0.3s; height: 30px; background: #FFFFFF; }
+        .wo-bar:nth-child(4) { animation-delay: 0.45s; height: 24px; background: #FF6B4A; }
+        .wo-bar:nth-child(5) { animation-delay: 0.6s; height: 18px; background: ${this.options.themeColor}; }
         .wo-meta {
           display: flex;
           flex-direction: column;
           text-align: left;
+          padding-right: 4px;
         }
         .wo-title {
-          font-size: 12px;
-          font-weight: 700;
-          letter-spacing: 0.03em;
+          font-family: 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.14em;
           display: flex;
           align-items: center;
           gap: 6px;
+          color: #FFFFFF;
         }
         .wo-dot {
           width: 6px;
@@ -3059,18 +3248,73 @@ class WebOrient {
           border-radius: 50%;
           background: ${this.options.themeColor};
         }
+        .wo-dot.wo-listening {
+          background: #34d399;
+          animation: wo-pulse-dot 1.4s ease-in-out infinite;
+        }
+        .wo-dot.wo-speaking {
+          background: ${this.options.themeColor};
+          animation: wo-pulse-dot 0.9s ease-in-out infinite;
+        }
         .wo-sub {
+          font-family: 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+          font-size: 9px;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: rgba(255, 255, 255, 0.6);
+          margin-top: 1px;
+        }
+        .wo-lang-popover {
+          display: none;
+          position: absolute;
+          bottom: calc(100% + 10px);
+          right: 0;
+          width: 196px;
+          padding: 10px;
+          background: #0A0A0A;
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+        .wo-lang-popover.wo-open {
+          display: block;
+        }
+        .wo-lang-label {
           font-family: 'Fira Code', monospace;
           font-size: 9px;
           text-transform: uppercase;
-          letter-spacing: 0.12em;
-          color: rgba(255, 255, 255, 0.65);
+          letter-spacing: 0.18em;
+          color: ${this.options.themeColor};
+          margin-bottom: 6px;
+        }
+        .wo-lang-select {
+          width: 100%;
+          padding: 6px 8px;
+          background: rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          color: #FFFFFF;
+          font-family: 'Fira Code', monospace;
+          font-size: 11px;
+          outline: none;
+        }
+        .wo-lang-select option {
+          color: #0A0A0A;
+          background: #FFFFFF;
         }
       </style>
       <div id="wo-assist-root">
+        <div class="wo-lang-popover" id="wo-shadow-lang-popover">
+          <div class="wo-lang-label">Session Voice Language</div>
+          <select class="wo-lang-select" id="wo-shadow-lang-select">
+            <option value="en-IN">English (India/Global)</option>
+            <option value="hinglish">Hinglish (Hindi + Eng)</option>
+            <option value="hi-IN">Hindi (हिन्दी)</option>
+            <option value="es-ES">Español (Spanish)</option>
+            <option value="fr-FR">Français (French)</option>
+          </select>
+        </div>
         <button type="button" class="wo-pill-btn" id="wo-shadow-btn" aria-label="Toggle WebOrient Voice Co-Pilot">
           <div class="wo-mic-circle" id="wo-shadow-mic">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
               <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
               <line x1="12" y1="19" x2="12" y2="22"></line>
@@ -3085,10 +3329,10 @@ class WebOrient {
           </div>
           <div class="wo-meta">
             <span class="wo-title">
-              <span>Assist</span>
+              <span>WebOrient</span>
               <span class="wo-dot" id="wo-shadow-dot"></span>
             </span>
-            <span class="wo-sub" id="wo-shadow-sub">Click to talk</span>
+            <span class="wo-sub" id="wo-shadow-sub">Click to co-browse</span>
           </div>
         </button>
       </div>
@@ -3096,8 +3340,28 @@ class WebOrient {
 
     shadowRoot.appendChild(wrapper);
     const btn = shadowRoot.getElementById('wo-shadow-btn');
+    const langPopover = shadowRoot.getElementById('wo-shadow-lang-popover');
+    const langSelect = shadowRoot.getElementById('wo-shadow-lang-select');
+
+    if (langSelect) {
+      langSelect.value = this.memory.state.userLanguage || 'en-IN';
+      langSelect.addEventListener('change', (e) => {
+        this.memory.setLanguage(e.target.value, true);
+        if (this.client) {
+          this.client.sendText(`[LANGUAGE CHANGE]: User set native language to ${e.target.value}. Respond in this language.`);
+        }
+        langPopover?.classList.remove('wo-open');
+      });
+    }
+
     if (btn) {
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        langPopover?.classList.toggle('wo-open');
+      });
+
       btn.addEventListener('click', async () => {
+        langPopover?.classList.remove('wo-open');
         if (!this.client) {
           this._syncShadowWidgetState(true, 'connecting');
           try {
@@ -3115,19 +3379,33 @@ class WebOrient {
   _syncShadowWidgetState(connected, state = 'idle') {
     const shadowRoot = this.cursor?.shadowRoot;
     if (!shadowRoot) return;
+    const btn = shadowRoot.getElementById('wo-shadow-btn');
     const mic = shadowRoot.getElementById('wo-shadow-mic');
     const wave = shadowRoot.getElementById('wo-shadow-wave');
     const sub = shadowRoot.getElementById('wo-shadow-sub');
+    const dot = shadowRoot.getElementById('wo-shadow-dot');
     if (!mic || !wave || !sub) return;
 
     if (connected) {
+      btn?.classList.add('wo-active');
       mic.style.display = 'none';
       wave.style.display = 'flex';
-      sub.textContent = state === 'speaking' ? 'Speaking...' : (state === 'connecting' ? 'Connecting...' : 'Listening...');
+      if (state === 'speaking') {
+        sub.textContent = 'AI Co-Browsing...';
+        if (dot) dot.className = 'wo-dot wo-speaking';
+      } else if (state === 'connecting') {
+        sub.textContent = 'Connecting...';
+        if (dot) dot.className = 'wo-dot';
+      } else {
+        sub.textContent = 'Listening Live...';
+        if (dot) dot.className = 'wo-dot wo-listening';
+      }
     } else {
+      btn?.classList.remove('wo-active');
       mic.style.display = 'flex';
       wave.style.display = 'none';
-      sub.textContent = state === 'offline' ? 'Relay offline' : 'Click to talk';
+      if (dot) dot.className = 'wo-dot';
+      sub.textContent = state === 'offline' ? 'Relay offline' : 'Click to co-browse';
     }
   }
 

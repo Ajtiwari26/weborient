@@ -3,7 +3,7 @@
     "tenantId": "tenant_deploymate_01",
     "siteId": "deploymate_weborient",
     "siteKey": "wo_live_deploymate_demo",
-    "companyName": "DeployMate",
+    "companyName": "DeployMate WebOrient",
     "domain": "weborient.deploymate.in",
     "allowedOrigins": [
       "localhost",
@@ -21,6 +21,29 @@
     },
     "defaultLanguage": "en-IN",
     "manifestFile": "sample-manifest.json"
+  },
+  "wo_live_deploymate_main": {
+    "tenantId": "tenant_deploymate_main",
+    "siteId": "deploymate_main",
+    "siteKey": "wo_live_deploymate_main",
+    "companyName": "DeployMate",
+    "domain": "deploymate.in",
+    "allowedOrigins": [
+      "deploymate.in",
+      "www.deploymate.in",
+      "localhost",
+      "127.0.0.1",
+      "weborient.deploymate.in"
+    ],
+    "creditsMinutes": 500.0,
+    "plan": "Enterprise",
+    "theme": {
+      "primaryColor": "#E6391E",
+      "accentColor": "#0A0A0A",
+      "themeName": "signal"
+    },
+    "defaultLanguage": "en-IN",
+    "manifestFile": "deploymate-manifest.json"
   },
   "wo_test_sandbox": {
     "tenantId": "tenant_sandbox_dev",

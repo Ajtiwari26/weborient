@@ -1,0 +1,82 @@
+{
+  "siteName": "DeployMate — Autonomous AI Telephony & Workflow Automation",
+  "theme": {
+    "primaryColor": "#E6391E",
+    "accentColor": "#0A0A0A",
+    "cursorStyle": "deploymate-signal"
+  },
+  "knowledgeBase": [
+    {
+      "topic": "overview",
+      "question": "What does DeployMate build?",
+      "answer": "DeployMate builds bespoke AI voice calling agents, official WhatsApp CRM automation, WebOrient voice co-browsing widgets, and custom AI software systems that automate lead follow-ups, customer support, and appointment booking while cutting operational costs by up to 70%."
+    },
+    {
+      "topic": "voice-agents",
+      "question": "How do DeployMate Voice AI Calling Agents work?",
+      "answer": "Our Voice AI Agents call new leads within 30 seconds of inquiry or answer inbound calls 24/7. They speak natural English, Hindi, and Hinglish, qualify budget and requirements, schedule callback appointments, and sync call summaries straight to your CRM."
+    },
+    {
+      "topic": "whatsapp-crm",
+      "question": "Does DeployMate provide official WhatsApp CRM automation?",
+      "answer": "Yes, DeployMate builds verified WhatsApp Business API bots that automatically dispatch brochures, catalogs, fee structures, and booking links on autopilot 24/7."
+    },
+    {
+      "topic": "roi",
+      "question": "How much can DeployMate save my business?",
+      "answer": "On average, DeployMate reduces operational and telecalling costs by up to 70% while lifting lead-to-booking conversion by +42.8% with sub-4-second lead response times."
+    },
+    {
+      "topic": "products",
+      "question": "What shipped products has DeployMate built?",
+      "answer": "DeployMate's shipped product suite includes WebOrient (Shadow DOM Voice Co-Pilot & Ghost Cursor), Knot (AI Music Skipping Engine), Etta (Autonomous Voice Receptionist), Legal Ears, Plate Vision, Prep SaaS, and Salon Mate."
+    }
+  ],
+  "pages": [
+    {
+      "route": "/",
+      "file": "index.html",
+      "title": "DeployMate | Autonomous AI Telephony & Workflow Automation",
+      "summary": "Main DeployMate platform showcase featuring live Voice AI, WhatsApp CRM, and Analytics sandbox demos, 9 custom engineering solutions, shipped products, and an interactive INR ROI savings calculator.",
+      "keywords": ["home", "overview", "deploymate", "voice", "whatsapp", "roi", "products", "solutions"],
+      "sections": [
+        {
+          "id": "hero",
+          "selector": "#hero",
+          "title": "Hero & Live M.A.T.E. Quick-Launch",
+          "description": "Hero introduction with 'Schedule a live demo' (#cta-schedule-demo-hero) and interactive M.A.T.E. quick-launch chips."
+        },
+        {
+          "id": "sandbox-playground",
+          "selector": "#sandbox-playground",
+          "title": "Interactive Live Sandbox (Voice AI, WhatsApp Bot & Analytics CRM)",
+          "description": "Live interactive sandbox with 3 tabs: 01 Inbound Voice AI Agent, 02 Official WhatsApp Chatbot, and 03 Central CRM & Cost Portal."
+        },
+        {
+          "id": "what-we-build",
+          "selector": "#what-we-build",
+          "title": "Custom Engineering Solutions Grid",
+          "description": "9 interactive expandable solution cards covering Voice AI Calling Agents, Official WhatsApp CRM, Website Chat Agents, Custom Dashboards, and Workflow Automation."
+        },
+        {
+          "id": "playground",
+          "selector": "#playground",
+          "title": "Live Voice Playground with M.A.T.E.",
+          "description": "Direct launcher to speak live with M.A.T.E., DeployMate's autonomous technical expert."
+        },
+        {
+          "id": "products",
+          "selector": "#products",
+          "title": "Shipped Products Portfolio (WebOrient, Knot, Etta & More)",
+          "description": "Interactive showcase of 7 shipped products engineered by DeployMate, led by 01 WebOrient."
+        },
+        {
+          "id": "why-choose-us",
+          "selector": "#why-choose-us",
+          "title": "Operational Metrics & Interactive ROI Savings Calculator",
+          "description": "70% cost reduction metrics and the Interactive Savings Calculator (#roi-savings-calculator) with Monthly Leads and Monthly Operating Cost range sliders."
+        }
+      ]
+    }
+  ]
+}

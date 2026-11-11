@@ -366,16 +366,22 @@ def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> di
 
 def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dict) -> str:
     prompt_file = PROJECT_ROOT / "config" / "agent-prompt.md"
-    manifest_name = tenant.get("manifestFile", "sample-manifest.json")
+    site_key = tenant.get("siteKey", "")
+    is_weborient_showcase = site_key in ("wo_live_deploymate_demo", "wo_test_sandbox") or tenant.get("domain") == "weborient.deploymate.in"
+    default_manifest = "sample-manifest.json" if is_weborient_showcase else ""
+    manifest_name = tenant.get("manifestFile", default_manifest)
+    if not is_weborient_showcase and manifest_name == "sample-manifest.json":
+        manifest_name = ""
+
     tenant_manifest = PROJECT_ROOT / "config" / "manifests" / f"{site_id}.json"
-    manifest_file = tenant_manifest if tenant_manifest.exists() else (PROJECT_ROOT / "config" / manifest_name)
+    manifest_file = tenant_manifest if tenant_manifest.exists() else ((PROJECT_ROOT / "config" / manifest_name) if manifest_name else None)
 
     prompt_text = "You are WebOrient by DeployMate, an intelligent on-screen voice salesperson and website co-pilot."
     if prompt_file.exists():
         prompt_text = prompt_file.read_text(encoding="utf-8")
 
     manifest_context = ""
-    if manifest_file.exists():
+    if manifest_file and manifest_file.exists():
         try:
             manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
             pages_desc = []
@@ -394,6 +400,12 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
                 manifest_context += "\n\n### SITE KNOWLEDGE BASE & FAQ:\n" + "\n".join(kb_desc)
         except Exception as e:
             print(f"[WARN] Failed to parse manifest: {e}")
+    else:
+        manifest_context = (
+            f"\n\n### CLIENT WEBSITE LIVE DOM GROUNDING ({tenant.get('companyName', 'Client Website')} - {tenant.get('domain', '')}):\n"
+            f"- You are embedded directly on {tenant.get('companyName', 'this client website')}. Ground all explanations, section walkthroughs, and Q&A strictly on the live `[CURRENT PAGE SECTIONS]`, `[CLIENT WEBSITE METADATA & FAQ]`, and `[INTERACTIVE DOM CONTROLS ON SCREEN]` provided in the session handoff and tool responses.\n"
+            f"- Do NOT reference WebOrient demo HTML filenames (`test-demo.html`, `features.html`, `pricing.html`, `docs.html`). Navigate and highlight the actual live sections and controls present on this website!"
+        )
 
     memory_block = (
         f"\n\n### DEPLOYMATE MULTI-TENANT SESSION & NON-LINEAR TO-DO MEMORY "

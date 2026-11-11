@@ -37,19 +37,42 @@ export const DEFAULT_TODO_CHECKLIST = [
   { id: 'contact-sla', page: 'contact.html', selector: '#sla-section', title: 'Global Relay Regions & Enterprise SLA', keywords: ['sla', 'san francisco', 'london', 'bengaluru', 'bhopal', '15 minutes'], done: false }
 ];
 
+const DEMO_PAGES = new Set([
+  'test-demo.html',
+  'features.html',
+  'pricing.html',
+  'docs.html',
+  'contact.html',
+  'dashboard.html'
+]);
+
+function isWebOrientDemoSite() {
+  if (typeof window === 'undefined') return true;
+  const host = (window.location.hostname || '').toLowerCase();
+  const file = window.location.pathname.split('/').pop() || '';
+  if (DEMO_PAGES.has(file)) return true;
+  if (host.startsWith('weborient.')) return true;
+  return false;
+}
+
 export class SessionMemory {
   constructor(options = {}) {
-    this.storageKey = options.storageKey || MEMORY_STORAGE_KEY;
+    this.storageKey = options.storageKey || `${MEMORY_STORAGE_KEY}_${options.siteKey || 'default'}`;
     this.onChange = options.onChange || (() => {});
     this.state = this._loadOrInitialize(options);
   }
 
   _loadOrInitialize(options = {}) {
+    const isDemo = isWebOrientDemoSite();
     try {
       const raw = localStorage.getItem(this.storageKey) || sessionStorage.getItem(this.storageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.sessionId && Array.isArray(parsed.todoChecklist)) {
+          // If this is a non-demo client website, strip any leftover demo-only checklist items
+          if (!isDemo && parsed.todoChecklist.some(t => t.page === 'test-demo.html')) {
+            parsed.todoChecklist = [];
+          }
           return parsed;
         }
       }
@@ -67,14 +90,19 @@ export class SessionMemory {
         (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
           ? 'ws://localhost:8088'
           : 'wss://relay.deploymate.in'),
+      userLanguage: options.defaultLanguage || initialLang,
       languageLocked: false,
       userIntent: {
-        goal: options.defaultGoal || 'Explore WebOrient capabilities, pricing ROI, and setup',
-        interestedTier: 'Pro Co-Pilot',
+        goal: options.defaultGoal || (isDemo
+          ? 'Explore WebOrient capabilities, pricing ROI, and setup'
+          : `Explore ${typeof document !== 'undefined' && document.title ? document.title : 'website'} solutions, demos, and ROI`),
+        interestedTier: isDemo ? 'Pro Co-Pilot' : 'Custom AI Solution',
         customNotes: []
       },
       visitedPages: [],
-      todoChecklist: DEFAULT_TODO_CHECKLIST.map(item => ({ ...item, completedAt: null })),
+      todoChecklist: isDemo
+        ? DEFAULT_TODO_CHECKLIST.map(item => ({ ...item, completedAt: null }))
+        : [],
       orientedHistory: [],
       recentTranscripts: [],
       pendingNavigationActions: [],
@@ -92,6 +120,75 @@ export class SessionMemory {
 
     this._persist(freshState, false);
     return freshState;
+  }
+
+  /**
+   * Dynamically populates `todoChecklist` from any client website's live DOM sections
+   * or manifest so 1-line `<script>` embeds get automatic non-linear orientation tracking!
+   */
+  syncDynamicDomChecklist(scanner, manifest = null) {
+    if (isWebOrientDemoSite() && this.state.todoChecklist.length > 0) {
+      return this.state.todoChecklist;
+    }
+    if (typeof document === 'undefined') return this.state.todoChecklist;
+
+    const currentRoute = window.location.pathname || '/';
+    const existingById = new Map(this.state.todoChecklist.map(item => [item.selector, item]));
+    const discovered = [];
+
+    if (manifest && Array.isArray(manifest.pages)) {
+      for (const p of manifest.pages) {
+        const pageRoute = p.file || p.route || '/';
+        for (const sec of p.sections || []) {
+          if (!sec.selector) continue;
+          const prev = existingById.get(sec.selector);
+          discovered.push({
+            id: sec.id || sec.selector.replace(/[^a-zA-Z0-9_-]/g, ''),
+            page: pageRoute,
+            selector: sec.selector,
+            title: sec.title || sec.selector,
+            keywords: sec.keywords || sec.title?.toLowerCase().split(/\s+/).filter(w => w.length > 3) || [],
+            done: prev ? Boolean(prev.done) : false,
+            completedAt: prev ? prev.completedAt : null
+          });
+        }
+      }
+    }
+
+    if (discovered.length === 0) {
+      const sectionEls = Array.from(
+        document.querySelectorAll('section[id], [id*="calculator"], [id*="sandbox"], [id*="products"], [id*="pricing"], form[id]')
+      );
+      for (const el of sectionEls) {
+        if (!el.id || el.id.startsWith('weborient') || el.hasAttribute('data-agent-ignore')) continue;
+        const selector = `#${el.id}`;
+        if (discovered.some(d => d.selector === selector)) continue;
+        const headingEl = el.querySelector('h1, h2, h3, h4');
+        const rawHeading = headingEl ? headingEl.innerText.replace(/\s+/g, ' ').trim() : '';
+        const title = rawHeading || el.id.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        const prev = existingById.get(selector);
+        const words = `${title} ${el.id.replace(/[-_]/g, ' ')}`
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter(w => w.length >= 3);
+
+        discovered.push({
+          id: el.id,
+          page: currentRoute,
+          selector,
+          title: title.slice(0, 70),
+          keywords: Array.from(new Set(words)).slice(0, 8),
+          done: prev ? Boolean(prev.done) : false,
+          completedAt: prev ? prev.completedAt : null
+        });
+      }
+    }
+
+    if (discovered.length > 0) {
+      this.state.todoChecklist = discovered;
+      this._persist(this.state, false);
+    }
+    return this.state.todoChecklist;
   }
 
   _persist(nextState = this.state, notify = true) {

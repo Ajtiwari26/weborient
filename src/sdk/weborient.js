@@ -54,6 +54,7 @@ export class WebOrient {
     });
 
     this.memory = new SessionMemory({
+      siteKey: this.options.siteKey,
       endpoint: this.options.endpoint,
       defaultLanguage: this.options.defaultLanguage,
       onChange: (memState) => {
@@ -74,8 +75,9 @@ export class WebOrient {
     this._isExecutingTool = false;
 
     if (typeof window !== 'undefined') {
-      const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
+      const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
       this.memory.recordPageVisit(currentFile);
+      this._prewarmRelay();
     }
 
     this._manifestReadyPromise = this.options.manifestUrl
@@ -86,7 +88,46 @@ export class WebOrient {
       this._mountShadowAssistWidget();
     }
 
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
+      }, 650);
+    }
+
     this._checkRestoredSession();
+  }
+
+  /**
+   * Silently pre-warms the Relay HTTP `/health` endpoint on page load so cloud instances
+   * are already awake before the visitor clicks the WebOrient Assist button.
+   */
+  _prewarmRelay() {
+    try {
+      const wsEndpoint = this.options.endpoint || getDefaultRelayEndpoint();
+      const httpHealthUrl = wsEndpoint.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '') + '/health';
+      fetch(httpHealthUrl, { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+    } catch (_) {}
+  }
+
+  /**
+   * Extracts structured page metadata (meta description + JSON-LD Organization/FAQ schemas)
+   * from any client website so 1-line `<script>` embeds work with zero manual configuration.
+   */
+  _extractLiveSiteMetadata() {
+    if (typeof document === 'undefined') return '';
+    const parts = [];
+    const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute('content');
+    if (metaDesc) {
+      parts.push(`Meta Description: ${metaDesc.trim()}`);
+    }
+    const ldScripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+    for (const s of ldScripts.slice(0, 3)) {
+      try {
+        const raw = (s.textContent || '').replace(/\s+/g, ' ').trim();
+        if (raw) parts.push(`JSON-LD Structured Data: ${raw.slice(0, 1400)}`);
+      } catch (_) {}
+    }
+    return parts.join('\n');
   }
 
   async loadManifest(url) {
@@ -94,6 +135,7 @@ export class WebOrient {
       const res = await fetch(url);
       this.manifest = await res.json();
       console.log('[WebOrient] Loaded site manifest:', this.manifest.siteName);
+      this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
       return this.manifest;
     } catch (e) {
       console.warn('[WebOrient] Failed to load manifest:', e);
@@ -152,14 +194,20 @@ export class WebOrient {
     this.memory.setLiveSessionStatus(true, endpoint);
     this._syncShadowWidgetState(true, 'listening');
 
+    this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
     const initialSnapshot = this.scanner.captureStateSnapshot();
-    const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 35);
+    const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 45);
+    const pageContent = this.scanner.readPageContent({ manifest: this.manifest });
+    const liveMetadata = this._extractLiveSiteMetadata();
     const memorySummary = this.memory.buildModelContextSummary();
 
     this.client.sendText(
       `[SESSION CONTINUITY HANDOFF]\n${memorySummary}\n` +
-      `[CURRENT PAGE DOM ("${document.title}" - ${initialSnapshot.url})]:\n` +
-      `Interactive & Section Elements on Screen: ${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type })))}`
+      (liveMetadata ? `[CLIENT WEBSITE METADATA & FAQ]:\n${liveMetadata}\n` : '') +
+      `[CURRENT PAGE SECTIONS ("${document.title}" - ${initialSnapshot.url})]:\n` +
+      `${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 180) })))}\n` +
+      `[INTERACTIVE DOM CONTROLS ON SCREEN]:\n` +
+      `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type })))}`
     );
   }
 
@@ -581,8 +629,8 @@ export class WebOrient {
   }
 
   /**
-   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave inside the
-   * isolated Shadow DOM (`#weborient-shadow-host`) so 1-line `<script>` embeds
+   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave + Right-Click Language Popover
+   * inside the isolated Shadow DOM (`#weborient-shadow-host`) so 1-line `<script>` embeds
    * work on any external website with zero CSS leakage or collision.
    */
   _mountShadowAssistWidget() {
@@ -606,24 +654,32 @@ export class WebOrient {
           0%, 100% { transform: scaleY(0.28); opacity: 0.65; }
           50% { transform: scaleY(1); opacity: 1; }
         }
+        @keyframes wo-pulse-dot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.45; transform: scale(1.25); }
+        }
         .wo-pill-btn {
           display: flex;
           align-items: center;
-          gap: 11px;
-          padding: 10px 18px;
+          gap: 12px;
+          padding: 10px 16px;
           border-radius: 999px;
           background: #0A0A0A;
           color: #FFFFFF;
-          border: 2px solid ${this.options.themeColor};
-          box-shadow: 0 14px 34px rgba(10, 10, 10, 0.35);
+          border: 1.5px solid #0A0A0A;
+          box-shadow: 0 18px 38px rgba(10, 10, 10, 0.38), 0 0 0 1px rgba(255, 255, 255, 0.14);
           cursor: pointer;
-          transition: transform 0.2s cubic-bezier(0.215, 0.61, 0.355, 1), background 0.2s ease;
+          transition: transform 0.22s cubic-bezier(0.215, 0.61, 0.355, 1), background 0.2s ease, border-color 0.2s ease;
         }
         .wo-pill-btn:hover {
-          transform: translateY(-2px);
+          background: #181818;
+          transform: scale(1.04);
         }
         .wo-pill-btn:active {
           transform: scale(0.96);
+        }
+        .wo-pill-btn.wo-active {
+          border: 2px solid ${this.options.themeColor};
         }
         .wo-mic-circle {
           width: 28px;
@@ -644,28 +700,32 @@ export class WebOrient {
           padding: 0 2px;
         }
         .wo-bar {
-          width: 3.5px;
+          width: 3px;
           height: 20px;
           border-radius: 999px;
           background: ${this.options.themeColor};
-          animation: wo-siri-wave 1s ease-in-out infinite;
+          animation: wo-siri-wave 1.05s ease-in-out infinite;
         }
-        .wo-bar:nth-child(2) { animation-delay: 0.15s; height: 24px; background: #FFFFFF; }
-        .wo-bar:nth-child(3) { animation-delay: 0.3s; height: 28px; background: ${this.options.themeColor}; }
-        .wo-bar:nth-child(4) { animation-delay: 0.45s; height: 22px; background: #FFFFFF; }
-        .wo-bar:nth-child(5) { animation-delay: 0.6s; height: 16px; background: ${this.options.themeColor}; }
+        .wo-bar:nth-child(2) { animation-delay: 0.15s; height: 25px; background: #FF6B4A; }
+        .wo-bar:nth-child(3) { animation-delay: 0.3s; height: 30px; background: #FFFFFF; }
+        .wo-bar:nth-child(4) { animation-delay: 0.45s; height: 24px; background: #FF6B4A; }
+        .wo-bar:nth-child(5) { animation-delay: 0.6s; height: 18px; background: ${this.options.themeColor}; }
         .wo-meta {
           display: flex;
           flex-direction: column;
           text-align: left;
+          padding-right: 4px;
         }
         .wo-title {
-          font-size: 12px;
-          font-weight: 700;
-          letter-spacing: 0.03em;
+          font-family: 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.14em;
           display: flex;
           align-items: center;
           gap: 6px;
+          color: #FFFFFF;
         }
         .wo-dot {
           width: 6px;
@@ -673,18 +733,73 @@ export class WebOrient {
           border-radius: 50%;
           background: ${this.options.themeColor};
         }
+        .wo-dot.wo-listening {
+          background: #34d399;
+          animation: wo-pulse-dot 1.4s ease-in-out infinite;
+        }
+        .wo-dot.wo-speaking {
+          background: ${this.options.themeColor};
+          animation: wo-pulse-dot 0.9s ease-in-out infinite;
+        }
         .wo-sub {
+          font-family: 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+          font-size: 9px;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: rgba(255, 255, 255, 0.6);
+          margin-top: 1px;
+        }
+        .wo-lang-popover {
+          display: none;
+          position: absolute;
+          bottom: calc(100% + 10px);
+          right: 0;
+          width: 196px;
+          padding: 10px;
+          background: #0A0A0A;
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+        .wo-lang-popover.wo-open {
+          display: block;
+        }
+        .wo-lang-label {
           font-family: 'Fira Code', monospace;
           font-size: 9px;
           text-transform: uppercase;
-          letter-spacing: 0.12em;
-          color: rgba(255, 255, 255, 0.65);
+          letter-spacing: 0.18em;
+          color: ${this.options.themeColor};
+          margin-bottom: 6px;
+        }
+        .wo-lang-select {
+          width: 100%;
+          padding: 6px 8px;
+          background: rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          color: #FFFFFF;
+          font-family: 'Fira Code', monospace;
+          font-size: 11px;
+          outline: none;
+        }
+        .wo-lang-select option {
+          color: #0A0A0A;
+          background: #FFFFFF;
         }
       </style>
       <div id="wo-assist-root">
+        <div class="wo-lang-popover" id="wo-shadow-lang-popover">
+          <div class="wo-lang-label">Session Voice Language</div>
+          <select class="wo-lang-select" id="wo-shadow-lang-select">
+            <option value="en-IN">English (India/Global)</option>
+            <option value="hinglish">Hinglish (Hindi + Eng)</option>
+            <option value="hi-IN">Hindi (हिन्दी)</option>
+            <option value="es-ES">Español (Spanish)</option>
+            <option value="fr-FR">Français (French)</option>
+          </select>
+        </div>
         <button type="button" class="wo-pill-btn" id="wo-shadow-btn" aria-label="Toggle WebOrient Voice Co-Pilot">
           <div class="wo-mic-circle" id="wo-shadow-mic">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
               <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
               <line x1="12" y1="19" x2="12" y2="22"></line>
@@ -699,10 +814,10 @@ export class WebOrient {
           </div>
           <div class="wo-meta">
             <span class="wo-title">
-              <span>Assist</span>
+              <span>WebOrient</span>
               <span class="wo-dot" id="wo-shadow-dot"></span>
             </span>
-            <span class="wo-sub" id="wo-shadow-sub">Click to talk</span>
+            <span class="wo-sub" id="wo-shadow-sub">Click to co-browse</span>
           </div>
         </button>
       </div>
@@ -710,8 +825,28 @@ export class WebOrient {
 
     shadowRoot.appendChild(wrapper);
     const btn = shadowRoot.getElementById('wo-shadow-btn');
+    const langPopover = shadowRoot.getElementById('wo-shadow-lang-popover');
+    const langSelect = shadowRoot.getElementById('wo-shadow-lang-select');
+
+    if (langSelect) {
+      langSelect.value = this.memory.state.userLanguage || 'en-IN';
+      langSelect.addEventListener('change', (e) => {
+        this.memory.setLanguage(e.target.value, true);
+        if (this.client) {
+          this.client.sendText(`[LANGUAGE CHANGE]: User set native language to ${e.target.value}. Respond in this language.`);
+        }
+        langPopover?.classList.remove('wo-open');
+      });
+    }
+
     if (btn) {
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        langPopover?.classList.toggle('wo-open');
+      });
+
       btn.addEventListener('click', async () => {
+        langPopover?.classList.remove('wo-open');
         if (!this.client) {
           this._syncShadowWidgetState(true, 'connecting');
           try {
@@ -729,19 +864,33 @@ export class WebOrient {
   _syncShadowWidgetState(connected, state = 'idle') {
     const shadowRoot = this.cursor?.shadowRoot;
     if (!shadowRoot) return;
+    const btn = shadowRoot.getElementById('wo-shadow-btn');
     const mic = shadowRoot.getElementById('wo-shadow-mic');
     const wave = shadowRoot.getElementById('wo-shadow-wave');
     const sub = shadowRoot.getElementById('wo-shadow-sub');
+    const dot = shadowRoot.getElementById('wo-shadow-dot');
     if (!mic || !wave || !sub) return;
 
     if (connected) {
+      btn?.classList.add('wo-active');
       mic.style.display = 'none';
       wave.style.display = 'flex';
-      sub.textContent = state === 'speaking' ? 'Speaking...' : (state === 'connecting' ? 'Connecting...' : 'Listening...');
+      if (state === 'speaking') {
+        sub.textContent = 'AI Co-Browsing...';
+        if (dot) dot.className = 'wo-dot wo-speaking';
+      } else if (state === 'connecting') {
+        sub.textContent = 'Connecting...';
+        if (dot) dot.className = 'wo-dot';
+      } else {
+        sub.textContent = 'Listening Live...';
+        if (dot) dot.className = 'wo-dot wo-listening';
+      }
     } else {
+      btn?.classList.remove('wo-active');
       mic.style.display = 'flex';
       wave.style.display = 'none';
-      sub.textContent = state === 'offline' ? 'Relay offline' : 'Click to talk';
+      if (dot) dot.className = 'wo-dot';
+      sub.textContent = state === 'offline' ? 'Relay offline' : 'Click to co-browse';
     }
   }
 
