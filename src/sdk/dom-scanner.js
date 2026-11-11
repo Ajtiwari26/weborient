@@ -1,11 +1,11 @@
 /**
- * WebOrient DOM Scanner & Semantic Grounding Engine (v0.4.0)
- * - Assigns persistent deterministic `data-wo-id` attributes to actionable & landmark elements
- * - Resolves selectors, data-wo-id, or natural accessible labels to live DOM elements
- * - Real-time `matchElementFromSpeech(spokenText)`: maps whatever the Live Voice Agent is
- *   currently saying to the matching DOM element on screen so the Ghost Cursor highlights it automatically!
- * - Extracts structured page content, headings, pricing cards, FAQs, and tables for Q&A
- * - Filters out sensitive fields (passwords, credit cards, [data-agent-ignore])
+ * WebOrient DOM Scanner & Semantic Grounding Engine (v0.6.0 — Full-Page, Popup, Banner & Close-Button Indexing)
+ * - Assigns persistent deterministic `data-wo-id` attributes to EVERY actionable element, popup, banner, and close button
+ * - Infers semantic labels for icon-only buttons (`<svg class="lucide-x">` -> "Close Popup / Modal (X)", arrows, etc.)
+ *   and sibling `<label>` fields (React/Tailwind forms where `<label>` is a sibling of `<input>`)
+ * - `scanActiveOverlaysAndPopups()`: detects any open modal, drawer, popup, ad overlay, banner, or expanded dossier
+ *   along with its exact `closeButtonSelector` and internal controls
+ * - `discoverSiteRoutes()`: indexes all internal routes, hash sections, and SPA navigation triggers from a 1-line embed
  */
 export class DOMScanner {
   constructor(options = {}) {
@@ -16,6 +16,7 @@ export class DOMScanner {
       '.weborient-ignore',
       '#weborient-overlay',
       '#weborient-overlay *',
+      '#weborient-shadow-host',
       '#test-toolbar',
       '#test-toolbar *'
     ];
@@ -25,18 +26,33 @@ export class DOMScanner {
   /**
    * Real-time Transcript-to-DOM Matcher:
    * Given a phrase currently being spoken by the Gemini Live Agent, finds the best matching
-   * DOM section, card, tab, button, or form field on the active page so the Ghost Cursor
-   * automatically scrolls to and highlights whatever the agent is describing!
+   * DOM section, popup, card, tab, button, or form field on the active page.
    */
   matchElementFromSpeech(spokenText, todoChecklist = []) {
     if (!spokenText || typeof document === 'undefined') return null;
     const text = String(spokenText).toLowerCase().trim();
     if (text.length < 4) return null;
 
-    const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
+    // 0. If an active modal/popup/drawer is open on screen, prioritize matching controls inside it
+    const activePopups = this.scanActiveOverlaysAndPopups();
+    if (activePopups.length > 0) {
+      const topPopup = activePopups[0];
+      if (/\b(close|band|dismiss|cancel|exit|hatay|hatao)\b/i.test(text) && topPopup.closeButtonSelector) {
+        const closeEl = this.resolveElement(topPopup.closeButtonSelector);
+        if (closeEl) {
+          return {
+            element: closeEl,
+            selector: topPopup.closeButtonSelector,
+            title: topPopup.title ? `Close ${topPopup.title}` : 'Close'
+          };
+        }
+      }
+    }
+
+    const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
 
     // 1. Check current-page To-Do checklist keywords first for high-precision section matching
-    const pageTodos = (todoChecklist || []).filter(t => t.page === currentFile);
+    const pageTodos = (todoChecklist || []).filter(t => !t.page || t.page === currentFile || t.page === window.location.pathname);
     for (const todo of pageTodos) {
       if (Array.isArray(todo.keywords)) {
         const hit = todo.keywords.some(kw => text.includes(kw.toLowerCase()));
@@ -54,9 +70,9 @@ export class DOMScanner {
       }
     }
 
-    // 2. Match against interactive controls, cards, tabs, headings, and sections on the page
+    // 2. Match against interactive controls, popups, cards, tabs, headings, and sections on the page
     const candidates = this._querySelectorAllDeep(
-      'section[id], .pricing-card, [role="tab"], [role="switch"], [data-carousel], details[id], form[id], button[id], input[id], select[id], h2, h3'
+      'section[id], [id*="modal"], [id*="drawer"], [id*="calculator"], .pricing-card, [role="tab"], [role="switch"], [data-carousel], details[id], form, button, input, select, h2, h3, h4'
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
 
     let bestEl = null;
@@ -69,7 +85,6 @@ export class DOMScanner {
       if (!label && !idStr) continue;
 
       let score = 0;
-      // Check significant words (>= 4 chars)
       const words = `${label} ${idStr}`.split(/\s+/).filter(w => w.length >= 4 && !['section', 'button', 'input', 'select', 'table'].includes(w));
       for (const w of words) {
         if (text.includes(w)) score += 25;
@@ -85,7 +100,7 @@ export class DOMScanner {
     }
 
     if (bestEl) {
-      const targetNode = bestEl.closest('section[id], .pricing-card, details[id]') || bestEl;
+      const targetNode = bestEl.closest('section[id], [id*="modal"], [id*="drawer"], .pricing-card, details[id]') || bestEl;
       return {
         element: targetNode,
         selector: this._getUniqueSelector(targetNode),
@@ -97,7 +112,109 @@ export class DOMScanner {
   }
 
   /**
-   * Resolves a selector, data-wo-id, element ID, or accessible label to a DOM element
+   * Detects any active modals, popups, drawers, ad overlays, banners, or expanded dossiers
+   * currently visible on screen, including their exact Close (`X`) button selector!
+   */
+  scanActiveOverlaysAndPopups() {
+    if (typeof document === 'undefined') return [];
+    const popupSelectors = [
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '[role="alertdialog"]',
+      '#scheduler-booking-modal',
+      '#personalize-drawer',
+      '[id*="modal" i]',
+      '[id*="popup" i]',
+      '[id*="drawer" i]',
+      '[id*="banner" i]',
+      '[class*="modal" i]',
+      '[class*="popup" i]',
+      '[class*="drawer" i]',
+      '.col-span-full.bg-ink'
+    ].join(', ');
+
+    const rawNodes = Array.from(document.querySelectorAll(popupSelectors))
+      .filter(el => !this._isIgnored(el) && this._isVisible(el, false));
+
+    const results = [];
+    for (const node of rawNodes) {
+      const woId = this._ensureWoId(node);
+      const selector = this._getUniqueSelector(node);
+      const title = this._extractHeading(node) || node.id || 'Active Popup / Overlay';
+
+      // Find close / dismiss button inside this popup/overlay
+      let closeBtn = node.querySelector(
+        'button[aria-label*="close" i], button[aria-label*="dismiss" i], button[title*="close" i], [data-dismiss], [data-close]'
+      );
+      if (!closeBtn) {
+        const allBtns = Array.from(node.querySelectorAll('button, [role="button"]'));
+        closeBtn = allBtns.find(b => this._isCloseOrDismissButton(b)) || null;
+      }
+
+      let closeButtonSelector = null;
+      if (closeBtn) {
+        this._ensureWoId(closeBtn);
+        closeButtonSelector = this._getUniqueSelector(closeBtn);
+      }
+
+      const controls = Array.from(node.querySelectorAll('button, a[href], input, select, textarea'))
+        .filter(c => !this._isIgnored(c) && this._isVisible(c, true))
+        .slice(0, 25)
+        .map(c => {
+          this._ensureWoId(c);
+          return {
+            selector: this._getUniqueSelector(c),
+            tag: c.tagName.toLowerCase(),
+            type: c.type || null,
+            label: this._getAccessibleLabel(c)
+          };
+        });
+
+      results.push({
+        woId,
+        selector,
+        title,
+        closeButtonSelector,
+        textSummary: this._cleanText(node.innerText || '', 320),
+        controls
+      });
+    }
+    return results;
+  }
+
+  /**
+   * Discovers all internal routes, section anchors, and SPA navigation buttons on the client site
+   */
+  discoverSiteRoutes() {
+    if (typeof document === 'undefined') return [];
+    const routes = new Map();
+
+    // 1. Anchor links (<a href="...">)
+    document.querySelectorAll('a[href]').forEach(a => {
+      if (this._isIgnored(a)) return;
+      const href = (a.getAttribute('href') || '').trim();
+      if (!href || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+      const label = this._getAccessibleLabel(a) || href;
+      const selector = this._getUniqueSelector(a);
+      if (!routes.has(href)) {
+        routes.set(href, { path: href, label, selector, kind: href.startsWith('#') ? 'anchor' : 'link' });
+      }
+    });
+
+    // 2. SPA Navigation / Action Triggers (e.g. Playground, Start a project, Book demo, Personalize Proposal, Voice agent)
+    document.querySelectorAll('header button, nav button, #hero button, footer button, #proposal-personalizer-toggle').forEach(btn => {
+      if (this._isIgnored(btn) || !this._isVisible(btn, true)) return;
+      const label = this._getAccessibleLabel(btn);
+      if (!label) return;
+      const selector = this._getUniqueSelector(btn);
+      routes.set(`btn:${selector}`, { path: selector, label, selector, kind: 'spa-trigger' });
+    });
+
+    return Array.from(routes.values()).slice(0, 35);
+  }
+
+  /**
+   * Resolves a selector, data-wo-id, element ID, or accessible label (including Close / X buttons) to a DOM element
    */
   resolveElement(target) {
     if (!target) return null;
@@ -125,6 +242,18 @@ export class DOMScanner {
     if (shadowMatch && !this._isIgnored(shadowMatch)) return shadowMatch;
 
     const needle = raw.toLowerCase();
+
+    // Special resolution for "close", "close modal", "close popup", "x" when an overlay is open
+    if (/\b(close|dismiss|band|exit)\b/i.test(needle)) {
+      const popups = this.scanActiveOverlaysAndPopups();
+      for (const p of popups) {
+        if (p.closeButtonSelector) {
+          const btn = document.querySelector(p.closeButtonSelector);
+          if (btn) return btn;
+        }
+      }
+    }
+
     const candidates = this._collectAllCandidateElements();
     let bestMatch = null;
     let bestScore = 0;
@@ -154,7 +283,7 @@ export class DOMScanner {
   }
 
   /**
-   * Scans and returns an array of interactive elements with rich state & selectors
+   * Scans and returns ALL interactive elements, buttons, inputs, popups, banners, and close buttons on the page
    */
   scan(options = {}) {
     const includeOffscreen = Boolean(options.includeOffscreen);
@@ -190,6 +319,9 @@ export class DOMScanner {
           rect.right > 0
         );
 
+        const parentSection = el.closest('section[id], [id*="modal"], [id*="drawer"], header, footer');
+        const contextId = parentSection ? (parentSection.id || parentSection.tagName.toLowerCase()) : null;
+
         const item = {
           woId,
           selector: this._getUniqueSelector(el),
@@ -197,10 +329,15 @@ export class DOMScanner {
           type: el.type || el.getAttribute('role') || null,
           role: el.getAttribute('role') || null,
           label: this._getAccessibleLabel(el),
+          section: contextId,
           inViewport,
           isInteractive: true,
           disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true')
         };
+
+        if (this._isCloseOrDismissButton(el)) {
+          item.isCloseButton = true;
+        }
 
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
           if (el.type === 'checkbox' || el.type === 'radio') {
@@ -262,13 +399,13 @@ export class DOMScanner {
     }
 
     const sectionNodes = Array.from(
-      document.querySelectorAll('section, article, main, [data-section], .pricing-card, details')
+      document.querySelectorAll('section, article, main, [data-section], #roi-savings-calculator, #scheduler-booking-modal, #personalize-drawer, .pricing-card, details')
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
 
     const sections = sectionNodes.map(sec => {
       const woId = this._ensureWoId(sec);
       const heading = this._extractHeading(sec);
-      const text = this._cleanText(sec.innerText || '', 600);
+      const text = this._cleanText(sec.innerText || '', 650);
       const rect = sec.getBoundingClientRect();
       const inViewport = rect.top < window.innerHeight && rect.bottom > 0;
 
@@ -319,13 +456,15 @@ export class DOMScanner {
       success: true,
       pageTitle: document.title,
       currentUrl: window.location.pathname + window.location.hash,
-      matchingSections: filteredSections.length > 0 ? filteredSections : sections.slice(0, 8),
-      manifestKnowledge: manifestMatches.slice(0, 6)
+      activePopups: this.scanActiveOverlaysAndPopups(),
+      matchingSections: filteredSections.length > 0 ? filteredSections : sections.slice(0, 14),
+      manifestKnowledge: manifestMatches.slice(0, 8)
     };
   }
 
   captureStateSnapshot() {
     const visibleInteractive = this.scan({ includeOffscreen: false });
+    const activePopups = this.scanActiveOverlaysAndPopups();
     const invalidFields = visibleInteractive
       .filter(item => item.valid === false)
       .map(item => ({
@@ -354,9 +493,31 @@ export class DOMScanner {
       url: window.location.pathname + window.location.hash,
       scrollY: Math.round(window.scrollY),
       activeSection,
+      activePopups: activePopups.map(p => ({ selector: p.selector, title: p.title, closeButtonSelector: p.closeButtonSelector })),
       visibleInteractiveCount: visibleInteractive.length,
       invalidFields
     };
+  }
+
+  _isCloseOrDismissButton(el) {
+    if (!el || !(el instanceof Element)) return false;
+    const aria = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.className || ''}`.toLowerCase();
+    if (/\b(close|dismiss|cancel)\b/.test(aria)) return true;
+    const txt = (el.innerText || '').trim();
+    if (txt === '×' || txt === '✕' || txt === '✖' || /^close$/i.test(txt)) return true;
+    const svg = el.querySelector('svg');
+    if (svg) {
+      const svgClass = (svg.getAttribute('class') || '').toLowerCase();
+      if (svgClass.includes('lucide-x') || svgClass.includes('icon-x') || svgClass.includes('close')) {
+        return true;
+      }
+      // Check if it's an X icon path (two crossing diagonal lines: M18 6 6 18 and M6 6 18 18)
+      const paths = Array.from(svg.querySelectorAll('path, line')).map(p => p.getAttribute('d') || '').join(' ');
+      if (paths.includes('18 6') && paths.includes('6 18')) {
+        return true;
+      }
+    }
+    return false;
   }
 
   _getCarouselState(carouselEl) {
@@ -434,14 +595,48 @@ export class DOMScanner {
       if (cloneText) return cloneText.slice(0, 80);
     }
 
+    // For inputs/selects/textareas in React/Tailwind forms where <label> is a sibling inside the field wrapper
+    if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') {
+      const prevLabel = el.previousElementSibling;
+      if (prevLabel && (prevLabel.tagName === 'LABEL' || prevLabel.tagName === 'SPAN' || prevLabel.tagName === 'DIV')) {
+        const lblTxt = prevLabel.innerText.replace(/\s+/g, ' ').trim();
+        const ph = el.getAttribute('placeholder');
+        if (lblTxt) return ph ? `${lblTxt} (${ph})` : lblTxt.slice(0, 80);
+      }
+      const wrapperLabel = el.parentElement?.querySelector('label');
+      if (wrapperLabel) {
+        const lblTxt = wrapperLabel.innerText.replace(/\s+/g, ' ').trim();
+        const ph = el.getAttribute('placeholder');
+        if (lblTxt) return ph ? `${lblTxt} (${ph})` : lblTxt.slice(0, 80);
+      }
+    }
+
     const placeholder = el.getAttribute('placeholder');
     if (placeholder) return placeholder.trim();
 
     const title = el.getAttribute('title') || el.getAttribute('data-tooltip');
     if (title) return title.trim();
 
-    const text = el.innerText || el.value || '';
-    return text.replace(/\s+/g, ' ').trim().slice(0, 80);
+    const text = (el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
+    if (text) return text.slice(0, 90);
+
+    // Icon-only button inference (Close 'X' buttons, arrows, mic, send, etc.)
+    if (this._isCloseOrDismissButton(el)) {
+      const modalParent = el.closest('[id*="modal"], [id*="drawer"], [role="dialog"], .col-span-full');
+      const modalTitle = modalParent ? (this._extractHeading(modalParent) || modalParent.id) : 'Popup';
+      return `Close ${modalTitle} (X)`;
+    }
+
+    const svg = el.querySelector('svg');
+    if (svg) {
+      const cls = (svg.getAttribute('class') || '').toLowerCase();
+      if (cls.includes('arrow-left') || cls.includes('chevron-left')) return 'Previous';
+      if (cls.includes('arrow-right') || cls.includes('chevron-right')) return 'Next';
+      if (cls.includes('send')) return 'Send';
+      if (cls.includes('mic')) return 'Microphone / Voice';
+    }
+
+    return '';
   }
 
   _getUniqueSelector(el) {
@@ -462,7 +657,7 @@ export class DOMScanner {
   _extractHeading(el) {
     if (/^H[1-6]$/.test(el.tagName)) return el.innerText.trim();
     const h = el.querySelector('h1, h2, h3, h4, summary, [data-title]');
-    if (h) return h.innerText.trim();
+    if (h) return h.innerText.replace(/\s+/g, ' ').trim();
     return el.getAttribute('aria-label') || el.id || '';
   }
 
@@ -476,7 +671,7 @@ export class DOMScanner {
     const results = Array.from(root.querySelectorAll(selector));
     const allNodes = root.querySelectorAll('*');
     for (const node of allNodes) {
-      if (node.shadowRoot) {
+      if (node.shadowRoot && node.id !== 'weborient-shadow-host') {
         results.push(...this._querySelectorAllDeep(selector, node.shadowRoot));
       }
     }
@@ -487,7 +682,7 @@ export class DOMScanner {
     if (!root) return null;
     const allNodes = root.querySelectorAll('*');
     for (const node of allNodes) {
-      if (node.shadowRoot) {
+      if (node.shadowRoot && node.id !== 'weborient-shadow-host') {
         try {
           const found = node.shadowRoot.querySelector(selector);
           if (found) return found;

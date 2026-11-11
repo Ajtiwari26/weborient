@@ -1,23 +1,23 @@
 /**
- * WebOrient Persistent Session & Non-Linear To-Do Memory Engine (`src/sdk/session-memory.js`)
+ * WebOrient Persistent Session, Language Note-Taking & Non-Linear To-Do Memory Engine (`src/sdk/session-memory.js` v0.6.0)
  * - Uses `localStorage` (with `sessionStorage` mirror) so session state, active connection status,
- *   user language, user goals, and orientation To-Do progress survive BOTH cross-page redirects
- *   AND hard browser refreshes (F5 / Cmd+R) without losing the potential customer.
- * - Non-Linear To-Do Checklist (`todoChecklist`):
- *   Tracks every key section/feature across the website as a flexible To-Do item (`done: true | false`).
- *   The user and Live Model can jump to ANY page or section in ANY order—whenever a section is
- *   shown, clicked, swiped, or explained, its To-Do item is marked `done: true` automatically.
+ *   detected user language, agent language notes, user goals, and orientation To-Do progress survive
+ *   BOTH cross-page redirects AND hard browser refreshes (F5 / Cmd+R).
+ * - Multi-Signal Language Detection & Persistent Note-Taking:
+ *   Continuously detects user/model language (English, Hindi, Hinglish, Spanish, French), locks it,
+ *   records timestamped language notes in `state.languageNotes`, and fires `onLanguageChange` so
+ *   what the agent SAYS aloud and what the Ghost Cursor SHOWS on screen stay 100% synchronized.
  */
 
 const MEMORY_STORAGE_KEY = 'weborient_persistent_session_v4';
 
 export const SUPPORTED_LANGUAGES = {
-  'en-IN': { code: 'en-IN', name: 'English (India / Global)' },
-  'hi-IN': { code: 'hi-IN', name: 'Hindi (हिन्दी)' },
-  'hinglish': { code: 'hinglish', name: 'Hinglish (Hindi + English)' },
-  'en-US': { code: 'en-US', name: 'English (US)' },
-  'es-ES': { code: 'es-ES', name: 'Español (Spanish)' },
-  'fr-FR': { code: 'fr-FR', name: 'Français (French)' }
+  'en-IN': { code: 'en-IN', badge: 'EN', name: 'English (India / Global)' },
+  'hi-IN': { code: 'hi-IN', badge: 'HI', name: 'Hindi (हिन्दी)' },
+  'hinglish': { code: 'hinglish', badge: 'HINGLISH', name: 'Hinglish (Hindi + English)' },
+  'en-US': { code: 'en-US', badge: 'EN', name: 'English (US)' },
+  'es-ES': { code: 'es-ES', badge: 'ES', name: 'Español (Spanish)' },
+  'fr-FR': { code: 'fr-FR', badge: 'FR', name: 'Français (French)' }
 };
 
 export const DEFAULT_TODO_CHECKLIST = [
@@ -46,7 +46,7 @@ const DEMO_PAGES = new Set([
   'dashboard.html'
 ]);
 
-function isWebOrientDemoSite() {
+export function isWebOrientDemoSite() {
   if (typeof window === 'undefined') return true;
   const host = (window.location.hostname || '').toLowerCase();
   const file = window.location.pathname.split('/').pop() || '';
@@ -59,6 +59,7 @@ export class SessionMemory {
   constructor(options = {}) {
     this.storageKey = options.storageKey || `${MEMORY_STORAGE_KEY}_${options.siteKey || 'default'}`;
     this.onChange = options.onChange || (() => {});
+    this.onLanguageChange = options.onLanguageChange || null;
     this.state = this._loadOrInitialize(options);
   }
 
@@ -69,9 +70,11 @@ export class SessionMemory {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.sessionId && Array.isArray(parsed.todoChecklist)) {
-          // If this is a non-demo client website, strip any leftover demo-only checklist items
           if (!isDemo && parsed.todoChecklist.some(t => t.page === 'test-demo.html')) {
             parsed.todoChecklist = [];
+          }
+          if (!Array.isArray(parsed.languageNotes)) {
+            parsed.languageNotes = [];
           }
           return parsed;
         }
@@ -92,6 +95,7 @@ export class SessionMemory {
           : 'wss://relay.deploymate.in'),
       userLanguage: options.defaultLanguage || initialLang,
       languageLocked: false,
+      languageNotes: [],
       userIntent: {
         goal: options.defaultGoal || (isDemo
           ? 'Explore WebOrient capabilities, pricing ROI, and setup'
@@ -208,20 +212,14 @@ export class SessionMemory {
     return this.state;
   }
 
-  /**
-   * Sets whether the Gemini Live voice session is currently active so page refreshes/redirects auto-reconnect
-   */
   setLiveSessionStatus(isActive, endpoint = null) {
     this.state.isLiveActive = Boolean(isActive);
     if (endpoint) this.state.liveEndpoint = endpoint;
     this._persist();
   }
 
-  /**
-   * Records a page visit across redirects or refreshes
-   */
   recordPageVisit(pageFile) {
-    const cleanFile = String(pageFile || '').split('/').pop() || 'test-demo.html';
+    const cleanFile = String(pageFile || '').split('/').pop() || window.location?.pathname || '/';
     if (!this.state.visitedPages.includes(cleanFile)) {
       this.state.visitedPages.push(cleanFile);
       this._persist();
@@ -229,22 +227,17 @@ export class SessionMemory {
     return this.state;
   }
 
-  /**
-   * Non-Linear To-Do Completion:
-   * Marks any matching To-Do item (and records in `orientedHistory`) as `done = true` regardless of order!
-   */
   markOriented({ page, selector, title, explanation }) {
-    const currentFile = page || (typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html') || 'test-demo.html';
+    const currentFile = page || (typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || window.location.pathname || '/') : '/');
     const selStr = String(selector || '').trim();
     if (!selStr) return null;
 
-    // 1. Check off any matching item(s) in `todoChecklist` regardless of order
     const targetEl = typeof document !== 'undefined' ? (() => {
       try { return document.querySelector(selStr); } catch (_) { return null; }
     })() : null;
 
     for (const todo of this.state.todoChecklist) {
-      if (todo.page === currentFile) {
+      if (!todo.page || todo.page === currentFile || todo.page === window.location?.pathname) {
         const directMatch =
           todo.selector === selStr ||
           todo.id === selStr.replace(/^#/, '') ||
@@ -257,7 +250,6 @@ export class SessionMemory {
       }
     }
 
-    // 2. Also record granular history entry
     const key = `${currentFile}::${selStr}`;
     const existingIdx = this.state.orientedHistory.findIndex(item => item.key === key);
     const entry = {
@@ -279,9 +271,6 @@ export class SessionMemory {
     return entry;
   }
 
-  /**
-   * Allows toggling or explicitly marking a To-Do checklist item by id or selector
-   */
   markTodoById(todoId, done = true) {
     const item = this.state.todoChecklist.find(
       t => t.id === todoId || t.selector === todoId || t.title.toLowerCase().includes(String(todoId).toLowerCase())
@@ -296,9 +285,11 @@ export class SessionMemory {
 
   /**
    * Updates and locks the user's native language throughout the entire session (surviving redirects & refreshes)
+   * and records an explicit agent language note so voice ("saying") and UI tooltip ("showing") stay 100% in sync!
    */
-  setLanguage(langCode, lock = true) {
+  setLanguage(langCode, lock = true, reason = 'detected from conversation') {
     if (!langCode) return this.getLanguageConfig();
+    const prevLang = this.state.userLanguage;
     const norm = String(langCode).trim();
     if (SUPPORTED_LANGUAGES[norm]) {
       this.state.userLanguage = norm;
@@ -306,46 +297,89 @@ export class SessionMemory {
       const lower = norm.toLowerCase();
       if (lower.includes('hinglish')) this.state.userLanguage = 'hinglish';
       else if (lower.includes('hi') || lower.includes('hindi') || /[\u0900-\u097F]/.test(norm)) this.state.userLanguage = 'hi-IN';
-      else if (lower.includes('es') || lower.includes('spanish')) this.state.userLanguage = 'es-ES';
-      else if (lower.includes('fr') || lower.includes('french')) this.state.userLanguage = 'fr-FR';
+      else if (lower.includes('es') || lower.includes('spanish') || lower.includes('español')) this.state.userLanguage = 'es-ES';
+      else if (lower.includes('fr') || lower.includes('french') || lower.includes('français')) this.state.userLanguage = 'fr-FR';
       else if (lower.includes('us')) this.state.userLanguage = 'en-US';
       else this.state.userLanguage = 'en-IN';
     }
     if (lock) this.state.languageLocked = true;
+
+    const cfg = this.getLanguageConfig();
+    if (!Array.isArray(this.state.languageNotes)) {
+      this.state.languageNotes = [];
+    }
+    if (prevLang !== this.state.userLanguage || this.state.languageNotes.length === 0) {
+      const noteEntry = `[LANG LOCK: ${cfg.code} (${cfg.name})] Locked via ${reason}. Agent MUST speak AND write all Ghost Cursor 'explanation' badges strictly in ${cfg.name}.`;
+      this.state.languageNotes.push({
+        code: cfg.code,
+        name: cfg.name,
+        note: noteEntry,
+        timestamp: Date.now()
+      });
+      this.state.languageNotes = this.state.languageNotes.slice(-6);
+      this.state.userIntent.customNotes = (this.state.userIntent.customNotes || []).filter(n => !n.startsWith('[LANG LOCK:'));
+      this.state.userIntent.customNotes.push(noteEntry);
+
+      if (typeof this.onLanguageChange === 'function' && (prevLang !== this.state.userLanguage || lock)) {
+        queueMicrotask(() => this.onLanguageChange(cfg, prevLang));
+      }
+    }
+
     this._persist();
-    return this.getLanguageConfig();
+    return cfg;
   }
 
   /**
-   * Auto-detects language from user's spoken/typed transcript if not manually locked
+   * Auto-detects language from user's or model's spoken/typed transcript and locks it
+   * so the agent continues in that exact language across all turns and page navigations.
    */
-  detectLanguageFromText(text) {
-    if (!text) return;
-    // Detect Devanagari script -> Hindi
-    if (/[\u0900-\u097F]/.test(text)) {
-      this.setLanguage('hi-IN', true);
-      return;
+  detectLanguageFromText(text, role = 'user') {
+    if (!text) return null;
+    const clean = String(text).trim();
+    const lower = clean.toLowerCase();
+
+    // 1. Explicit user language switch commands always override lock
+    if (/\b(speak in english|talk in english|english mein|switch to english|only english)\b/i.test(lower)) {
+      return this.setLanguage('en-IN', true, 'explicit user request for English');
     }
-    // Detect common Hinglish markers
-    if (/\b(kya|kaise|dikhao|batao|chaliye|mujhe|aap|plan|karo|bhai|hai|hain|aur|mein)\b/i.test(text)) {
-      this.setLanguage('hinglish', true);
+    if (/\b(hinglish mein|talk in hinglish|speak hinglish)\b/i.test(lower)) {
+      return this.setLanguage('hinglish', true, 'explicit user request for Hinglish');
     }
+    if (/\b(hindi mein|talk in hindi|speak in hindi|हिंदी में)\b/i.test(lower)) {
+      return this.setLanguage('hi-IN', true, 'explicit user request for Hindi');
+    }
+    if (/\b(habla en español|speak spanish|in spanish)\b/i.test(lower)) {
+      return this.setLanguage('es-ES', true, 'explicit user request for Spanish');
+    }
+    if (/\b(parle en français|speak french|in french)\b/i.test(lower)) {
+      return this.setLanguage('fr-FR', true, 'explicit user request for French');
+    }
+
+    // 2. Detect Devanagari script -> Hindi or Hinglish (if mixed with Latin words)
+    if (/[\u0900-\u097F]/.test(clean)) {
+      const hasLatinWords = /[a-zA-Z]{4,}/.test(clean);
+      return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, `${role} Devanagari speech transcript`);
+    }
+
+    // 3. Detect conversational Hinglish / Romanized Hindi markers
+    const hinglishMatches = lower.match(
+      /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|ye|woh|wo|hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
+    );
+    if (hinglishMatches && (hinglishMatches.length >= 2 || (role === 'user' && hinglishMatches.length >= 1))) {
+      return this.setLanguage('hinglish', true, `${role} Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
+    }
+
+    return null;
   }
 
   getLanguageConfig() {
     return SUPPORTED_LANGUAGES[this.state.userLanguage] || SUPPORTED_LANGUAGES['en-IN'];
   }
 
-  /**
-   * Records conversation transcript turns so after a page redirect or refresh,
-   * the Live Model remembers the exact conversation flow!
-   */
   appendTranscript(role, text) {
     if (!text || !String(text).trim()) return;
     const clean = String(text).replace(/\s+/g, ' ').trim();
-    if (role === 'user') {
-      this.detectLanguageFromText(clean);
-    }
+    this.detectLanguageFromText(clean, role);
 
     const last = this.state.recentTranscripts[this.state.recentTranscripts.length - 1];
     if (last && last.role === role && Date.now() - last.timestamp < 4000) {
@@ -355,7 +389,7 @@ export class SessionMemory {
       this.state.recentTranscripts.push({
         role,
         text: clean.slice(0, 300),
-        page: typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html',
+        page: typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || window.location.pathname || '/') : '/',
         timestamp: Date.now()
       });
     }
@@ -366,9 +400,6 @@ export class SessionMemory {
     this._persist();
   }
 
-  /**
-   * Updates what the user wants (goal, interested tier, notes, form facts)
-   */
   updateUserIntent({ goal, interestedTier, note, language, todoIdDone, formFactPatch }) {
     if (goal) this.state.userIntent.goal = goal;
     if (interestedTier) this.state.userIntent.interestedTier = interestedTier;
@@ -376,7 +407,7 @@ export class SessionMemory {
       this.state.userIntent.customNotes.push(note);
     }
     if (language) {
-      this.setLanguage(language, true);
+      this.setLanguage(language, true, 'agent tool update_session_memory');
     }
     if (todoIdDone) {
       this.markTodoById(todoIdDone, true);
@@ -400,38 +431,40 @@ export class SessionMemory {
     return actions;
   }
 
-  /**
-   * Builds the Non-Linear To-Do & Session Continuity prompt block for the Gemini Live Model
-   */
   buildModelContextSummary() {
     const langCfg = this.getLanguageConfig();
-    const currentFile = typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || 'test-demo.html') : 'test-demo.html';
+    const currentFile = typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || window.location.pathname || '/') : '/';
 
     const doneItems = this.state.todoChecklist.filter(t => t.done);
-    const pendingOnThisPage = this.state.todoChecklist.filter(t => !t.done && t.page === currentFile);
-    const pendingOtherPages = this.state.todoChecklist.filter(t => !t.done && t.page !== currentFile);
+    const pendingOnThisPage = this.state.todoChecklist.filter(t => !t.done && (!t.page || t.page === currentFile || t.page === window.location?.pathname));
+    const pendingOtherPages = this.state.todoChecklist.filter(t => !t.done && t.page && t.page !== currentFile && t.page !== window.location?.pathname);
 
     const recentTurns = this.state.recentTranscripts
       .slice(-6)
       .map(t => `  [${t.role.toUpperCase()} on ${t.page}]: ${t.text}`)
       .join('\n') || '  (Session just started)';
 
+    const notesList = (this.state.userIntent.customNotes || []).slice(-5).join(' | ') || `Language locked to ${langCfg.name}`;
+
     return [
-      `=== PERSISTENT SESSION & NON-LINEAR TO-DO MEMORY (${this.state.sessionId}) ===`,
-      `1. LOCKED NATIVE LANGUAGE: ${langCfg.name} (code: ${langCfg.code}). You MUST speak and respond strictly in ${langCfg.name} throughout this session, across all page redirects and refreshes.`,
+      `=== PERSISTENT SESSION, LANGUAGE NOTES & NON-LINEAR TO-DO MEMORY (${this.state.sessionId}) ===`,
+      `1. DETECTED & LOCKED LANGUAGE: ${langCfg.name} (code: ${langCfg.code}).`,
+      `   - SHOWING & SAYING SYNC RULE (CRITICAL): Everything you SAY aloud AND every \`explanation\` badge text you pass to \`move_and_highlight\`, \`click_element\`, \`fill_form_field\`, or \`swipe_or_swap\` MUST be in ${langCfg.name}! Never show an English tooltip badge when speaking ${langCfg.name}, and never switch language unless the user asks!`,
+      `   - AGENT SESSION NOTES: ${notesList}`,
       `2. USER GOAL / WANT: "${this.state.userIntent.goal}" (Interested Tier: ${this.state.userIntent.interestedTier})`,
       `3. CURRENT ACTIVE PAGE: ${currentFile} (Pages visited so far: ${this.state.visitedPages.join(' -> ') || currentFile})`,
       `4. NON-LINEAR ORIENTATION TO-DO CHECKLIST (Follow the user in ANY order; do NOT force a rigid sequence!):`,
-      `   - COMPLETED [x] (${doneItems.length}/${this.state.todoChecklist.length}): ${doneItems.map(i => `${i.title} (${i.page} ${i.selector})`).join(', ') || 'None yet'}`,
+      `   - COMPLETED [x] (${doneItems.length}/${this.state.todoChecklist.length}): ${doneItems.map(i => `${i.title} (${i.selector})`).join(', ') || 'None yet'}`,
       `   - REMAINING ON CURRENT PAGE [ ] (${currentFile}): ${pendingOnThisPage.map(i => `${i.title} -> selector "${i.selector}"`).join(' | ') || 'All sections on this page are done!'}`,
       `   - REMAINING ON OTHER PAGES [ ]: ${pendingOtherPages.map(i => `${i.title} (${i.page})`).join(', ') || 'All pages complete!'}`,
-      `5. VISUAL GROUNDING RULE: Every single time you describe or mention any section, card, tab, calculator, or input field on the page, you MUST call \`move_and_highlight\`, \`click_element\`, \`swipe_or_swap\`, or \`fill_form_field\` on its selector so the user sees the Ghost Cursor highlighting or clicking it on screen while you speak!`,
+      `5. FULL PAGE, POPUP & CLOSE-BUTTON CONTROL RULE: Every button, popup, modal, drawer, banner, form input, and Close ('X') button on the screen is indexed with a selector or \`[data-wo-id="wo-..."]\`. Whenever the user asks to open, fill, interact with, or close any popup/modal/drawer/banner/button, immediately call \`click_element\`, \`fill_form_field\`, \`move_and_highlight\`, or \`swipe_or_swap\` on its selector!`,
       `6. RECENT CONVERSATION CONTINUITY (Across Page Redirects / Refreshes):\n${recentTurns}`
     ].join('\n');
   }
 
   reset() {
     const keepLang = this.state?.userLanguage || 'en-IN';
+    const wasConnected = Boolean(this.state?.isLiveActive);
     const endpoint =
       this.state?.liveEndpoint ||
       (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')

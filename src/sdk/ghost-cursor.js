@@ -793,14 +793,25 @@ export class GhostCursor {
     };
   }
 
-  async typeIntoField(selector, rawValue, charDelayMs = 22) {
+  /**
+   * Live-updates the floating coachmark badge text above the currently spotlighted component
+   * so what the Ghost Cursor SHOWS on screen stays 100% synchronized with what the agent SAYS aloud.
+   */
+  updateActiveExplanation(explanation) {
+    if (!explanation || !this.activeTarget || !document.body.contains(this.activeTarget)) return;
+    this.activeExplanation = String(explanation).trim().slice(0, 140);
+    this._syncSpotlightPosition();
+  }
+
+  async typeIntoField(selector, rawValue, charDelayMs = 22, explanation = null) {
     const el = this._resolve(selector);
     if (!el) {
       return { success: false, elementFound: false, error: `Form field not found: ${selector}` };
     }
 
     const normalizedValue = this._normalizeVoiceInput(el, rawValue);
-    const res = await this.moveToElement(el, true, `Filling: ${normalizedValue}`);
+    const badgeText = explanation || `${normalizedValue}`;
+    const res = await this.moveToElement(el, true, badgeText);
     if (!res.success) return res;
 
     if (typeof el.focus === 'function') el.focus({ preventScroll: true });
@@ -883,7 +894,7 @@ export class GhostCursor {
     return this._buildFieldResult(el, selector);
   }
 
-  async fillFormBatch(fields = []) {
+  async fillFormBatch(fields = [], explanation = null) {
     if (!Array.isArray(fields) || fields.length === 0) {
       return { success: false, error: 'No fields provided for batch fill' };
     }
@@ -891,7 +902,7 @@ export class GhostCursor {
     const results = [];
     for (const item of fields) {
       if (!item || !item.selector) continue;
-      const res = await this.typeIntoField(item.selector, item.value ?? '', 12);
+      const res = await this.typeIntoField(item.selector, item.value ?? '', 12, item.explanation || explanation || null);
       results.push(res);
     }
 
@@ -905,11 +916,11 @@ export class GhostCursor {
     };
   }
 
-  async scroll(direction = 'down', targetSelector = null, amount = 'page') {
+  async scroll(direction = 'down', targetSelector = null, amount = 'page', explanation = null) {
     if (targetSelector) {
       const targetEl = this._resolve(targetSelector);
       if (targetEl) {
-        return await this.moveToElement(targetEl, true, `Scrolled to ${targetSelector}`);
+        return await this.moveToElement(targetEl, true, explanation || null);
       }
     }
 
@@ -939,7 +950,7 @@ export class GhostCursor {
     };
   }
 
-  async swipeOrSwap(selector, action = 'next', targetValue = null) {
+  async swipeOrSwap(selector, action = 'next', targetValue = null, explanation = null) {
     let el = this._resolve(selector);
     if (!el) {
       return { success: false, elementFound: false, error: `Target widget not found: ${selector}` };
@@ -965,7 +976,7 @@ export class GhostCursor {
       } else if (act === 'prev' || act === 'left' || act === 'decrease') {
         nextVal = Math.max(min, current - step * 5);
       }
-      return await this.typeIntoField(rangeInput, String(nextVal));
+      return await this.typeIntoField(rangeInput, String(nextVal), 22, explanation);
     }
 
     // 2. Toggle Switch or Checkbox
@@ -973,7 +984,7 @@ export class GhostCursor {
       ? el
       : el.querySelector?.('[role="switch"], input[type="checkbox"]');
     if (switchEl && (el === switchEl || act === 'toggle' || act === 'switch')) {
-      return await this.click(switchEl, `Toggled switch`);
+      return await this.click(switchEl, explanation || null);
     }
 
     // 3. Tablist / Tabs
@@ -1005,7 +1016,7 @@ export class GhostCursor {
       }
 
       if (targetTab) {
-        await this.click(targetTab, `Swapped to tab: ${targetTab.innerText.trim()}`);
+        await this.click(targetTab, explanation || targetTab.innerText.trim());
         return {
           success: true,
           action: 'swipe_or_swap',
@@ -1020,7 +1031,7 @@ export class GhostCursor {
       ? el
       : (el.querySelector('[data-carousel]') || el);
 
-    await this.moveToElement(carouselBox, true, `Swiping carousel (${act})`);
+    await this.moveToElement(carouselBox, true, explanation || null);
     const rect = carouselBox.getBoundingClientRect();
     const cy = Math.max(24, Math.min(window.innerHeight - 24, rect.top + rect.height * 0.5));
     const isNext = act !== 'prev' && act !== 'right';

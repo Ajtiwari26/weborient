@@ -9,25 +9,25 @@
 
 // --- MODULE: session-memory.js ---
 /**
- * WebOrient Persistent Session & Non-Linear To-Do Memory Engine (`src/sdk/session-memory.js`)
+ * WebOrient Persistent Session, Language Note-Taking & Non-Linear To-Do Memory Engine (`src/sdk/session-memory.js` v0.6.0)
  * - Uses `localStorage` (with `sessionStorage` mirror) so session state, active connection status,
- *   user language, user goals, and orientation To-Do progress survive BOTH cross-page redirects
- *   AND hard browser refreshes (F5 / Cmd+R) without losing the potential customer.
- * - Non-Linear To-Do Checklist (`todoChecklist`):
- *   Tracks every key section/feature across the website as a flexible To-Do item (`done: true | false`).
- *   The user and Live Model can jump to ANY page or section in ANY order—whenever a section is
- *   shown, clicked, swiped, or explained, its To-Do item is marked `done: true` automatically.
+ *   detected user language, agent language notes, user goals, and orientation To-Do progress survive
+ *   BOTH cross-page redirects AND hard browser refreshes (F5 / Cmd+R).
+ * - Multi-Signal Language Detection & Persistent Note-Taking:
+ *   Continuously detects user/model language (English, Hindi, Hinglish, Spanish, French), locks it,
+ *   records timestamped language notes in `state.languageNotes`, and fires `onLanguageChange` so
+ *   what the agent SAYS aloud and what the Ghost Cursor SHOWS on screen stay 100% synchronized.
  */
 
 const MEMORY_STORAGE_KEY = 'weborient_persistent_session_v4';
 
 const SUPPORTED_LANGUAGES = {
-  'en-IN': { code: 'en-IN', name: 'English (India / Global)' },
-  'hi-IN': { code: 'hi-IN', name: 'Hindi (हिन्दी)' },
-  'hinglish': { code: 'hinglish', name: 'Hinglish (Hindi + English)' },
-  'en-US': { code: 'en-US', name: 'English (US)' },
-  'es-ES': { code: 'es-ES', name: 'Español (Spanish)' },
-  'fr-FR': { code: 'fr-FR', name: 'Français (French)' }
+  'en-IN': { code: 'en-IN', badge: 'EN', name: 'English (India / Global)' },
+  'hi-IN': { code: 'hi-IN', badge: 'HI', name: 'Hindi (हिन्दी)' },
+  'hinglish': { code: 'hinglish', badge: 'HINGLISH', name: 'Hinglish (Hindi + English)' },
+  'en-US': { code: 'en-US', badge: 'EN', name: 'English (US)' },
+  'es-ES': { code: 'es-ES', badge: 'ES', name: 'Español (Spanish)' },
+  'fr-FR': { code: 'fr-FR', badge: 'FR', name: 'Français (French)' }
 };
 
 const DEFAULT_TODO_CHECKLIST = [
@@ -69,6 +69,7 @@ class SessionMemory {
   constructor(options = {}) {
     this.storageKey = options.storageKey || `${MEMORY_STORAGE_KEY}_${options.siteKey || 'default'}`;
     this.onChange = options.onChange || (() => {});
+    this.onLanguageChange = options.onLanguageChange || null;
     this.state = this._loadOrInitialize(options);
   }
 
@@ -79,9 +80,11 @@ class SessionMemory {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.sessionId && Array.isArray(parsed.todoChecklist)) {
-          // If this is a non-demo client website, strip any leftover demo-only checklist items
           if (!isDemo && parsed.todoChecklist.some(t => t.page === 'test-demo.html')) {
             parsed.todoChecklist = [];
+          }
+          if (!Array.isArray(parsed.languageNotes)) {
+            parsed.languageNotes = [];
           }
           return parsed;
         }
@@ -102,6 +105,7 @@ class SessionMemory {
           : 'wss://relay.deploymate.in'),
       userLanguage: options.defaultLanguage || initialLang,
       languageLocked: false,
+      languageNotes: [],
       userIntent: {
         goal: options.defaultGoal || (isDemo
           ? 'Explore WebOrient capabilities, pricing ROI, and setup'
@@ -218,20 +222,14 @@ class SessionMemory {
     return this.state;
   }
 
-  /**
-   * Sets whether the Gemini Live voice session is currently active so page refreshes/redirects auto-reconnect
-   */
   setLiveSessionStatus(isActive, endpoint = null) {
     this.state.isLiveActive = Boolean(isActive);
     if (endpoint) this.state.liveEndpoint = endpoint;
     this._persist();
   }
 
-  /**
-   * Records a page visit across redirects or refreshes
-   */
   recordPageVisit(pageFile) {
-    const cleanFile = String(pageFile || '').split('/').pop() || 'test-demo.html';
+    const cleanFile = String(pageFile || '').split('/').pop() || window.location?.pathname || '/';
     if (!this.state.visitedPages.includes(cleanFile)) {
       this.state.visitedPages.push(cleanFile);
       this._persist();
@@ -239,22 +237,17 @@ class SessionMemory {
     return this.state;
   }
 
-  /**
-   * Non-Linear To-Do Completion:
-   * Marks any matching To-Do item (and records in `orientedHistory`) as `done = true` regardless of order!
-   */
   markOriented({ page, selector, title, explanation }) {
-    const currentFile = page || (typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html') || 'test-demo.html';
+    const currentFile = page || (typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || window.location.pathname || '/') : '/');
     const selStr = String(selector || '').trim();
     if (!selStr) return null;
 
-    // 1. Check off any matching item(s) in `todoChecklist` regardless of order
     const targetEl = typeof document !== 'undefined' ? (() => {
       try { return document.querySelector(selStr); } catch (_) { return null; }
     })() : null;
 
     for (const todo of this.state.todoChecklist) {
-      if (todo.page === currentFile) {
+      if (!todo.page || todo.page === currentFile || todo.page === window.location?.pathname) {
         const directMatch =
           todo.selector === selStr ||
           todo.id === selStr.replace(/^#/, '') ||
@@ -267,7 +260,6 @@ class SessionMemory {
       }
     }
 
-    // 2. Also record granular history entry
     const key = `${currentFile}::${selStr}`;
     const existingIdx = this.state.orientedHistory.findIndex(item => item.key === key);
     const entry = {
@@ -289,9 +281,6 @@ class SessionMemory {
     return entry;
   }
 
-  /**
-   * Allows toggling or explicitly marking a To-Do checklist item by id or selector
-   */
   markTodoById(todoId, done = true) {
     const item = this.state.todoChecklist.find(
       t => t.id === todoId || t.selector === todoId || t.title.toLowerCase().includes(String(todoId).toLowerCase())
@@ -306,9 +295,11 @@ class SessionMemory {
 
   /**
    * Updates and locks the user's native language throughout the entire session (surviving redirects & refreshes)
+   * and records an explicit agent language note so voice ("saying") and UI tooltip ("showing") stay 100% in sync!
    */
-  setLanguage(langCode, lock = true) {
+  setLanguage(langCode, lock = true, reason = 'detected from conversation') {
     if (!langCode) return this.getLanguageConfig();
+    const prevLang = this.state.userLanguage;
     const norm = String(langCode).trim();
     if (SUPPORTED_LANGUAGES[norm]) {
       this.state.userLanguage = norm;
@@ -316,46 +307,89 @@ class SessionMemory {
       const lower = norm.toLowerCase();
       if (lower.includes('hinglish')) this.state.userLanguage = 'hinglish';
       else if (lower.includes('hi') || lower.includes('hindi') || /[\u0900-\u097F]/.test(norm)) this.state.userLanguage = 'hi-IN';
-      else if (lower.includes('es') || lower.includes('spanish')) this.state.userLanguage = 'es-ES';
-      else if (lower.includes('fr') || lower.includes('french')) this.state.userLanguage = 'fr-FR';
+      else if (lower.includes('es') || lower.includes('spanish') || lower.includes('español')) this.state.userLanguage = 'es-ES';
+      else if (lower.includes('fr') || lower.includes('french') || lower.includes('français')) this.state.userLanguage = 'fr-FR';
       else if (lower.includes('us')) this.state.userLanguage = 'en-US';
       else this.state.userLanguage = 'en-IN';
     }
     if (lock) this.state.languageLocked = true;
+
+    const cfg = this.getLanguageConfig();
+    if (!Array.isArray(this.state.languageNotes)) {
+      this.state.languageNotes = [];
+    }
+    if (prevLang !== this.state.userLanguage || this.state.languageNotes.length === 0) {
+      const noteEntry = `[LANG LOCK: ${cfg.code} (${cfg.name})] Locked via ${reason}. Agent MUST speak AND write all Ghost Cursor 'explanation' badges strictly in ${cfg.name}.`;
+      this.state.languageNotes.push({
+        code: cfg.code,
+        name: cfg.name,
+        note: noteEntry,
+        timestamp: Date.now()
+      });
+      this.state.languageNotes = this.state.languageNotes.slice(-6);
+      this.state.userIntent.customNotes = (this.state.userIntent.customNotes || []).filter(n => !n.startsWith('[LANG LOCK:'));
+      this.state.userIntent.customNotes.push(noteEntry);
+
+      if (typeof this.onLanguageChange === 'function' && (prevLang !== this.state.userLanguage || lock)) {
+        queueMicrotask(() => this.onLanguageChange(cfg, prevLang));
+      }
+    }
+
     this._persist();
-    return this.getLanguageConfig();
+    return cfg;
   }
 
   /**
-   * Auto-detects language from user's spoken/typed transcript if not manually locked
+   * Auto-detects language from user's or model's spoken/typed transcript and locks it
+   * so the agent continues in that exact language across all turns and page navigations.
    */
-  detectLanguageFromText(text) {
-    if (!text) return;
-    // Detect Devanagari script -> Hindi
-    if (/[\u0900-\u097F]/.test(text)) {
-      this.setLanguage('hi-IN', true);
-      return;
+  detectLanguageFromText(text, role = 'user') {
+    if (!text) return null;
+    const clean = String(text).trim();
+    const lower = clean.toLowerCase();
+
+    // 1. Explicit user language switch commands always override lock
+    if (/\b(speak in english|talk in english|english mein|switch to english|only english)\b/i.test(lower)) {
+      return this.setLanguage('en-IN', true, 'explicit user request for English');
     }
-    // Detect common Hinglish markers
-    if (/\b(kya|kaise|dikhao|batao|chaliye|mujhe|aap|plan|karo|bhai|hai|hain|aur|mein)\b/i.test(text)) {
-      this.setLanguage('hinglish', true);
+    if (/\b(hinglish mein|talk in hinglish|speak hinglish)\b/i.test(lower)) {
+      return this.setLanguage('hinglish', true, 'explicit user request for Hinglish');
     }
+    if (/\b(hindi mein|talk in hindi|speak in hindi|हिंदी में)\b/i.test(lower)) {
+      return this.setLanguage('hi-IN', true, 'explicit user request for Hindi');
+    }
+    if (/\b(habla en español|speak spanish|in spanish)\b/i.test(lower)) {
+      return this.setLanguage('es-ES', true, 'explicit user request for Spanish');
+    }
+    if (/\b(parle en français|speak french|in french)\b/i.test(lower)) {
+      return this.setLanguage('fr-FR', true, 'explicit user request for French');
+    }
+
+    // 2. Detect Devanagari script -> Hindi or Hinglish (if mixed with Latin words)
+    if (/[\u0900-\u097F]/.test(clean)) {
+      const hasLatinWords = /[a-zA-Z]{4,}/.test(clean);
+      return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, `${role} Devanagari speech transcript`);
+    }
+
+    // 3. Detect conversational Hinglish / Romanized Hindi markers
+    const hinglishMatches = lower.match(
+      /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|ye|woh|wo|hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
+    );
+    if (hinglishMatches && (hinglishMatches.length >= 2 || (role === 'user' && hinglishMatches.length >= 1))) {
+      return this.setLanguage('hinglish', true, `${role} Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
+    }
+
+    return null;
   }
 
   getLanguageConfig() {
     return SUPPORTED_LANGUAGES[this.state.userLanguage] || SUPPORTED_LANGUAGES['en-IN'];
   }
 
-  /**
-   * Records conversation transcript turns so after a page redirect or refresh,
-   * the Live Model remembers the exact conversation flow!
-   */
   appendTranscript(role, text) {
     if (!text || !String(text).trim()) return;
     const clean = String(text).replace(/\s+/g, ' ').trim();
-    if (role === 'user') {
-      this.detectLanguageFromText(clean);
-    }
+    this.detectLanguageFromText(clean, role);
 
     const last = this.state.recentTranscripts[this.state.recentTranscripts.length - 1];
     if (last && last.role === role && Date.now() - last.timestamp < 4000) {
@@ -365,7 +399,7 @@ class SessionMemory {
       this.state.recentTranscripts.push({
         role,
         text: clean.slice(0, 300),
-        page: typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : 'test-demo.html',
+        page: typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || window.location.pathname || '/') : '/',
         timestamp: Date.now()
       });
     }
@@ -376,9 +410,6 @@ class SessionMemory {
     this._persist();
   }
 
-  /**
-   * Updates what the user wants (goal, interested tier, notes, form facts)
-   */
   updateUserIntent({ goal, interestedTier, note, language, todoIdDone, formFactPatch }) {
     if (goal) this.state.userIntent.goal = goal;
     if (interestedTier) this.state.userIntent.interestedTier = interestedTier;
@@ -386,7 +417,7 @@ class SessionMemory {
       this.state.userIntent.customNotes.push(note);
     }
     if (language) {
-      this.setLanguage(language, true);
+      this.setLanguage(language, true, 'agent tool update_session_memory');
     }
     if (todoIdDone) {
       this.markTodoById(todoIdDone, true);
@@ -410,38 +441,40 @@ class SessionMemory {
     return actions;
   }
 
-  /**
-   * Builds the Non-Linear To-Do & Session Continuity prompt block for the Gemini Live Model
-   */
   buildModelContextSummary() {
     const langCfg = this.getLanguageConfig();
-    const currentFile = typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || 'test-demo.html') : 'test-demo.html';
+    const currentFile = typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || window.location.pathname || '/') : '/';
 
     const doneItems = this.state.todoChecklist.filter(t => t.done);
-    const pendingOnThisPage = this.state.todoChecklist.filter(t => !t.done && t.page === currentFile);
-    const pendingOtherPages = this.state.todoChecklist.filter(t => !t.done && t.page !== currentFile);
+    const pendingOnThisPage = this.state.todoChecklist.filter(t => !t.done && (!t.page || t.page === currentFile || t.page === window.location?.pathname));
+    const pendingOtherPages = this.state.todoChecklist.filter(t => !t.done && t.page && t.page !== currentFile && t.page !== window.location?.pathname);
 
     const recentTurns = this.state.recentTranscripts
       .slice(-6)
       .map(t => `  [${t.role.toUpperCase()} on ${t.page}]: ${t.text}`)
       .join('\n') || '  (Session just started)';
 
+    const notesList = (this.state.userIntent.customNotes || []).slice(-5).join(' | ') || `Language locked to ${langCfg.name}`;
+
     return [
-      `=== PERSISTENT SESSION & NON-LINEAR TO-DO MEMORY (${this.state.sessionId}) ===`,
-      `1. LOCKED NATIVE LANGUAGE: ${langCfg.name} (code: ${langCfg.code}). You MUST speak and respond strictly in ${langCfg.name} throughout this session, across all page redirects and refreshes.`,
+      `=== PERSISTENT SESSION, LANGUAGE NOTES & NON-LINEAR TO-DO MEMORY (${this.state.sessionId}) ===`,
+      `1. DETECTED & LOCKED LANGUAGE: ${langCfg.name} (code: ${langCfg.code}).`,
+      `   - SHOWING & SAYING SYNC RULE (CRITICAL): Everything you SAY aloud AND every \`explanation\` badge text you pass to \`move_and_highlight\`, \`click_element\`, \`fill_form_field\`, or \`swipe_or_swap\` MUST be in ${langCfg.name}! Never show an English tooltip badge when speaking ${langCfg.name}, and never switch language unless the user asks!`,
+      `   - AGENT SESSION NOTES: ${notesList}`,
       `2. USER GOAL / WANT: "${this.state.userIntent.goal}" (Interested Tier: ${this.state.userIntent.interestedTier})`,
       `3. CURRENT ACTIVE PAGE: ${currentFile} (Pages visited so far: ${this.state.visitedPages.join(' -> ') || currentFile})`,
       `4. NON-LINEAR ORIENTATION TO-DO CHECKLIST (Follow the user in ANY order; do NOT force a rigid sequence!):`,
-      `   - COMPLETED [x] (${doneItems.length}/${this.state.todoChecklist.length}): ${doneItems.map(i => `${i.title} (${i.page} ${i.selector})`).join(', ') || 'None yet'}`,
+      `   - COMPLETED [x] (${doneItems.length}/${this.state.todoChecklist.length}): ${doneItems.map(i => `${i.title} (${i.selector})`).join(', ') || 'None yet'}`,
       `   - REMAINING ON CURRENT PAGE [ ] (${currentFile}): ${pendingOnThisPage.map(i => `${i.title} -> selector "${i.selector}"`).join(' | ') || 'All sections on this page are done!'}`,
       `   - REMAINING ON OTHER PAGES [ ]: ${pendingOtherPages.map(i => `${i.title} (${i.page})`).join(', ') || 'All pages complete!'}`,
-      `5. VISUAL GROUNDING RULE: Every single time you describe or mention any section, card, tab, calculator, or input field on the page, you MUST call \`move_and_highlight\`, \`click_element\`, \`swipe_or_swap\`, or \`fill_form_field\` on its selector so the user sees the Ghost Cursor highlighting or clicking it on screen while you speak!`,
+      `5. FULL PAGE, POPUP & CLOSE-BUTTON CONTROL RULE: Every button, popup, modal, drawer, banner, form input, and Close ('X') button on the screen is indexed with a selector or \`[data-wo-id="wo-..."]\`. Whenever the user asks to open, fill, interact with, or close any popup/modal/drawer/banner/button, immediately call \`click_element\`, \`fill_form_field\`, \`move_and_highlight\`, or \`swipe_or_swap\` on its selector!`,
       `6. RECENT CONVERSATION CONTINUITY (Across Page Redirects / Refreshes):\n${recentTurns}`
     ].join('\n');
   }
 
   reset() {
     const keepLang = this.state?.userLanguage || 'en-IN';
+    const wasConnected = Boolean(this.state?.isLiveActive);
     const endpoint =
       this.state?.liveEndpoint ||
       (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -461,13 +494,13 @@ class SessionMemory {
 
 // --- MODULE: dom-scanner.js ---
 /**
- * WebOrient DOM Scanner & Semantic Grounding Engine (v0.4.0)
- * - Assigns persistent deterministic `data-wo-id` attributes to actionable & landmark elements
- * - Resolves selectors, data-wo-id, or natural accessible labels to live DOM elements
- * - Real-time `matchElementFromSpeech(spokenText)`: maps whatever the Live Voice Agent is
- *   currently saying to the matching DOM element on screen so the Ghost Cursor highlights it automatically!
- * - Extracts structured page content, headings, pricing cards, FAQs, and tables for Q&A
- * - Filters out sensitive fields (passwords, credit cards, [data-agent-ignore])
+ * WebOrient DOM Scanner & Semantic Grounding Engine (v0.6.0 — Full-Page, Popup, Banner & Close-Button Indexing)
+ * - Assigns persistent deterministic `data-wo-id` attributes to EVERY actionable element, popup, banner, and close button
+ * - Infers semantic labels for icon-only buttons (`<svg class="lucide-x">` -> "Close Popup / Modal (X)", arrows, etc.)
+ *   and sibling `<label>` fields (React/Tailwind forms where `<label>` is a sibling of `<input>`)
+ * - `scanActiveOverlaysAndPopups()`: detects any open modal, drawer, popup, ad overlay, banner, or expanded dossier
+ *   along with its exact `closeButtonSelector` and internal controls
+ * - `discoverSiteRoutes()`: indexes all internal routes, hash sections, and SPA navigation triggers from a 1-line embed
  */
 class DOMScanner {
   constructor(options = {}) {
@@ -478,6 +511,7 @@ class DOMScanner {
       '.weborient-ignore',
       '#weborient-overlay',
       '#weborient-overlay *',
+      '#weborient-shadow-host',
       '#test-toolbar',
       '#test-toolbar *'
     ];
@@ -487,18 +521,33 @@ class DOMScanner {
   /**
    * Real-time Transcript-to-DOM Matcher:
    * Given a phrase currently being spoken by the Gemini Live Agent, finds the best matching
-   * DOM section, card, tab, button, or form field on the active page so the Ghost Cursor
-   * automatically scrolls to and highlights whatever the agent is describing!
+   * DOM section, popup, card, tab, button, or form field on the active page.
    */
   matchElementFromSpeech(spokenText, todoChecklist = []) {
     if (!spokenText || typeof document === 'undefined') return null;
     const text = String(spokenText).toLowerCase().trim();
     if (text.length < 4) return null;
 
-    const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
+    // 0. If an active modal/popup/drawer is open on screen, prioritize matching controls inside it
+    const activePopups = this.scanActiveOverlaysAndPopups();
+    if (activePopups.length > 0) {
+      const topPopup = activePopups[0];
+      if (/\b(close|band|dismiss|cancel|exit|hatay|hatao)\b/i.test(text) && topPopup.closeButtonSelector) {
+        const closeEl = this.resolveElement(topPopup.closeButtonSelector);
+        if (closeEl) {
+          return {
+            element: closeEl,
+            selector: topPopup.closeButtonSelector,
+            title: topPopup.title ? `Close ${topPopup.title}` : 'Close'
+          };
+        }
+      }
+    }
+
+    const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
 
     // 1. Check current-page To-Do checklist keywords first for high-precision section matching
-    const pageTodos = (todoChecklist || []).filter(t => t.page === currentFile);
+    const pageTodos = (todoChecklist || []).filter(t => !t.page || t.page === currentFile || t.page === window.location.pathname);
     for (const todo of pageTodos) {
       if (Array.isArray(todo.keywords)) {
         const hit = todo.keywords.some(kw => text.includes(kw.toLowerCase()));
@@ -516,9 +565,9 @@ class DOMScanner {
       }
     }
 
-    // 2. Match against interactive controls, cards, tabs, headings, and sections on the page
+    // 2. Match against interactive controls, popups, cards, tabs, headings, and sections on the page
     const candidates = this._querySelectorAllDeep(
-      'section[id], .pricing-card, [role="tab"], [role="switch"], [data-carousel], details[id], form[id], button[id], input[id], select[id], h2, h3'
+      'section[id], [id*="modal"], [id*="drawer"], [id*="calculator"], .pricing-card, [role="tab"], [role="switch"], [data-carousel], details[id], form, button, input, select, h2, h3, h4'
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
 
     let bestEl = null;
@@ -531,7 +580,6 @@ class DOMScanner {
       if (!label && !idStr) continue;
 
       let score = 0;
-      // Check significant words (>= 4 chars)
       const words = `${label} ${idStr}`.split(/\s+/).filter(w => w.length >= 4 && !['section', 'button', 'input', 'select', 'table'].includes(w));
       for (const w of words) {
         if (text.includes(w)) score += 25;
@@ -547,7 +595,7 @@ class DOMScanner {
     }
 
     if (bestEl) {
-      const targetNode = bestEl.closest('section[id], .pricing-card, details[id]') || bestEl;
+      const targetNode = bestEl.closest('section[id], [id*="modal"], [id*="drawer"], .pricing-card, details[id]') || bestEl;
       return {
         element: targetNode,
         selector: this._getUniqueSelector(targetNode),
@@ -559,7 +607,109 @@ class DOMScanner {
   }
 
   /**
-   * Resolves a selector, data-wo-id, element ID, or accessible label to a DOM element
+   * Detects any active modals, popups, drawers, ad overlays, banners, or expanded dossiers
+   * currently visible on screen, including their exact Close (`X`) button selector!
+   */
+  scanActiveOverlaysAndPopups() {
+    if (typeof document === 'undefined') return [];
+    const popupSelectors = [
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '[role="alertdialog"]',
+      '#scheduler-booking-modal',
+      '#personalize-drawer',
+      '[id*="modal" i]',
+      '[id*="popup" i]',
+      '[id*="drawer" i]',
+      '[id*="banner" i]',
+      '[class*="modal" i]',
+      '[class*="popup" i]',
+      '[class*="drawer" i]',
+      '.col-span-full.bg-ink'
+    ].join(', ');
+
+    const rawNodes = Array.from(document.querySelectorAll(popupSelectors))
+      .filter(el => !this._isIgnored(el) && this._isVisible(el, false));
+
+    const results = [];
+    for (const node of rawNodes) {
+      const woId = this._ensureWoId(node);
+      const selector = this._getUniqueSelector(node);
+      const title = this._extractHeading(node) || node.id || 'Active Popup / Overlay';
+
+      // Find close / dismiss button inside this popup/overlay
+      let closeBtn = node.querySelector(
+        'button[aria-label*="close" i], button[aria-label*="dismiss" i], button[title*="close" i], [data-dismiss], [data-close]'
+      );
+      if (!closeBtn) {
+        const allBtns = Array.from(node.querySelectorAll('button, [role="button"]'));
+        closeBtn = allBtns.find(b => this._isCloseOrDismissButton(b)) || null;
+      }
+
+      let closeButtonSelector = null;
+      if (closeBtn) {
+        this._ensureWoId(closeBtn);
+        closeButtonSelector = this._getUniqueSelector(closeBtn);
+      }
+
+      const controls = Array.from(node.querySelectorAll('button, a[href], input, select, textarea'))
+        .filter(c => !this._isIgnored(c) && this._isVisible(c, true))
+        .slice(0, 25)
+        .map(c => {
+          this._ensureWoId(c);
+          return {
+            selector: this._getUniqueSelector(c),
+            tag: c.tagName.toLowerCase(),
+            type: c.type || null,
+            label: this._getAccessibleLabel(c)
+          };
+        });
+
+      results.push({
+        woId,
+        selector,
+        title,
+        closeButtonSelector,
+        textSummary: this._cleanText(node.innerText || '', 320),
+        controls
+      });
+    }
+    return results;
+  }
+
+  /**
+   * Discovers all internal routes, section anchors, and SPA navigation buttons on the client site
+   */
+  discoverSiteRoutes() {
+    if (typeof document === 'undefined') return [];
+    const routes = new Map();
+
+    // 1. Anchor links (<a href="...">)
+    document.querySelectorAll('a[href]').forEach(a => {
+      if (this._isIgnored(a)) return;
+      const href = (a.getAttribute('href') || '').trim();
+      if (!href || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+      const label = this._getAccessibleLabel(a) || href;
+      const selector = this._getUniqueSelector(a);
+      if (!routes.has(href)) {
+        routes.set(href, { path: href, label, selector, kind: href.startsWith('#') ? 'anchor' : 'link' });
+      }
+    });
+
+    // 2. SPA Navigation / Action Triggers (e.g. Playground, Start a project, Book demo, Personalize Proposal, Voice agent)
+    document.querySelectorAll('header button, nav button, #hero button, footer button, #proposal-personalizer-toggle').forEach(btn => {
+      if (this._isIgnored(btn) || !this._isVisible(btn, true)) return;
+      const label = this._getAccessibleLabel(btn);
+      if (!label) return;
+      const selector = this._getUniqueSelector(btn);
+      routes.set(`btn:${selector}`, { path: selector, label, selector, kind: 'spa-trigger' });
+    });
+
+    return Array.from(routes.values()).slice(0, 35);
+  }
+
+  /**
+   * Resolves a selector, data-wo-id, element ID, or accessible label (including Close / X buttons) to a DOM element
    */
   resolveElement(target) {
     if (!target) return null;
@@ -587,6 +737,18 @@ class DOMScanner {
     if (shadowMatch && !this._isIgnored(shadowMatch)) return shadowMatch;
 
     const needle = raw.toLowerCase();
+
+    // Special resolution for "close", "close modal", "close popup", "x" when an overlay is open
+    if (/\b(close|dismiss|band|exit)\b/i.test(needle)) {
+      const popups = this.scanActiveOverlaysAndPopups();
+      for (const p of popups) {
+        if (p.closeButtonSelector) {
+          const btn = document.querySelector(p.closeButtonSelector);
+          if (btn) return btn;
+        }
+      }
+    }
+
     const candidates = this._collectAllCandidateElements();
     let bestMatch = null;
     let bestScore = 0;
@@ -616,7 +778,7 @@ class DOMScanner {
   }
 
   /**
-   * Scans and returns an array of interactive elements with rich state & selectors
+   * Scans and returns ALL interactive elements, buttons, inputs, popups, banners, and close buttons on the page
    */
   scan(options = {}) {
     const includeOffscreen = Boolean(options.includeOffscreen);
@@ -652,6 +814,9 @@ class DOMScanner {
           rect.right > 0
         );
 
+        const parentSection = el.closest('section[id], [id*="modal"], [id*="drawer"], header, footer');
+        const contextId = parentSection ? (parentSection.id || parentSection.tagName.toLowerCase()) : null;
+
         const item = {
           woId,
           selector: this._getUniqueSelector(el),
@@ -659,10 +824,15 @@ class DOMScanner {
           type: el.type || el.getAttribute('role') || null,
           role: el.getAttribute('role') || null,
           label: this._getAccessibleLabel(el),
+          section: contextId,
           inViewport,
           isInteractive: true,
           disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true')
         };
+
+        if (this._isCloseOrDismissButton(el)) {
+          item.isCloseButton = true;
+        }
 
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
           if (el.type === 'checkbox' || el.type === 'radio') {
@@ -724,13 +894,13 @@ class DOMScanner {
     }
 
     const sectionNodes = Array.from(
-      document.querySelectorAll('section, article, main, [data-section], .pricing-card, details')
+      document.querySelectorAll('section, article, main, [data-section], #roi-savings-calculator, #scheduler-booking-modal, #personalize-drawer, .pricing-card, details')
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
 
     const sections = sectionNodes.map(sec => {
       const woId = this._ensureWoId(sec);
       const heading = this._extractHeading(sec);
-      const text = this._cleanText(sec.innerText || '', 600);
+      const text = this._cleanText(sec.innerText || '', 650);
       const rect = sec.getBoundingClientRect();
       const inViewport = rect.top < window.innerHeight && rect.bottom > 0;
 
@@ -781,13 +951,15 @@ class DOMScanner {
       success: true,
       pageTitle: document.title,
       currentUrl: window.location.pathname + window.location.hash,
-      matchingSections: filteredSections.length > 0 ? filteredSections : sections.slice(0, 8),
-      manifestKnowledge: manifestMatches.slice(0, 6)
+      activePopups: this.scanActiveOverlaysAndPopups(),
+      matchingSections: filteredSections.length > 0 ? filteredSections : sections.slice(0, 14),
+      manifestKnowledge: manifestMatches.slice(0, 8)
     };
   }
 
   captureStateSnapshot() {
     const visibleInteractive = this.scan({ includeOffscreen: false });
+    const activePopups = this.scanActiveOverlaysAndPopups();
     const invalidFields = visibleInteractive
       .filter(item => item.valid === false)
       .map(item => ({
@@ -816,9 +988,31 @@ class DOMScanner {
       url: window.location.pathname + window.location.hash,
       scrollY: Math.round(window.scrollY),
       activeSection,
+      activePopups: activePopups.map(p => ({ selector: p.selector, title: p.title, closeButtonSelector: p.closeButtonSelector })),
       visibleInteractiveCount: visibleInteractive.length,
       invalidFields
     };
+  }
+
+  _isCloseOrDismissButton(el) {
+    if (!el || !(el instanceof Element)) return false;
+    const aria = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.className || ''}`.toLowerCase();
+    if (/\b(close|dismiss|cancel)\b/.test(aria)) return true;
+    const txt = (el.innerText || '').trim();
+    if (txt === '×' || txt === '✕' || txt === '✖' || /^close$/i.test(txt)) return true;
+    const svg = el.querySelector('svg');
+    if (svg) {
+      const svgClass = (svg.getAttribute('class') || '').toLowerCase();
+      if (svgClass.includes('lucide-x') || svgClass.includes('icon-x') || svgClass.includes('close')) {
+        return true;
+      }
+      // Check if it's an X icon path (two crossing diagonal lines: M18 6 6 18 and M6 6 18 18)
+      const paths = Array.from(svg.querySelectorAll('path, line')).map(p => p.getAttribute('d') || '').join(' ');
+      if (paths.includes('18 6') && paths.includes('6 18')) {
+        return true;
+      }
+    }
+    return false;
   }
 
   _getCarouselState(carouselEl) {
@@ -896,14 +1090,48 @@ class DOMScanner {
       if (cloneText) return cloneText.slice(0, 80);
     }
 
+    // For inputs/selects/textareas in React/Tailwind forms where <label> is a sibling inside the field wrapper
+    if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') {
+      const prevLabel = el.previousElementSibling;
+      if (prevLabel && (prevLabel.tagName === 'LABEL' || prevLabel.tagName === 'SPAN' || prevLabel.tagName === 'DIV')) {
+        const lblTxt = prevLabel.innerText.replace(/\s+/g, ' ').trim();
+        const ph = el.getAttribute('placeholder');
+        if (lblTxt) return ph ? `${lblTxt} (${ph})` : lblTxt.slice(0, 80);
+      }
+      const wrapperLabel = el.parentElement?.querySelector('label');
+      if (wrapperLabel) {
+        const lblTxt = wrapperLabel.innerText.replace(/\s+/g, ' ').trim();
+        const ph = el.getAttribute('placeholder');
+        if (lblTxt) return ph ? `${lblTxt} (${ph})` : lblTxt.slice(0, 80);
+      }
+    }
+
     const placeholder = el.getAttribute('placeholder');
     if (placeholder) return placeholder.trim();
 
     const title = el.getAttribute('title') || el.getAttribute('data-tooltip');
     if (title) return title.trim();
 
-    const text = el.innerText || el.value || '';
-    return text.replace(/\s+/g, ' ').trim().slice(0, 80);
+    const text = (el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
+    if (text) return text.slice(0, 90);
+
+    // Icon-only button inference (Close 'X' buttons, arrows, mic, send, etc.)
+    if (this._isCloseOrDismissButton(el)) {
+      const modalParent = el.closest('[id*="modal"], [id*="drawer"], [role="dialog"], .col-span-full');
+      const modalTitle = modalParent ? (this._extractHeading(modalParent) || modalParent.id) : 'Popup';
+      return `Close ${modalTitle} (X)`;
+    }
+
+    const svg = el.querySelector('svg');
+    if (svg) {
+      const cls = (svg.getAttribute('class') || '').toLowerCase();
+      if (cls.includes('arrow-left') || cls.includes('chevron-left')) return 'Previous';
+      if (cls.includes('arrow-right') || cls.includes('chevron-right')) return 'Next';
+      if (cls.includes('send')) return 'Send';
+      if (cls.includes('mic')) return 'Microphone / Voice';
+    }
+
+    return '';
   }
 
   _getUniqueSelector(el) {
@@ -924,7 +1152,7 @@ class DOMScanner {
   _extractHeading(el) {
     if (/^H[1-6]$/.test(el.tagName)) return el.innerText.trim();
     const h = el.querySelector('h1, h2, h3, h4, summary, [data-title]');
-    if (h) return h.innerText.trim();
+    if (h) return h.innerText.replace(/\s+/g, ' ').trim();
     return el.getAttribute('aria-label') || el.id || '';
   }
 
@@ -938,7 +1166,7 @@ class DOMScanner {
     const results = Array.from(root.querySelectorAll(selector));
     const allNodes = root.querySelectorAll('*');
     for (const node of allNodes) {
-      if (node.shadowRoot) {
+      if (node.shadowRoot && node.id !== 'weborient-shadow-host') {
         results.push(...this._querySelectorAllDeep(selector, node.shadowRoot));
       }
     }
@@ -949,7 +1177,7 @@ class DOMScanner {
     if (!root) return null;
     const allNodes = root.querySelectorAll('*');
     for (const node of allNodes) {
-      if (node.shadowRoot) {
+      if (node.shadowRoot && node.id !== 'weborient-shadow-host') {
         try {
           const found = node.shadowRoot.querySelector(selector);
           if (found) return found;
@@ -1765,14 +1993,25 @@ class GhostCursor {
     };
   }
 
-  async typeIntoField(selector, rawValue, charDelayMs = 22) {
+  /**
+   * Live-updates the floating coachmark badge text above the currently spotlighted component
+   * so what the Ghost Cursor SHOWS on screen stays 100% synchronized with what the agent SAYS aloud.
+   */
+  updateActiveExplanation(explanation) {
+    if (!explanation || !this.activeTarget || !document.body.contains(this.activeTarget)) return;
+    this.activeExplanation = String(explanation).trim().slice(0, 140);
+    this._syncSpotlightPosition();
+  }
+
+  async typeIntoField(selector, rawValue, charDelayMs = 22, explanation = null) {
     const el = this._resolve(selector);
     if (!el) {
       return { success: false, elementFound: false, error: `Form field not found: ${selector}` };
     }
 
     const normalizedValue = this._normalizeVoiceInput(el, rawValue);
-    const res = await this.moveToElement(el, true, `Filling: ${normalizedValue}`);
+    const badgeText = explanation || `${normalizedValue}`;
+    const res = await this.moveToElement(el, true, badgeText);
     if (!res.success) return res;
 
     if (typeof el.focus === 'function') el.focus({ preventScroll: true });
@@ -1855,7 +2094,7 @@ class GhostCursor {
     return this._buildFieldResult(el, selector);
   }
 
-  async fillFormBatch(fields = []) {
+  async fillFormBatch(fields = [], explanation = null) {
     if (!Array.isArray(fields) || fields.length === 0) {
       return { success: false, error: 'No fields provided for batch fill' };
     }
@@ -1863,7 +2102,7 @@ class GhostCursor {
     const results = [];
     for (const item of fields) {
       if (!item || !item.selector) continue;
-      const res = await this.typeIntoField(item.selector, item.value ?? '', 12);
+      const res = await this.typeIntoField(item.selector, item.value ?? '', 12, item.explanation || explanation || null);
       results.push(res);
     }
 
@@ -1877,11 +2116,11 @@ class GhostCursor {
     };
   }
 
-  async scroll(direction = 'down', targetSelector = null, amount = 'page') {
+  async scroll(direction = 'down', targetSelector = null, amount = 'page', explanation = null) {
     if (targetSelector) {
       const targetEl = this._resolve(targetSelector);
       if (targetEl) {
-        return await this.moveToElement(targetEl, true, `Scrolled to ${targetSelector}`);
+        return await this.moveToElement(targetEl, true, explanation || null);
       }
     }
 
@@ -1911,7 +2150,7 @@ class GhostCursor {
     };
   }
 
-  async swipeOrSwap(selector, action = 'next', targetValue = null) {
+  async swipeOrSwap(selector, action = 'next', targetValue = null, explanation = null) {
     let el = this._resolve(selector);
     if (!el) {
       return { success: false, elementFound: false, error: `Target widget not found: ${selector}` };
@@ -1937,7 +2176,7 @@ class GhostCursor {
       } else if (act === 'prev' || act === 'left' || act === 'decrease') {
         nextVal = Math.max(min, current - step * 5);
       }
-      return await this.typeIntoField(rangeInput, String(nextVal));
+      return await this.typeIntoField(rangeInput, String(nextVal), 22, explanation);
     }
 
     // 2. Toggle Switch or Checkbox
@@ -1945,7 +2184,7 @@ class GhostCursor {
       ? el
       : el.querySelector?.('[role="switch"], input[type="checkbox"]');
     if (switchEl && (el === switchEl || act === 'toggle' || act === 'switch')) {
-      return await this.click(switchEl, `Toggled switch`);
+      return await this.click(switchEl, explanation || null);
     }
 
     // 3. Tablist / Tabs
@@ -1977,7 +2216,7 @@ class GhostCursor {
       }
 
       if (targetTab) {
-        await this.click(targetTab, `Swapped to tab: ${targetTab.innerText.trim()}`);
+        await this.click(targetTab, explanation || targetTab.innerText.trim());
         return {
           success: true,
           action: 'swipe_or_swap',
@@ -1992,7 +2231,7 @@ class GhostCursor {
       ? el
       : (el.querySelector('[data-carousel]') || el);
 
-    await this.moveToElement(carouselBox, true, `Swiping carousel (${act})`);
+    await this.moveToElement(carouselBox, true, explanation || null);
     const rect = carouselBox.getBoundingClientRect();
     const cy = Math.max(24, Math.min(window.innerHeight - 24, rect.top + rect.height * 0.5));
     const isNext = act !== 'prev' && act !== 'right';
@@ -2515,12 +2754,13 @@ class LiveClient {
 
 // --- MODULE: weborient.js ---
 /**
- * WebOrient by DeployMate: Multi-Tenant Voice Co-Pilot & Shadow DOM SDK (`src/sdk/weborient.js` v0.5.0)
+ * WebOrient by DeployMate: Multi-Tenant Voice Co-Pilot & Shadow DOM SDK (`src/sdk/weborient.js` v0.6.0)
  * - 1-Line Embed Ready (`<script async src="..." data-site-key="wo_live_..." data-theme="signal" data-lang="en-IN">`)
- * - Shadow DOM Encapsulation: Mounts both the Ghost Cursor overlay and the Siri-like Assist Pill
- *   inside `#weborient-shadow-host` (`ShadowRoot`) so client CSS never collides with WebOrient
- * - Multi-Tenant Gateway Handshake: Passes `siteKey`, `siteId`, `sessionId`, `lang`, and `origin`
- * - Non-Linear To-Do Checklist Memory (`SessionMemory`) & Refresh-Safe Continuity
+ * - Full-Page, Popup, Modal, Drawer, Banner & Close-Button (`X`) Auto-Indexing via Live `MutationObserver`
+ * - Strict Showing-vs-Saying Language Synchronization:
+ *   Detects & locks user language (`en-IN`, `hinglish`, `hi-IN`, `es-ES`, `fr-FR`), records persistent
+ *   agent notes, updates the Shadow DOM language badge, and synchronizes the floating Ghost Cursor
+ *   coachmark badge (`explanation`) with the exact language and phrasing the agent is speaking!
  */
 
 
@@ -2574,11 +2814,14 @@ class WebOrient {
       defaultLanguage: this.options.defaultLanguage,
       onChange: (memState) => {
         queueMicrotask(() => this._emit('memoryUpdate', memState));
+      },
+      onLanguageChange: (langCfg, prevLang) => {
+        this._handleLanguageChange(langCfg, prevLang);
       }
     });
 
     if (this.options.defaultLanguage && !this.memory.state.languageLocked) {
-      this.memory.setLanguage(this.options.defaultLanguage, false);
+      this.memory.setLanguage(this.options.defaultLanguage, false, 'script data-lang attribute');
     }
 
     this.client = null;
@@ -2588,11 +2831,15 @@ class WebOrient {
     this._lastAutoGroundedSelector = null;
     this._lastExplicitToolTime = 0;
     this._isExecutingTool = false;
+    this._domObserver = null;
+    this._lastPopupSignature = '';
+    this._lastObservedRoute = '';
 
     if (typeof window !== 'undefined') {
       const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
       this.memory.recordPageVisit(currentFile);
       this._prewarmRelay();
+      this._startLiveDomObserver();
     }
 
     this._manifestReadyPromise = this.options.manifestUrl
@@ -2612,10 +2859,6 @@ class WebOrient {
     this._checkRestoredSession();
   }
 
-  /**
-   * Silently pre-warms the Relay HTTP `/health` endpoint on page load so cloud instances
-   * are already awake before the visitor clicks the WebOrient Assist button.
-   */
   _prewarmRelay() {
     try {
       const wsEndpoint = this.options.endpoint || getDefaultRelayEndpoint();
@@ -2625,9 +2868,107 @@ class WebOrient {
   }
 
   /**
-   * Extracts structured page metadata (meta description + JSON-LD Organization/FAQ schemas)
-   * from any client website so 1-line `<script>` embeds work with zero manual configuration.
+   * Watches the host website for dynamically opened popups, modals, drawers, banners,
+   * expandable dossiers, and SPA route transitions (`pushState` / `popstate`) so
+   * newly rendered buttons and Close ('X') buttons are indexed automatically!
    */
+  _startLiveDomObserver() {
+    if (typeof window === 'undefined' || typeof MutationObserver === 'undefined') return;
+
+    let debounceTimer = null;
+    const checkDomDelta = () => {
+      this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
+      const currentRoute = window.location.pathname + window.location.hash;
+      const activePopups = this.scanner.scanActiveOverlaysAndPopups();
+      const popupSig = activePopups.map(p => `${p.selector}:${p.closeButtonSelector || ''}`).join('|');
+
+      const routeChanged = this._lastObservedRoute && this._lastObservedRoute !== currentRoute;
+      const popupChanged = popupSig !== this._lastPopupSignature;
+
+      this._lastObservedRoute = currentRoute;
+      this._lastPopupSignature = popupSig;
+
+      if (this.client && (popupChanged || routeChanged)) {
+        const langCfg = this.memory.getLanguageConfig();
+        const visibleControls = this.scanner.scan({ includeOffscreen: false }).slice(0, 60);
+        const updateMsg = [
+          `[LIVE DOM & POPUP INDEX UPDATE — Route: ${currentRoute} | Active Language Lock: ${langCfg.name}]`,
+          activePopups.length > 0
+            ? `ACTIVE POPUPS / MODALS / DRAWERS ON SCREEN (Including Close 'X' Buttons): ${JSON.stringify(activePopups)}`
+            : `No modal/popup currently open.`,
+          `Visible Interactive Controls & Buttons: ${JSON.stringify(visibleControls.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, isCloseButton: e.isCloseButton || false })))}`
+        ].join('\n');
+        this.client.sendText(updateMsg);
+      }
+    };
+
+    const scheduleCheck = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(checkDomDelta, 380);
+    };
+
+    const attachObserver = () => {
+      if (!document.body || this._domObserver) return;
+      this._lastObservedRoute = window.location.pathname + window.location.hash;
+      this._domObserver = new MutationObserver((mutations) => {
+        const relevant = mutations.some(m => {
+          if (m.target && (m.target.id === 'weborient-shadow-host' || m.target.closest?.('#weborient-shadow-host'))) {
+            return false;
+          }
+          return m.addedNodes.length > 0 || m.removedNodes.length > 0 || m.type === 'attributes';
+        });
+        if (relevant) scheduleCheck();
+      });
+      this._domObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'aria-expanded', 'aria-hidden', 'open']
+      });
+    };
+
+    if (document.body) {
+      attachObserver();
+    } else {
+      window.addEventListener('DOMContentLoaded', attachObserver, { once: true });
+    }
+
+    window.addEventListener('popstate', scheduleCheck);
+    window.addEventListener('hashchange', scheduleCheck);
+  }
+
+  /**
+   * Synchronizes UI language badge and broadcasts an immediate language lock directive
+   * to the active Gemini Live session whenever user language is detected or changed.
+   */
+  _handleLanguageChange(langCfg, prevLang) {
+    const shadowRoot = this.cursor?.shadowRoot;
+    if (shadowRoot) {
+      const langSelect = shadowRoot.getElementById('wo-shadow-lang-select');
+      const langBadge = shadowRoot.getElementById('wo-shadow-lang-badge');
+      if (langSelect && langSelect.value !== langCfg.code) {
+        langSelect.value = langCfg.code;
+      }
+      if (langBadge) {
+        langBadge.textContent = langCfg.badge || langCfg.code.toUpperCase();
+      }
+    }
+
+    const lightSelect = document.getElementById('quick-lang-select');
+    if (lightSelect && lightSelect.value !== langCfg.code) {
+      lightSelect.value = langCfg.code;
+    }
+
+    if (this.client && prevLang !== langCfg.code) {
+      this.client.sendText(
+        `[CRITICAL LANGUAGE LOCK & SHOWING-SAYING SYNC]: Detected & locked user language to ${langCfg.name} (${langCfg.code}). ` +
+        `Note recorded in session memory. You MUST continue speaking strictly in ${langCfg.name} AND write every single \`explanation\` badge in \`move_and_highlight\`, \`click_element\`, \`fill_form_field\`, and \`swipe_or_swap\` in ${langCfg.name} so what is SHOWN on screen and what is SAID aloud are 100% in sync!`
+      );
+    }
+
+    this._emit('languageChange', langCfg);
+  }
+
   _extractLiveSiteMetadata() {
     if (typeof document === 'undefined') return '';
     const parts = [];
@@ -2711,23 +3052,41 @@ class WebOrient {
 
     this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
     const initialSnapshot = this.scanner.captureStateSnapshot();
-    const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 45);
+    const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 110);
+    const activePopups = this.scanner.scanActiveOverlaysAndPopups();
+    const discoveredRoutes = this.scanner.discoverSiteRoutes();
     const pageContent = this.scanner.readPageContent({ manifest: this.manifest });
     const liveMetadata = this._extractLiveSiteMetadata();
     const memorySummary = this.memory.buildModelContextSummary();
 
     this.client.sendText(
-      `[SESSION CONTINUITY HANDOFF]\n${memorySummary}\n` +
+      `[SESSION CONTINUITY & FULL DOM INDEX HANDOFF]\n${memorySummary}\n` +
       (liveMetadata ? `[CLIENT WEBSITE METADATA & FAQ]:\n${liveMetadata}\n` : '') +
+      `[DISCOVERED SITE PAGES, ANCHORS & SPA NAVIGATION TRIGGERS]:\n${JSON.stringify(discoveredRoutes)}\n` +
+      (activePopups.length > 0 ? `[ACTIVE POPUPS / MODALS / DRAWERS ON SCREEN]:\n${JSON.stringify(activePopups)}\n` : '') +
       `[CURRENT PAGE SECTIONS ("${document.title}" - ${initialSnapshot.url})]:\n` +
       `${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 180) })))}\n` +
-      `[INTERACTIVE DOM CONTROLS ON SCREEN]:\n` +
-      `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type })))}`
+      `[ALL INDEXED BUTTONS, INPUTS, BANNERS & CLOSE ('X') CONTROLS ON PAGE (${initialElements.length} items)]:\n` +
+      `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false })))}`
     );
   }
 
+  _getCleanSpokenCaption(buffer) {
+    if (!buffer) return '';
+    const cleaned = String(buffer).replace(/\s+/g, ' ').trim();
+    const sentences = cleaned.split(/(?<=[.!?।])\s+/);
+    const latest = sentences[sentences.length - 1] || cleaned;
+    return latest.slice(-115).trim();
+  }
+
   _autoGroundFromModelSpeech(chunk) {
-    this._modelSpeechBuffer = `${this._modelSpeechBuffer} ${chunk}`.slice(-260);
+    this._modelSpeechBuffer = `${this._modelSpeechBuffer} ${chunk}`.slice(-280);
+    const spokenCaption = this._getCleanSpokenCaption(this._modelSpeechBuffer);
+
+    // Keep the active Ghost Cursor coachmark tooltip synchronized with what the agent is currently saying!
+    if (this.cursor.activeTarget && spokenCaption.length >= 12) {
+      this.cursor.updateActiveExplanation(spokenCaption);
+    }
 
     if (this._isExecutingTool || Date.now() - this._lastExplicitToolTime < 2200) return;
 
@@ -2738,22 +3097,23 @@ class WebOrient {
 
     if (match && match.selector && match.selector !== this._lastAutoGroundedSelector) {
       this._lastAutoGroundedSelector = match.selector;
-      this.cursor.moveToElement(match.element || match.selector, true, match.title);
+      const badgeToDisplay = spokenCaption.length >= 8 ? spokenCaption : match.title;
+      this.cursor.moveToElement(match.element || match.selector, true, badgeToDisplay);
       this.memory.markOriented({
         selector: match.selector,
         title: match.title,
-        explanation: this._modelSpeechBuffer.trim().slice(-120)
+        explanation: badgeToDisplay
       });
-      this._emit('autoGrounded', { selector: match.selector, title: match.title });
+      this._emit('autoGrounded', { selector: match.selector, title: match.title, explanation: badgeToDisplay });
     }
   }
 
   async orientTopic(todoOrQuery) {
     if (!todoOrQuery) return;
-    const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
+    const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
 
     if (typeof todoOrQuery === 'object' && todoOrQuery.selector) {
-      if (todoOrQuery.page && todoOrQuery.page !== currentFile) {
+      if (todoOrQuery.page && todoOrQuery.page !== currentFile && todoOrQuery.page !== window.location.pathname) {
         this.queuePostNavigationActions([
           {
             name: 'move_and_highlight',
@@ -2772,7 +3132,7 @@ class WebOrient {
       if (this.client) {
         const langCfg = this.memory.getLanguageConfig();
         this.client.sendText(
-          `[USER SELECTED TOPIC]: The user wants you to explain "${todoOrQuery.title}" (${todoOrQuery.selector}) right now in ${langCfg.name}. The Ghost Cursor is already highlighting it on screen. Describe it concisely and naturally.`
+          `[USER SELECTED TOPIC]: The user wants you to explain "${todoOrQuery.title}" (${todoOrQuery.selector}) right now in ${langCfg.name}. The Ghost Cursor is already highlighting it on screen. Describe it concisely in ${langCfg.name}.`
         );
       }
       return;
@@ -2782,7 +3142,7 @@ class WebOrient {
       this.memory.appendTranscript('user', String(todoOrQuery));
       const langCfg = this.memory.getLanguageConfig();
       this.client.sendText(
-        `[USER MESSAGE (Respond in ${langCfg.name} and call move_and_highlight/click_element/swipe_or_swap on every DOM element you describe)]: ${todoOrQuery}`
+        `[USER MESSAGE (Respond strictly in ${langCfg.name} and pass all tool 'explanation' badges in ${langCfg.name})]: ${todoOrQuery}`
       );
     }
   }
@@ -2806,12 +3166,13 @@ class WebOrient {
     this._emit('toolCall', { name, args, callId });
 
     let result = { success: true, action: name };
+    const spokenFallback = this._getCleanSpokenCaption(this._modelSpeechBuffer) || null;
+    const explanation = args.explanation || args.spokenText || spokenFallback;
 
     try {
       switch (name) {
         case 'show_and_describe':
         case 'move_and_highlight': {
-          const explanation = args.explanation || args.spokenText || null;
           result = await this.cursor.moveToElement(args.selector, true, explanation);
           if (result.success) {
             this._lastAutoGroundedSelector = args.selector;
@@ -2832,7 +3193,7 @@ class WebOrient {
           );
 
           if (isSubmit && this.options.requireSubmitConfirmation && !args.confirmed) {
-            await this.cursor.moveToElement(el, true, 'Awaiting your confirmation to submit');
+            await this.cursor.moveToElement(el, true, explanation || 'Confirm submit');
             result = {
               success: true,
               requiresConfirmation: true,
@@ -2840,31 +3201,31 @@ class WebOrient {
               message: 'Moved cursor to submit button. Ask user to confirm before calling click_element with confirmed=true.'
             };
           } else {
-            result = await this.cursor.click(args.selector, args.explanation || null);
-            this.memory.markOriented({ selector: args.selector, title: `Clicked ${args.selector}` });
+            result = await this.cursor.click(args.selector, explanation);
+            this.memory.markOriented({ selector: args.selector, title: explanation || `Clicked ${args.selector}` });
           }
           break;
         }
 
         case 'fill_form_field':
-          result = await this.cursor.typeIntoField(args.selector, args.value ?? '');
-          this.memory.markOriented({ selector: args.selector, title: `Filled ${args.selector}` });
-          this.memory.markOriented({ selector: '#intake-form-section', title: 'Enterprise Consultation Form' });
+          result = await this.cursor.typeIntoField(args.selector, args.value ?? '', 22, explanation);
+          this.memory.markOriented({ selector: args.selector, title: explanation || `Filled ${args.selector}` });
           break;
 
         case 'fill_form_batch':
-          result = await this.cursor.fillFormBatch(args.fields || []);
-          this.memory.markOriented({ selector: '#intake-form-section', title: `Batch filled ${result.filledCount} fields` });
+          result = await this.cursor.fillFormBatch(args.fields || [], explanation);
+          this.memory.markOriented({ selector: args.fields?.[0]?.selector || 'form', title: explanation || `Batch filled ${result.filledCount} fields` });
           break;
 
         case 'scroll_page':
           result = await this.cursor.scroll(
             args.direction || 'down',
             args.targetSelector || null,
-            args.amount || 'page'
+            args.amount || 'page',
+            explanation
           );
           if (args.targetSelector) {
-            this.memory.markOriented({ selector: args.targetSelector, title: `Scrolled to ${args.targetSelector}` });
+            this.memory.markOriented({ selector: args.targetSelector, title: explanation || args.targetSelector });
           }
           break;
 
@@ -2872,19 +3233,21 @@ class WebOrient {
           result = await this.cursor.swipeOrSwap(
             args.selector,
             args.action || 'next',
-            args.targetValue ?? null
+            args.targetValue ?? null,
+            explanation
           );
-          this.memory.markOriented({ selector: args.selector, title: `Interacted with ${args.selector}` });
+          this.memory.markOriented({ selector: args.selector, title: explanation || args.selector });
           break;
 
         case 'navigate_route':
-          result = await this._handleNavigation(args.path, args.targetSelector, args.explanation);
+          result = await this._handleNavigation(args.path, args.targetSelector, explanation);
           break;
 
         case 'scan_visible_elements':
           result = {
             success: true,
             action: 'scan_visible_elements',
+            activePopups: this.scanner.scanActiveOverlaysAndPopups(),
             elements: this.scanner.scan({ includeOffscreen: Boolean(args.includeOffscreen) })
           };
           break;
@@ -2901,7 +3264,7 @@ class WebOrient {
             await this.cursor.moveToElement(
               secToHighlight,
               true,
-              result.matchingSections?.[0]?.heading || args.query || 'Reading section'
+              explanation || result.matchingSections?.[0]?.heading || args.query
             );
             this.memory.markOriented({
               selector: secToHighlight,
@@ -2946,14 +3309,17 @@ class WebOrient {
       this._lastExplicitToolTime = Date.now();
     }
 
-    await this._waitForDOMSettle(120);
+    await this._waitForDOMSettle(160);
     result.viewportSummary = this.scanner.captureStateSnapshot();
 
     const doneTodos = this.memory.state.todoChecklist.filter(t => t.done).map(t => t.id);
     const pendingTodos = this.memory.state.todoChecklist.filter(t => !t.done).map(t => ({ id: t.id, page: t.page, selector: t.selector, title: t.title }));
+    const langCfg = this.memory.getLanguageConfig();
 
     result.sessionMemoryDigest = {
-      userLanguage: this.memory.state.userLanguage,
+      userLanguage: langCfg.code,
+      userLanguageName: langCfg.name,
+      languageNotes: this.memory.state.languageNotes || [],
       userGoal: this.memory.state.userIntent.goal,
       completedTodoIds: doneTodos,
       remainingTodos: pendingTodos.slice(0, 6)
@@ -2975,13 +3341,30 @@ class WebOrient {
     await this._manifestReadyPromise;
     const path = String(rawPath).trim();
 
+    // 1. If path is a CSS selector or hash on the current page, scroll & highlight it directly
     if (path.startsWith('#')) {
       const hashEl = document.querySelector(path);
       if (hashEl) {
         window.history.pushState({}, '', path);
-        const res = await this.cursor.moveToElement(hashEl, true, explanation || `Section ${path}`);
+        const res = await this.cursor.moveToElement(hashEl, true, explanation || path);
         this.memory.markOriented({ selector: path, title: explanation || path });
         return res;
+      }
+    }
+
+    // 2. Check if there is an interactive SPA button/link on screen matching this route name (e.g. "Playground", "Start a project", "Book demo")
+    const cleanKey = path.toLowerCase().replace(/^\/+|\/+$/g, '').replace(/\.html$/, '');
+    if (!isWebOrientDemoSite() && cleanKey) {
+      const candidateLinkOrBtn = Array.from(document.querySelectorAll('a[href], header button, nav button, #hero button, footer button'))
+        .find(el => {
+          const href = (el.getAttribute('href') || '').toLowerCase();
+          const txt = (el.innerText || '').toLowerCase();
+          return href === path.toLowerCase() || href === `/${cleanKey}` || href === `#${cleanKey}` || (cleanKey.length > 2 && txt.includes(cleanKey));
+        });
+
+      if (candidateLinkOrBtn && candidateLinkOrBtn.tagName === 'BUTTON') {
+        const clickRes = await this.cursor.click(candidateLinkOrBtn, explanation || candidateLinkOrBtn.innerText.trim());
+        return clickRes;
       }
     }
 
@@ -3009,39 +3392,43 @@ class WebOrient {
     }
 
     if (!resolvedUrl) {
-      const routeMap = {
-        '/': 'test-demo.html',
-        'home': 'test-demo.html',
-        '/home': 'test-demo.html',
-        'test-demo.html': 'test-demo.html',
-        '/features': 'features.html',
-        'features': 'features.html',
-        'features.html': 'features.html',
-        '/pricing': 'pricing.html',
-        'pricing': 'pricing.html',
-        'pricing.html': 'pricing.html',
-        '/docs': 'docs.html',
-        'docs': 'docs.html',
-        'documentation': 'docs.html',
-        'docs.html': 'docs.html',
-        '/contact': 'contact.html',
-        'contact': 'contact.html',
-        'contact.html': 'contact.html'
-      };
-      const key = path.toLowerCase().split('#')[0].trim();
-      resolvedUrl = routeMap[key] || path;
+      if (isWebOrientDemoSite()) {
+        const routeMap = {
+          '/': 'test-demo.html',
+          'home': 'test-demo.html',
+          '/home': 'test-demo.html',
+          'test-demo.html': 'test-demo.html',
+          '/features': 'features.html',
+          'features': 'features.html',
+          'features.html': 'features.html',
+          '/pricing': 'pricing.html',
+          'pricing': 'pricing.html',
+          'pricing.html': 'pricing.html',
+          '/docs': 'docs.html',
+          'docs': 'docs.html',
+          'documentation': 'docs.html',
+          'docs.html': 'docs.html',
+          '/contact': 'contact.html',
+          'contact': 'contact.html',
+          'contact.html': 'contact.html'
+        };
+        const key = path.toLowerCase().split('#')[0].trim();
+        resolvedUrl = routeMap[key] || path;
+      } else {
+        resolvedUrl = path.startsWith('/') || path.startsWith('http') ? path : `/${path}`;
+      }
     }
 
     const hashPart = path.includes('#') ? `#${path.split('#')[1]}` : '';
-    const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
-    const targetFile = resolvedUrl.split('#')[0].split('/').pop();
+    const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
+    const targetFile = resolvedUrl.split('#')[0].split('/').pop() || '/';
 
-    if (targetFile === currentFile) {
+    if (targetFile === currentFile || resolvedUrl.split('#')[0] === window.location.pathname) {
       const selectorToFocus = targetSelector || hashPart || 'h1';
       const res = await this.cursor.moveToElement(
         selectorToFocus,
         true,
-        explanation || `Focused ${matchedPage?.title || targetFile}`
+        explanation || matchedPage?.title || targetFile
       );
       this.memory.markOriented({ selector: selectorToFocus, title: explanation || selectorToFocus });
       return res;
@@ -3049,7 +3436,7 @@ class WebOrient {
 
     const navLink = document.querySelector(`#global-site-header a[href*="${targetFile}"], a[href*="${targetFile}"]`);
     if (navLink) {
-      await this.cursor.moveToElement(navLink, true, `Navigating to ${matchedPage?.title || targetFile}...`);
+      await this.cursor.moveToElement(navLink, true, explanation || `${matchedPage?.title || targetFile}`);
       await this.cursor.playClickAnimation();
       await new Promise(r => setTimeout(r, 120));
     }
@@ -3060,7 +3447,7 @@ class WebOrient {
         name: 'move_and_highlight',
         args: {
           selector: targetSelector || hashPart,
-          explanation: explanation || `Arrived at ${targetSelector || hashPart}`
+          explanation: explanation || `${targetSelector || hashPart}`
         }
       });
     }
@@ -3080,7 +3467,7 @@ class WebOrient {
     };
   }
 
-  _waitForDOMSettle(maxWaitMs = 120) {
+  _waitForDOMSettle(maxWaitMs = 140) {
     return new Promise(resolve => {
       let timer = setTimeout(() => {
         observer.disconnect();
@@ -3144,14 +3531,14 @@ class WebOrient {
   }
 
   /**
-   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave + Right-Click Language Popover
-   * inside the isolated Shadow DOM (`#weborient-shadow-host`) so 1-line `<script>` embeds
-   * work on any external website with zero CSS leakage or collision.
+   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave + Active Language Badge +
+   * Right-Click Language Popover inside the isolated Shadow DOM (`#weborient-shadow-host`).
    */
   _mountShadowAssistWidget() {
     const shadowRoot = this.cursor?.getOrCreateShadowRoot();
     if (!shadowRoot || shadowRoot.getElementById('wo-shadow-assist')) return;
 
+    const currentLangCfg = this.memory.getLanguageConfig();
     const wrapper = document.createElement('div');
     wrapper.id = 'wo-shadow-assist';
     wrapper.innerHTML = `
@@ -3242,6 +3629,15 @@ class WebOrient {
           gap: 6px;
           color: #FFFFFF;
         }
+        .wo-lang-chip {
+          font-size: 8px;
+          padding: 1px 5px;
+          border-radius: 4px;
+          background: rgba(230, 57, 30, 0.22);
+          border: 1px solid ${this.options.themeColor};
+          color: #FFFFFF;
+          letter-spacing: 0.08em;
+        }
         .wo-dot {
           width: 6px;
           height: 6px;
@@ -3330,6 +3726,7 @@ class WebOrient {
           <div class="wo-meta">
             <span class="wo-title">
               <span>WebOrient</span>
+              <span class="wo-lang-chip" id="wo-shadow-lang-badge">${currentLangCfg.badge || 'EN'}</span>
               <span class="wo-dot" id="wo-shadow-dot"></span>
             </span>
             <span class="wo-sub" id="wo-shadow-sub">Click to co-browse</span>
@@ -3346,10 +3743,7 @@ class WebOrient {
     if (langSelect) {
       langSelect.value = this.memory.state.userLanguage || 'en-IN';
       langSelect.addEventListener('change', (e) => {
-        this.memory.setLanguage(e.target.value, true);
-        if (this.client) {
-          this.client.sendText(`[LANGUAGE CHANGE]: User set native language to ${e.target.value}. Respond in this language.`);
-        }
+        this.memory.setLanguage(e.target.value, true, 'user manual dropdown selection');
         langPopover?.classList.remove('wo-open');
       });
     }
@@ -3384,6 +3778,11 @@ class WebOrient {
     const wave = shadowRoot.getElementById('wo-shadow-wave');
     const sub = shadowRoot.getElementById('wo-shadow-sub');
     const dot = shadowRoot.getElementById('wo-shadow-dot');
+    const langBadge = shadowRoot.getElementById('wo-shadow-lang-badge');
+    if (langBadge) {
+      const cfg = this.memory.getLanguageConfig();
+      langBadge.textContent = cfg.badge || cfg.code.toUpperCase();
+    }
     if (!mic || !wave || !sub) return;
 
     if (connected) {

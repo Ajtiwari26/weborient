@@ -410,11 +410,13 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
     memory_block = (
         f"\n\n### DEPLOYMATE MULTI-TENANT SESSION & NON-LINEAR TO-DO MEMORY "
         f"(Tenant: {tenant.get('companyName', 'DeployMate')} | Session ID: {session_mem['sessionId']} | Credits: {tenant.get('creditsMinutes', 250)} mins):\n"
-        f"- LOCKED NATIVE LANGUAGE: {session_mem['userLanguage']} (Maintain this language strictly across all page redirects and refreshes)\n"
+        f"- DETECTED & LOCKED LANGUAGE: {session_mem['userLanguage']} (Maintain this language strictly across all turns, popups, and page redirects)\n"
+        f"- SHOWING vs. SAYING SYNCHRONIZATION RULE (CRITICAL): Whenever you detect the user's language (English, Hindi, Hinglish, Spanish, French), call `update_session_memory(language=..., note=...)` to record a note. Every single `explanation` badge you pass to `move_and_highlight`, `click_element`, `fill_form_field`, `scroll_page`, or `swipe_or_swap` MUST be written in the exact same language that you are speaking aloud! Never show an English tooltip badge while speaking Hindi/Hinglish!\n"
+        f"- FULL PAGE, POPUP & CLOSE-BUTTON ('X') CONTROL: Every button, popup, modal, drawer, banner, input, and Close ('X') button on the user's screen is indexed. If the user asks to open, fill, or close any popup/modal/drawer/banner, immediately call `click_element` or `fill_form_field` on its selector.\n"
         f"- USER GOAL / WANT: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
         f"- COMPLETED TO-DO ITEMS (Any order): {json.dumps(session_mem.get('completedTodoIds', []))}\n"
         f"- REMAINING TO-DO ITEMS: {json.dumps(session_mem.get('remainingTodos', [])[:6])}\n"
-        f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its actual interactive component selector (NEVER highlight h1/h2 titles or headers)."
+        f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, popup, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its actual interactive component selector (NEVER highlight h1/h2 titles or headers)."
     )
 
     return prompt_text + manifest_context + memory_block
@@ -426,23 +428,24 @@ def get_gemini_tools():
             function_declarations=[
                 types.FunctionDeclaration(
                     name="move_and_highlight",
-                    description="Smoothly glides the Ghost Cursor to the actual interactive DOM component being described, scrolls it into the center of the viewport, spotlights it, and marks its To-Do item complete.",
+                    description="Smoothly glides the Ghost Cursor to the actual interactive DOM component being described, scrolls it into the center of the viewport, spotlights it, and displays an explanation badge in the exact language you are speaking.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
                             "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or accessible label of the interactive component"),
-                            "explanation": types.Schema(type=types.Type.STRING, description="Concise explanation badge text displayed with boundary clearance beside the component")
+                            "explanation": types.Schema(type=types.Type.STRING, description="Concise explanation badge text displayed on screen — MUST be written in the exact same language you are currently speaking aloud!")
                         },
-                        required=["selector"]
+                        required=["selector", "explanation"]
                     )
                 ),
                 types.FunctionDeclaration(
                     name="click_element",
-                    description="Glides cursor to a button, link, tab, toggle, or interactive control, plays a click ripple animation, and triggers full pointer/mouse click events.",
+                    description="Glides cursor to a button, link, tab, toggle, popup trigger, or Close ('X') button, plays a click ripple animation, and triggers full pointer/mouse click events.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
-                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or label of element"),
+                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or label of element (including Close 'X' buttons on popups/modals)"),
+                            "explanation": types.Schema(type=types.Type.STRING, description="Short badge text in the exact language you are speaking aloud"),
                             "confirmed": types.Schema(type=types.Type.BOOLEAN, description="Set to true when user has verbally confirmed a submit action")
                         },
                         required=["selector"]
@@ -450,12 +453,13 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="fill_form_field",
-                    description="Fills or sets a form control (text, email, tel, textarea, select dropdown, checkbox, radio, or range slider) with typewriter animation and validation checking.",
+                    description="Fills or sets a form control (text, email, tel, date, textarea, select dropdown, checkbox, radio, or range slider) with typewriter animation and validation checking.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
                             "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or label of the form control"),
-                            "value": types.Schema(type=types.Type.STRING, description="Value to enter, option to select, or 'true'/'false' for checkboxes")
+                            "value": types.Schema(type=types.Type.STRING, description="Value to enter, option to select, or 'true'/'false' for checkboxes"),
+                            "explanation": types.Schema(type=types.Type.STRING, description="Short badge text in the exact language you are speaking aloud")
                         },
                         required=["selector", "value"]
                     )
@@ -477,7 +481,8 @@ def get_gemini_tools():
                                     },
                                     required=["selector", "value"]
                                 )
-                            )
+                            ),
+                            "explanation": types.Schema(type=types.Type.STRING, description="Short badge text in the exact language you are speaking aloud")
                         },
                         required=["fields"]
                     )
@@ -490,7 +495,8 @@ def get_gemini_tools():
                         properties={
                             "direction": types.Schema(type=types.Type.STRING, enum=["up", "down", "top", "bottom"]),
                             "targetSelector": types.Schema(type=types.Type.STRING, description="Optional CSS selector to scroll directly into view"),
-                            "amount": types.Schema(type=types.Type.STRING, enum=["small", "half", "page"])
+                            "amount": types.Schema(type=types.Type.STRING, enum=["small", "half", "page"]),
+                            "explanation": types.Schema(type=types.Type.STRING, description="Short badge text in the exact language you are speaking aloud")
                         }
                     )
                 ),
@@ -502,7 +508,8 @@ def get_gemini_tools():
                         properties={
                             "selector": types.Schema(type=types.Type.STRING, description="CSS selector of carousel, tablist, tab, switch, or slider"),
                             "action": types.Schema(type=types.Type.STRING, enum=["next", "prev", "left", "right", "toggle", "select"]),
-                            "targetValue": types.Schema(type=types.Type.STRING, description="Optional tab name, slide index, or slider value")
+                            "targetValue": types.Schema(type=types.Type.STRING, description="Optional tab name, slide index, or slider value"),
+                            "explanation": types.Schema(type=types.Type.STRING, description="Short badge text in the exact language you are speaking aloud")
                         },
                         required=["selector", "action"]
                     )
