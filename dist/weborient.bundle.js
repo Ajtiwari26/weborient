@@ -2500,7 +2500,7 @@ class WebOrient {
       `siteKey=${encodeURIComponent(this.options.siteKey)}` +
       `&siteId=${encodeURIComponent(this.options.siteId)}` +
       `&sessionId=${encodeURIComponent(this.memory.state.sessionId)}` +
-      `&lang=${encodeURIComponent(this.memory.state.userLanguage)}`;
+      `&lang=${encodeURIComponent(this.memory.state.userLanguage || this.options.defaultLanguage || 'en-IN')}`;
 
     this.client = new LiveClient({
       endpoint: wsUrl,

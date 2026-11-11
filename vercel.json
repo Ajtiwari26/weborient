@@ -1,5 +1,5 @@
 {
-  "cleanUrls": true,
+  "cleanUrls": false,
   "headers": [
     {
       "source": "/sdk/(.*)",
@@ -63,28 +63,64 @@
       "destination": "/testscript/deploymate-stacked-logo.svg"
     },
     {
+      "source": "/deploymate-full-logo.svg",
+      "destination": "/testscript/deploymate-full-logo.svg"
+    },
+    {
+      "source": "/favicon.png",
+      "destination": "/testscript/favicon.png"
+    },
+    {
       "source": "/",
-      "destination": "/testscript/test-demo"
+      "destination": "/testscript/test-demo.html"
+    },
+    {
+      "source": "/test-demo.html",
+      "destination": "/testscript/test-demo.html"
+    },
+    {
+      "source": "/test-demo",
+      "destination": "/testscript/test-demo.html"
+    },
+    {
+      "source": "/dashboard.html",
+      "destination": "/testscript/dashboard.html"
     },
     {
       "source": "/dashboard",
-      "destination": "/testscript/dashboard"
+      "destination": "/testscript/dashboard.html"
+    },
+    {
+      "source": "/features.html",
+      "destination": "/testscript/features.html"
     },
     {
       "source": "/features",
-      "destination": "/testscript/features"
+      "destination": "/testscript/features.html"
+    },
+    {
+      "source": "/pricing.html",
+      "destination": "/testscript/pricing.html"
     },
     {
       "source": "/pricing",
-      "destination": "/testscript/pricing"
+      "destination": "/testscript/pricing.html"
+    },
+    {
+      "source": "/docs.html",
+      "destination": "/testscript/docs.html"
     },
     {
       "source": "/docs",
-      "destination": "/testscript/docs"
+      "destination": "/testscript/docs.html"
+    },
+    {
+      "source": "/contact.html",
+      "destination": "/testscript/contact.html"
     },
     {
       "source": "/contact",
-      "destination": "/testscript/contact"
+      "destination": "/testscript/contact.html"
     }
   ]
 }

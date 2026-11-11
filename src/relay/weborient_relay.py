@@ -649,6 +649,8 @@ async def process_http_request(*args):
         plan = qs.get("plan", ["Starter ($29/mo)"])[0]
         theme = qs.get("theme", ["signal"])[0]
         lang = qs.get("lang", ["en-IN"])[0]
+    if not lang or lang == "undefined":
+        lang = "en-IN"
         credits = float(qs.get("credits", ["25.0"])[0])
         tenant_doc = register_new_tenant(company, domain, email, plan, theme, lang, credits)
         return build_http_response(201, {"ok": True, "tenant": tenant_doc})
@@ -700,6 +702,8 @@ async def handle_browser_client(websocket):
     site_id = qs.get("siteId", [site_key])[0]
     session_id = qs.get("sessionId", ["default_session"])[0]
     lang = qs.get("lang", ["en-IN"])[0]
+    if not lang or lang == "undefined":
+        lang = "en-IN"
 
     origin_header = ""
     if hasattr(websocket, "request") and websocket.request and hasattr(websocket.request, "headers"):
@@ -721,7 +725,7 @@ async def handle_browser_client(websocket):
         f"sessionId={session_id} | lang={session_mem['userLanguage']}"
     )
 
-    client = genai.Client(api_key=API_KEY)
+    client = genai.Client(api_key=API_KEY, http_options={"api_version": "v1alpha"})
     full_prompt = load_system_prompt_and_manifest(site_id, session_mem, tenant)
     tools = get_gemini_tools()
 
