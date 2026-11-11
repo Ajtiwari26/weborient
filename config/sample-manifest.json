@@ -1,10 +1,10 @@
 {
-  "siteName": "Acme AI Cloud — Multi-Page Enterprise Platform",
-  "baseUrl": "http://localhost:3000/testscript",
+  "siteName": "WebOrient by DeployMate — Enterprise Voice Co-Browsing Platform",
+  "baseUrl": "http://localhost:3333/testscript",
   "theme": {
-    "primaryColor": "#6366f1",
-    "accentColor": "#ec4899",
-    "cursorStyle": "modern-glow"
+    "primaryColor": "#E6391E",
+    "accentColor": "#0A0A0A",
+    "cursorStyle": "deploymate-signal"
   },
   "knowledgeBase": [
     {
@@ -32,65 +32,64 @@
     {
       "route": "/",
       "file": "test-demo.html",
-      "title": "Home — Acme AI Co-Browsing Overview",
+      "title": "DeployMate WebOrient — Live Telemetry & 4-Stage Workflow",
       "summary": "Main landing hub featuring live platform metrics, 4-step interactive workflow tabs, customer case-study carousel, security compliance summary table, and quick FAQ.",
       "keywords": ["home", "overview", "start", "landing", "metrics", "workflow", "case studies"],
       "sections": [
-        { "id": "hero-section", "selector": "#hero-section", "title": "Hero & Live Metrics", "description": "Headline showcase, live latency/conversion counters, and primary navigation CTAs." },
-        { "id": "workflow-section", "selector": "#workflow-section", "title": "4-Step Interactive Workflow Tabs", "description": "Interactive tabs explaining Connect, Perceive, Actuate, and Verify stages." },
-        { "id": "carousel-section", "selector": "#carousel-section", "title": "Customer Case-Study Carousel", "description": "Swipeable showcase of SaaS, E-Commerce, and FinTech deployments." },
-        { "id": "security-section", "selector": "#security-section", "title": "Enterprise Security & Guardrails Matrix", "description": "Overview of sensitive field masking, confirmation gates, and SOC2/HIPAA compliance." }
+        { "id": "telemetry-strip", "selector": "#telemetry-strip", "title": "Live Telemetry Counters", "description": "Live 310ms latency, <50ms barge-in, and +42.8% completion counters." },
+        { "id": "workflow-tabs", "selector": "#workflow-tabs", "title": "4-Stage Interactive Workflow Tabs", "description": "Interactive tabs explaining Perception, PCM Relay, Bézier Actuation, and Session Memory." },
+        { "id": "home-case-carousel", "selector": "#home-case-carousel", "title": "Customer Case-Study Carousel", "description": "Swipeable showcase of SaaS, E-Commerce, and FinTech deployments." },
+        { "id": "security-table", "selector": "#security-section table", "title": "Enterprise Security & Guardrails Matrix", "description": "Overview of sensitive field masking, confirmation gates, and SOC2/HIPAA compliance." }
       ]
     },
     {
       "route": "/features",
       "file": "features.html",
-      "title": "Product & Deep Architecture — Acme AI",
+      "title": "5-Layer Architecture & Latency Benchmarks — DeployMate",
       "summary": "Deep technical breakdown of the 5-layer WebOrient runtime, interactive subsystem tabs, 4-slide industry deployment carousel, and latency benchmark table.",
       "keywords": ["features", "product", "architecture", "benchmarks", "subsystems", "capabilities", "carousel", "tabs"],
       "sections": [
-        { "id": "features-hero", "selector": "#features-hero", "title": "Architecture Overview", "description": "5-layer runtime summary and live architecture metrics." },
-        { "id": "subsystem-tabs-section", "selector": "#subsystem-tabs-section", "title": "5-Layer Subsystem Explorer Tabs", "description": "Swappable tabs for AudioWorklet Pipeline, Cubic Bézier Engine, DOM Scanner, Closed-Loop Verifier, and Multi-Tenant Relay." },
-        { "id": "industry-carousel-section", "selector": "#industry-carousel-section", "title": "Industry Deployment Carousel", "description": "4-slide swipeable showcase covering SaaS Onboarding, FinTech KYC, E-Commerce Concierge, and Healthcare Triage." },
-        { "id": "benchmark-section", "selector": "#benchmark-section", "title": "Latency & Accuracy Benchmark Table", "description": "Quantitative comparison of WebOrient vs. Traditional Text Chatbots vs. Headless Cloud Browsers." }
+        { "id": "subsystem-tabs", "selector": "#subsystem-tabs", "title": "5-Layer Subsystem Explorer Tabs", "description": "Swappable tabs for AudioWorklet Pipeline, Cubic Bézier Engine, DOM Scanner, Form Actuator, and Multi-Tenant Relay." },
+        { "id": "industry-carousel", "selector": "#industry-carousel", "title": "Industry Deployment Carousel", "description": "4-slide swipeable showcase covering SaaS Onboarding, FinTech KYC, E-Commerce Concierge, and Healthcare Triage." },
+        { "id": "benchmark-table", "selector": "#benchmark-table", "title": "Latency & Accuracy Benchmark Table", "description": "Quantitative comparison of WebOrient vs. Traditional Text Chatbots vs. Headless Cloud Browsers." }
       ]
     },
     {
       "route": "/pricing",
       "file": "pricing.html",
-      "title": "Pricing, Plans & ROI Calculator — Acme AI",
+      "title": "Pricing, Credit Packs & ROI Calculator — DeployMate",
       "summary": "Monthly/Annual billing toggle switch, 4 pricing tiers (Starter $29, Growth $49, Pro Co-Pilot $79, Enterprise Custom), interactive ROI calculator with sliders, 12-row comparison table, and billing FAQ.",
       "keywords": ["pricing", "cost", "plans", "roi", "calculator", "billing", "annual", "monthly", "starter", "growth", "pro", "enterprise"],
       "sections": [
-        { "id": "pricing-tiers-section", "selector": "#pricing-tiers-section", "title": "Pricing Tiers & Billing Switch", "description": "Monthly/Annual toggle switch (#billing-toggle) and Starter, Growth, Pro Co-Pilot (#plan-pro), and Enterprise cards." },
-        { "id": "roi-calculator-section", "selector": "#roi-calculator-section", "title": "Interactive Voice ROI Calculator", "description": "Sliders for Monthly Visitors (#calc-visitors-slider) and Order Value (#calc-aov-slider) plus Currency dropdown (#calc-currency)." },
-        { "id": "comparison-table-section", "selector": "#comparison-table-section", "title": "Full Feature Comparison Matrix", "description": "12-row feature breakdown across Starter, Growth, Pro, and Enterprise." },
-        { "id": "pricing-faq-section", "selector": "#pricing-faq-section", "title": "Billing & Refund FAQ", "description": "Expandable accordion answering billing, overage, and refund questions." }
+        { "id": "pricing-cards-grid", "selector": "#pricing-cards-grid", "title": "Pricing Tiers & Billing Switch", "description": "Monthly/Annual toggle switch (#billing-toggle) and Starter, Growth, Pro Co-Pilot (#plan-pro), and Enterprise cards." },
+        { "id": "roi-result-card", "selector": "#roi-result-card", "title": "Interactive Voice ROI Calculator", "description": "Sliders for Monthly Visitors (#calc-visitors-slider) and Order Value (#calc-aov-slider) plus Currency dropdown (#calc-currency)." },
+        { "id": "comparison-table", "selector": "#comparison-table-section table", "title": "Full Feature Comparison Matrix", "description": "12-row feature breakdown across Starter, Growth, Pro, and Enterprise." },
+        { "id": "pricing-faq", "selector": "#faq-billing-refund", "title": "Billing & Refund FAQ", "description": "Expandable accordion answering billing, overage, and refund questions." }
       ]
     },
     {
       "route": "/docs",
       "file": "docs.html",
-      "title": "Developer Documentation & API Reference — Acme AI",
+      "title": "Developer Documentation & API Reference — DeployMate",
       "summary": "5-minute integration guide, framework code tabs (HTML/CDN, Next.js/React, Vue, Shopify/WordPress), site-manifest.json schema reference, and 10-tool Live API specification table.",
       "keywords": ["docs", "documentation", "api", "sdk", "install", "setup", "plugin", "react", "nextjs", "shopify", "wordpress", "tools", "manifest"],
       "sections": [
-        { "id": "quickstart-section", "selector": "#quickstart-section", "title": "5-Minute Client Quickstart & Framework Tabs", "description": "Swappable code snippets (#docs-framework-tabs) for HTML CDN, Next.js, Vue, and WordPress/Shopify." },
-        { "id": "tools-reference-section", "selector": "#tools-reference-section", "title": "10-Tool Gemini Live API Reference", "description": "Complete parameter and response documentation for all 10 DOM tools." },
-        { "id": "manifest-schema-section", "selector": "#manifest-schema-section", "title": "Site Manifest & Auto-Crawler Guide", "description": "How site-manifest.json maps routes, sections, forms, and knowledgeBase entries." },
-        { "id": "troubleshooting-section", "selector": "#troubleshooting-section", "title": "Troubleshooting & Guardrails FAQ", "description": "Expandable developer Q&A on Shadow DOM, CORS, and React controlled inputs." }
+        { "id": "docs-framework-tabs", "selector": "#docs-framework-tabs", "title": "5-Minute Client Quickstart & Framework Tabs", "description": "Swappable code snippets (#docs-framework-tabs) for HTML CDN, Next.js, Vue, and WordPress/Shopify." },
+        { "id": "tools-reference-table", "selector": "#tools-reference-section table", "title": "11-Tool Gemini Live API Reference Table", "description": "Complete parameter and response documentation for all 11 DOM tools." },
+        { "id": "manifest-schema-card", "selector": "#manifest-schema-section", "title": "Site Manifest & Auto-Crawler Guide", "description": "How site-manifest.json maps routes, sections, forms, and knowledgeBase entries." },
+        { "id": "faq-react-state", "selector": "#faq-react-state", "title": "Troubleshooting & Guardrails FAQ", "description": "Expandable developer Q&A on Shadow DOM, CORS, and React controlled inputs." }
       ]
     },
     {
       "route": "/contact",
       "file": "contact.html",
-      "title": "Enterprise Contact, Demo Intake & Global Support — Acme AI",
+      "title": "Enterprise Consultation & Voice Form Co-Pilot — DeployMate",
       "summary": "Comprehensive 10-field enterprise consultation and onboarding intake form, global office directory, and support SLA matrix.",
       "keywords": ["contact", "sales", "demo", "form", "book", "consultation", "support", "enterprise", "intake"],
       "sections": [
-        { "id": "intake-form-section", "selector": "#intake-form-section", "title": "Enterprise Technical Consultation Form", "description": "10-field interactive form (#contact-form) supporting voice dictation, dropdowns, slider, and checkboxes." },
-        { "id": "offices-section", "selector": "#offices-section", "title": "Global Engineering & Support Hubs", "description": "San Francisco, London, and Bengaluru office cards." },
-        { "id": "sla-section", "selector": "#sla-section", "title": "Support Response Time & SLA Matrix", "description": "Guaranteed response times by plan tier." }
+        { "id": "contact-form", "selector": "#contact-form", "title": "Enterprise Technical Consultation Form", "description": "10-field interactive form (#contact-form) supporting voice dictation, dropdowns, slider, and checkboxes." },
+        { "id": "offices-grid", "selector": "#offices-section .grid", "title": "Global Engineering & Support Hubs", "description": "San Francisco, London, and Bengaluru office cards." },
+        { "id": "sla-table", "selector": "#sla-section table", "title": "Support Response Time & SLA Matrix", "description": "Guaranteed response times by plan tier." }
       ],
       "forms": [
         {

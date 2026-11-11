@@ -1275,11 +1275,44 @@ class GhostCursor {
           <span>${this._escapeHtml(this.activeExplanation)}</span>
         </div>
       `;
-      const canPlaceAbove = !isInsideHeader && (safeTop - headerBottom) > 52;
-      const topPos = canPlaceAbove
-        ? Math.max(headerBottom + 8, safeTop - 42)
-        : Math.min(window.innerHeight - 56, safeTop + safeHeight + 10);
-      const leftPos = Math.max(12, Math.min(window.innerWidth - 360, safeLeft));
+
+      // Smart boundary placement: Tooltip MUST NEVER touch or overlap the highlighted component or spotlight
+      const CLEARANCE = 22; // Strict safety buffer so tooltip never touches component boundary
+      const tooltipW = Math.min(380, Math.max(220, this.tooltip.offsetWidth || 280));
+      const tooltipH = Math.max(34, this.tooltip.offsetHeight || 38);
+
+      const spaceAbove = safeTop - headerBottom;
+      const spaceBelow = window.innerHeight - (safeTop + safeHeight);
+
+      let topPos;
+      let leftPos = Math.max(16, Math.min(window.innerWidth - tooltipW - 16, safeLeft + (safeWidth - tooltipW) / 2));
+
+      if (!isInsideHeader && spaceAbove >= tooltipH + CLEARANCE + 10) {
+        // Place strictly above component with clear boundary
+        topPos = safeTop - tooltipH - CLEARANCE;
+      } else if (spaceBelow >= tooltipH + CLEARANCE + 16) {
+        // Place strictly below component with clear boundary
+        topPos = safeTop + safeHeight + CLEARANCE;
+      } else {
+        // Component is tall or near viewport edges: dock cleanly at top safe boundary below header
+        topPos = Math.max(headerBottom + 16, 20);
+        leftPos = Math.max(16, Math.min(window.innerWidth - tooltipW - 20, window.innerWidth - tooltipW - 24));
+      }
+
+      // Avoid collision with cursor pointer: if tooltip bounds cover current cursor hotspot, offset left
+      if (
+        this.currentPosition &&
+        this.currentPosition.x >= leftPos - 12 &&
+        this.currentPosition.x <= leftPos + tooltipW + 12 &&
+        this.currentPosition.y >= topPos - 12 &&
+        this.currentPosition.y <= topPos + tooltipH + 12
+      ) {
+        if (leftPos > window.innerWidth / 2) {
+          leftPos = Math.max(16, leftPos - 60);
+        } else {
+          leftPos = Math.min(window.innerWidth - tooltipW - 16, leftPos + 60);
+        }
+      }
 
       this.tooltip.style.top = `${topPos}px`;
       this.tooltip.style.left = `${leftPos}px`;
@@ -1291,13 +1324,28 @@ class GhostCursor {
   }
 
   /**
-   * Resolves landmark sections or containers down to their ACTUAL substantive component
+   * Resolves landmark sections, headers, or containers down to their ACTUAL substantive component
    * (e.g., interactive tabs + code viewer, table, carousel, cards grid, form, sliders, or accordion)
+   * NEVER highlights or lands on title headers, H1/H2 tags, or page section banners!
    */
   _resolveActualContent(el, explanation = '') {
     if (!el || !(el instanceof Element)) return el;
 
     const tag = el.tagName.toLowerCase();
+
+    // 0. If el itself is a heading tag or title container, immediately find the actual substantive widget
+    if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'header' || tag === 'nav' || el.classList.contains('pricing-header') || el.classList.contains('grid-fine')) {
+      const parentScope = el.closest('section, main, article, div.space-y-24, div.space-y-12, div.space-y-8') || el.parentElement;
+      if (parentScope && parentScope !== el) {
+        const resolved = this._resolveActualContent(parentScope, explanation);
+        if (resolved && resolved !== el) return resolved;
+      }
+      if (el.nextElementSibling) {
+        const nextResolved = this._resolveActualContent(el.nextElementSibling, explanation);
+        if (nextResolved) return nextResolved;
+      }
+    }
+
     const isSection = tag === 'section' || tag === 'article' || tag === 'main' || (el.id && el.id.includes('section'));
     if (!isSection) return el;
 
@@ -1311,34 +1359,34 @@ class GhostCursor {
       return tabWidget;
     }
 
-    // 2. Carousel / Case-Study Showcase
-    const carousel = el.querySelector('[data-carousel], .carousel');
-    if (carousel) {
-      return carousel;
-    }
-
-    // 3. Tables (e.g. 10-Tool API Reference Table, Latency Benchmark Table, Security Matrix, SLA)
+    // 2. Tables (e.g. 10-Tool API Reference Table, Latency Benchmark Table, Security Matrix, SLA)
     const tableContainer = el.querySelector('.overflow-x-auto, table');
     if (tableContainer) {
       return tableContainer;
     }
 
-    // 4. Form (e.g. #contact-form)
+    // 3. Form (e.g. #contact-form)
     const form = el.querySelector('form');
     if (form) {
       return form;
     }
 
-    // 5. Pricing Cards Grid / Feature Grid
+    // 4. Pricing Cards Grid / Feature Grid
     const cardsGrid = el.querySelector('#pricing-cards-grid, .pricing-grid, [data-plan="pro"], .grid:has(.pricing-card)');
     if (cardsGrid) {
       return cardsGrid;
     }
 
-    // 6. Interactive Calculator Sliders & Result Card
+    // 5. Interactive Calculator Sliders & Result Card
     const calcGrid = el.querySelector('.grid:has(input[type="range"]), .grid:has(#roi-result-card)');
     if (calcGrid) {
       return calcGrid;
+    }
+
+    // 6. Carousel / Case-Study Showcase
+    const carousel = el.querySelector('[data-carousel], .carousel');
+    if (carousel) {
+      return carousel;
     }
 
     // 7. Telemetry / Metric strips
@@ -1353,8 +1401,8 @@ class GhostCursor {
       return faqContainer;
     }
 
-    // 9. Content following the title header block
-    const headerBlock = el.querySelector('div.space-y-2:has(h1), div.space-y-1:has(h2), .pricing-header, header');
+    // 9. First substantive content following the title header block
+    const headerBlock = el.querySelector('div.space-y-2:has(h1), div.space-y-1:has(h2), .pricing-header, header, .grid-fine');
     if (headerBlock && headerBlock.nextElementSibling) {
       return headerBlock.nextElementSibling;
     }
@@ -1421,9 +1469,9 @@ class GhostCursor {
       };
     }
 
-    const minTop = isInsideHeader ? 12 : headerHeight + 18;
-    const xOffset = Math.min(Math.max(48, rect.width * 0.28), 220);
-    const yOffset = Math.min(Math.max(32, rect.height * 0.3), 85);
+    const minTop = isInsideHeader ? 12 : headerHeight + 22;
+    const xOffset = Math.min(Math.max(48, rect.width * 0.35), 240);
+    const yOffset = Math.min(Math.max(36, rect.height * 0.38), 95);
 
     return {
       x: Math.max(16, Math.min(window.innerWidth - 24, rect.left + xOffset)),

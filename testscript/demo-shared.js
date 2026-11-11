@@ -2,17 +2,18 @@
  * WebOrient Multi-Page Demo Shared Shell (v0.6.0 — DeployMate Signature Design System)
  * - Exact DeployMate design.md visual language: Paper (#FFFFFF), Ink (#0A0A0A), Signal (#E6391E)
  * - Official DeployMate signature stacked SVG logo in header and footer
+ * - Clean standard single-tier website header (like all modern SaaS websites, no subnav debug bars)
  * - Minimal Siri-Like Waveform & Assist Toggle (Shadow DOM & Light DOM synchronized)
- * - Substantive component resolution & viewport auto-centering
+ * - Substantive component resolution & collision-free boundary positioning
  */
 import { WebOrient } from '../src/sdk/weborient.js';
 
 const PAGES = [
-  { id: 'home', file: 'test-demo.html', route: '/', label: 'Overview Hub', badge: '01' },
-  { id: 'features', file: 'features.html', route: '/features', label: 'Architecture', badge: '02' },
-  { id: 'pricing', file: 'pricing.html', route: '/pricing', label: 'Pricing & ROI', badge: '03' },
-  { id: 'docs', file: 'docs.html', route: '/docs', label: 'Docs & SDK', badge: '04' },
-  { id: 'contact', file: 'contact.html', route: '/contact', label: 'Enterprise', badge: '05' }
+  { id: 'home', file: 'test-demo.html', route: '/', label: 'Overview' },
+  { id: 'features', file: 'features.html', route: '/features', label: 'Architecture' },
+  { id: 'pricing', file: 'pricing.html', route: '/pricing', label: 'Pricing & ROI' },
+  { id: 'docs', file: 'docs.html', route: '/docs', label: 'Developer Docs' },
+  { id: 'contact', file: 'contact.html', route: '/contact', label: 'Enterprise' }
 ];
 
 export function initMultiPageDemo(pageConfig = {}) {
@@ -22,8 +23,8 @@ export function initMultiPageDemo(pageConfig = {}) {
   // 1. Inject DeployMate design.md CSS Variables & Architectural Grid Utilities
   injectDeployMateBaseStyles();
 
-  // 2. Mount DeployMate Architectural Header & Sub-Navigation
-  mountGlobalHeader(activePage, pageConfig.sectionLinks || []);
+  // 2. Mount Clean Single-Tier Architectural Header (like standard website headers)
+  mountGlobalHeader(activePage);
 
   // 3. Mount DeployMate Architectural Footer
   mountGlobalFooter();
@@ -50,8 +51,6 @@ export function initMultiPageDemo(pageConfig = {}) {
         syncAssistUI(true, state);
       } else if (type === 'interrupted') {
         syncAssistUI(true, 'interrupted');
-      } else if (type === 'memoryUpdate') {
-        updateHeaderVisitedBadges(detail);
       }
     }
   });
@@ -61,7 +60,6 @@ export function initMultiPageDemo(pageConfig = {}) {
   wireGenericTabs(weborient);
   wireGenericCarousels(weborient);
   wireAssistToggleActions(weborient, activePage);
-  updateHeaderVisitedBadges(weborient.memory.getState());
 
   return weborient;
 }
@@ -134,7 +132,12 @@ function injectDeployMateBaseStyles() {
   document.head.appendChild(style);
 }
 
-function mountGlobalHeader(activePage, sectionLinks) {
+/**
+ * Standard, clean single-tier website header (like all SaaS websites)
+ * Logo on left, clean navigation links in center/right, live assist CTA on right.
+ * No second black sub-bar, no debug badges, no cluttered title blocks.
+ */
+function mountGlobalHeader(activePage) {
   const existing = document.getElementById('global-site-header');
   if (existing) existing.remove();
 
@@ -145,68 +148,50 @@ function mountGlobalHeader(activePage, sectionLinks) {
   const navItemsHtml = PAGES.map(p => {
     const isCurrent = p.id === activePage.id;
     return `
-      <a href="${p.file}" id="nav-link-${p.id}" data-page-file="${p.file}" class="px-3.5 py-2 text-xs font-mono uppercase tracking-[0.12em] transition-colors flex items-center gap-2 border ${
+      <a href="${p.file}" id="nav-link-${p.id}" data-page-file="${p.file}" class="px-4 py-2 text-xs font-mono uppercase tracking-[0.12em] transition-colors ${
         isCurrent
-          ? 'bg-[#0A0A0A] text-white border-[#0A0A0A] font-medium'
-          : 'bg-white text-[#0A0A0A]/75 border-transparent hover:border-[#0A0A0A] hover:text-[#0A0A0A]'
+          ? 'bg-[#0A0A0A] text-white font-medium'
+          : 'text-[#0A0A0A]/75 hover:text-[#0A0A0A] hover:bg-[#0A0A0A]/5'
       }">
         <span>${p.label}</span>
-        <span data-visit-badge="${p.file}" class="text-[10px] px-1.5 py-0.5 font-mono ${
-          isCurrent ? 'bg-[#E6391E] text-white' : 'bg-[#0A0A0A]/5 text-[#0A0A0A]/60'
-        }">${p.badge}</span>
       </a>
     `;
   }).join('');
 
-  const subNavHtml = sectionLinks.length > 0
-    ? `
-      <div class="bg-[#0A0A0A] text-white border-t border-[#0A0A0A] px-6 md:px-12 py-2.5">
-        <div class="max-w-7xl mx-auto flex flex-wrap items-center gap-2 text-[11px]">
-          <span class="text-[#E6391E] font-mono uppercase tracking-[0.2em] mr-2">INDEX // ${activePage.file.toUpperCase()}</span>
-          ${sectionLinks.map((s, idx) => `
-            <button type="button" data-section-target="${s.selector}" class="px-3 py-1 bg-white/5 hover:bg-[#E6391E] text-white/85 hover:text-white border border-white/15 hover:border-[#E6391E] transition-colors cursor-pointer flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em]">
-              <span class="text-[#E6391E] group-hover:text-white">0${idx + 1}</span>
-              <span>${s.label}</span>
-            </button>
-          `).join('')}
-        </div>
-      </div>
-    `
-    : '';
-
   header.innerHTML = `
-    <div class="max-w-7xl mx-auto px-6 md:px-12 h-20 flex flex-wrap items-center justify-between gap-4">
+    <div class="max-w-7xl mx-auto px-6 md:px-12 h-20 flex items-center justify-between gap-4">
       <a href="test-demo.html" class="flex items-center gap-3.5 group" aria-label="DeployMate WebOrient Home">
         <img src="deploymate-stacked-logo.svg" alt="DeployMate" class="h-11 w-auto object-contain transition-transform duration-300 group-hover:scale-105" />
-        <div class="border-l border-[#0A0A0A]/20 pl-3.5">
+        <div class="border-l border-[#0A0A0A]/20 pl-3.5 hidden sm:block">
           <div class="font-display font-bold text-sm tracking-tight text-[#0A0A0A] flex items-center gap-2">
             <span>WEBORIENT</span>
-            <span class="text-[9px] font-mono uppercase tracking-[0.18em] px-2 py-0.5 bg-[#E6391E] text-white">LIVE SDK v1.0</span>
+            <span class="text-[9px] font-mono uppercase tracking-[0.18em] px-2 py-0.5 bg-[#E6391E] text-white">LIVE SDK</span>
           </div>
           <div class="text-[10px] font-mono uppercase tracking-[0.15em] text-[#0A0A0A]/55">DeployMate Voice Co-Pilot</div>
         </div>
       </a>
-      <nav aria-label="Primary Multi-Page Navigation" class="flex flex-wrap items-center gap-1">
-        ${navItemsHtml}
-      </nav>
+
+      <div class="flex items-center gap-2 sm:gap-6">
+        <nav aria-label="Primary Multi-Page Navigation" class="flex items-center gap-1">
+          ${navItemsHtml}
+        </nav>
+        <button id="header-btn-assist" type="button" class="hidden md:flex items-center gap-2 px-4 py-2 bg-[#0A0A0A] hover:bg-[#E6391E] text-white font-mono text-xs uppercase tracking-[0.14em] transition-colors border border-[#0A0A0A] cursor-pointer">
+          <span class="w-2 h-2 rounded-full bg-[#E6391E]"></span>
+          <span>Live Assist</span>
+        </button>
+      </div>
     </div>
-    ${subNavHtml}
   `;
 
   document.body.prepend(header);
 
-  header.querySelectorAll('[data-section-target]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const sel = btn.getAttribute('data-section-target');
-      const label = btn.textContent.trim();
-      if (window.weborient) {
-        window.weborient.handleToolCall('move_and_highlight', {
-          selector: sel,
-          explanation: label
-        });
-      }
+  const headerAssistBtn = document.getElementById('header-btn-assist');
+  if (headerAssistBtn) {
+    headerAssistBtn.addEventListener('click', () => {
+      const toggle = document.getElementById('btn-assist-toggle');
+      if (toggle) toggle.click();
     });
-  });
+  }
 }
 
 function mountGlobalFooter() {
@@ -226,27 +211,15 @@ function mountGlobalFooter() {
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-6 font-mono text-[11px] uppercase tracking-[0.15em] text-[#0A0A0A]/60">
-        <a href="test-demo.html" class="hover:text-[#E6391E] transition-colors">01 Overview</a>
-        <a href="features.html" class="hover:text-[#E6391E] transition-colors">02 Architecture</a>
-        <a href="pricing.html" class="hover:text-[#E6391E] transition-colors">03 Pricing</a>
-        <a href="docs.html" class="hover:text-[#E6391E] transition-colors">04 SDK Docs</a>
-        <a href="contact.html" class="hover:text-[#E6391E] transition-colors">05 Intake</a>
+        <a href="test-demo.html" class="hover:text-[#E6391E] transition-colors">Overview</a>
+        <a href="features.html" class="hover:text-[#E6391E] transition-colors">Architecture</a>
+        <a href="pricing.html" class="hover:text-[#E6391E] transition-colors">Pricing</a>
+        <a href="docs.html" class="hover:text-[#E6391E] transition-colors">Docs</a>
+        <a href="contact.html" class="hover:text-[#E6391E] transition-colors">Enterprise</a>
       </div>
     </div>
   `;
   document.body.appendChild(footer);
-}
-
-function updateHeaderVisitedBadges(memState) {
-  if (!memState || !Array.isArray(memState.todoChecklist)) return;
-  for (const page of PAGES) {
-    const pageTodos = memState.todoChecklist.filter(t => t.page === page.file);
-    const doneCount = pageTodos.filter(t => t.done).length;
-    const badge = document.querySelector(`[data-visit-badge="${page.file}"]`);
-    if (badge && pageTodos.length > 0) {
-      badge.textContent = `${doneCount}/${pageTodos.length} ✓`;
-    }
-  }
 }
 
 /**
