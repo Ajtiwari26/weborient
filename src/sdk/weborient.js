@@ -24,7 +24,7 @@ export function getDefaultRelayEndpoint() {
       return 'ws://localhost:8088';
     }
   }
-  return 'wss://weborient-relay.onrender.com';
+  return 'wss://relay.deploymate.in';
 }
 
 export class WebOrient {
