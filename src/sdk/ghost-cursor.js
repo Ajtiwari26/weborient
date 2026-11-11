@@ -1,21 +1,21 @@
 /**
- * WebOrient Ghost Cursor & Deterministic UI Actuator (v0.5.0 — Precision Trajectory & Scroll-Sync Edition)
+ * WebOrient Ghost Cursor & Deterministic UI Actuator (v0.5.0 — DeployMate Shadow DOM Edition)
+ * - Encapsulated inside an open ShadowRoot (`#weborient-shadow-host` on `document.documentElement`)
+ *   so client website CSS (Tailwind/Bootstrap resets, body transforms) never distorts the cursor or spotlight
+ * - DeployMate Signal (`#E6391E`) & Ink (`#0A0A0A`) Brutalist-Editorial Coachmark & Spotlight aesthetic
  * - True Cubic Bézier + Fitts's Law human-like 60fps cursor trajectory with tip hotspot offset
- * - Exact smooth scroll completion listener (`_smoothScrollTo`) so elements are 100% settled in center before measuring coordinates
- * - Cross-page cursor coordinate persistence (`weborient_cursor_pos_v5`) so page redirects never jump the cursor
- * - Exact center targeting for interactive controls (buttons, links, switches, tabs, inputs)
- * - Scroll-locked element spotlight + floating glassmorphic explanation coachmark
+ * - Exact smooth scroll completion listener (`_smoothScrollTo`) so elements are 100% settled in center
+ * - Cross-page cursor coordinate persistence (`weborient_cursor_pos_v5`)
  * - React/Vue/Angular compatible form filling (`HTMLInputElement.prototype.value` setter)
- * - Gesture & swap actuation (`swipeOrSwap`) for carousels, tabs, toggle switches, and range sliders
  */
 
 const CURSOR_POS_STORAGE_KEY = 'weborient_cursor_pos_v5';
 
 export class GhostCursor {
   constructor(options = {}) {
-    this.primaryColor = options.primaryColor || '#6366f1';
-    this.accentColor = options.accentColor || '#ec4899';
-    this.cursorStyle = options.cursorStyle || 'modern-glow';
+    this.primaryColor = options.primaryColor || '#E6391E';
+    this.accentColor = options.accentColor || '#0A0A0A';
+    this.cursorStyle = options.cursorStyle || 'deploymate-signal';
     this.scanner = options.scanner || null;
 
     this.currentPosition = this._loadStoredPosition();
@@ -61,9 +61,32 @@ export class GhostCursor {
     } catch (_) {}
   }
 
+  /**
+   * Mounts or reuses `#weborient-shadow-host` on `document.documentElement` (`<html>`)
+   * with an open ShadowRoot so host website CSS rules can never collide with WebOrient UI.
+   */
+  getOrCreateShadowRoot() {
+    if (typeof document === 'undefined') return null;
+    let host = document.getElementById('weborient-shadow-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'weborient-shadow-host';
+      host.setAttribute('data-agent-ignore', 'true');
+      host.style.cssText = 'all: initial; position: fixed; inset: 0; width: 0; height: 0; pointer-events: none; z-index: 2147483647;';
+      (document.documentElement || document.body).appendChild(host);
+    }
+    return host.shadowRoot || host.attachShadow({ mode: 'open' });
+  }
+
   _initOverlay() {
     if (typeof document === 'undefined') return;
-    const existing = document.getElementById('weborient-overlay');
+    const legacyOverlay = document.getElementById('weborient-overlay');
+    if (legacyOverlay) legacyOverlay.remove();
+
+    this.shadowRoot = this.getOrCreateShadowRoot();
+    if (!this.shadowRoot) return;
+
+    const existing = this.shadowRoot.getElementById('weborient-overlay');
     if (existing) existing.remove();
 
     this.container = document.createElement('div');
@@ -76,43 +99,44 @@ export class GhostCursor {
       pointer-events: none;
       z-index: 2147483647;
       overflow: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     `;
 
-    // Spotlight Element Bounding Box
+    // Spotlight Element Bounding Box (DeployMate Signal #E6391E crisp architectural frame)
     this.spotlight = document.createElement('div');
     this.spotlight.id = 'weborient-spotlight';
     this.spotlight.style.cssText = `
       position: fixed;
       border: 2px solid ${this.primaryColor};
-      border-radius: 10px;
-      box-shadow: 0 0 26px ${this.primaryColor}88, inset 0 0 12px ${this.primaryColor}33;
+      border-radius: 6px;
+      box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.25), 0 0 28px ${this.primaryColor}55, inset 0 0 14px ${this.primaryColor}22;
       pointer-events: none;
       opacity: 0;
-      transition: opacity 0.22s ease, top 0.12s ease-out, left 0.12s ease-out, width 0.16s ease-out, height 0.16s ease-out;
+      transition: opacity 0.2s ease, top 0.12s cubic-bezier(0.215, 0.61, 0.355, 1), left 0.12s cubic-bezier(0.215, 0.61, 0.355, 1), width 0.16s cubic-bezier(0.215, 0.61, 0.355, 1), height 0.16s cubic-bezier(0.215, 0.61, 0.355, 1);
       z-index: 2147483645;
     `;
 
-    // Floating Explanation Coachmark / Tooltip
+    // Floating Explanation Coachmark / Tooltip (DeployMate Ink #0A0A0A + Signal #E6391E border)
     this.tooltip = document.createElement('div');
     this.tooltip.id = 'weborient-tooltip';
     this.tooltip.style.cssText = `
       position: fixed;
-      max-width: 340px;
-      padding: 8px 13px;
-      background: rgba(15, 23, 42, 0.95);
-      backdrop-filter: blur(10px);
-      border: 1px solid ${this.primaryColor};
-      border-radius: 10px;
-      color: #f8fafc;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 12px;
-      line-height: 1.45;
+      max-width: 360px;
+      padding: 8px 14px;
+      background: #0A0A0A;
+      border: 1.5px solid ${this.primaryColor};
+      border-radius: 999px;
+      color: #FFFFFF;
+      font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.4;
       font-weight: 500;
-      box-shadow: 0 12px 28px -5px rgba(0, 0, 0, 0.6), 0 0 16px ${this.primaryColor}44;
+      letter-spacing: 0.04em;
+      box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.45);
       pointer-events: none;
       opacity: 0;
       transform: translateY(4px);
-      transition: opacity 0.22s ease, transform 0.22s ease, top 0.12s ease-out, left 0.12s ease-out;
+      transition: opacity 0.2s ease, transform 0.2s ease, top 0.12s ease-out, left 0.12s ease-out;
       z-index: 2147483646;
     `;
 
@@ -129,7 +153,7 @@ export class GhostCursor {
     `;
     this.trailPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     this.trailPath.setAttribute('fill', 'none');
-    this.trailPath.setAttribute('stroke', this.accentColor);
+    this.trailPath.setAttribute('stroke', this.primaryColor);
     this.trailPath.setAttribute('stroke-width', '3.5');
     this.trailPath.setAttribute('stroke-linecap', 'round');
     this.trailPath.setAttribute('stroke-dasharray', '7 5');
@@ -137,17 +161,17 @@ export class GhostCursor {
     this.trailPath.style.transition = 'opacity 0.35s ease';
     this.trailSvg.appendChild(this.trailPath);
 
-    // Ghost Cursor Pointer (Tip hotspot at SVG (4, 3) is aligned to (0, 0) via margin offset)
+    // Ghost Cursor Pointer (Tip hotspot at SVG (4, 3) aligned to (0, 0) via margin offset)
     this.cursor = document.createElement('div');
     this.cursor.id = 'weborient-cursor';
     this.cursor.innerHTML = `
       <div class="weborient-pointer" style="position: relative; width: 30px; height: 30px; margin-left: -4px; margin-top: -3px; transition: transform 0.18s ease-out;">
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" style="filter: drop-shadow(0 3px 10px rgba(0,0,0,0.45));">
-          <path d="M4 3L11 20L14.5 13.5L21 11L4 3Z" fill="${this.primaryColor}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" style="filter: drop-shadow(0 4px 10px rgba(10,10,10,0.38));">
+          <path d="M4 3L11 20L14.5 13.5L21 11L4 3Z" fill="${this.primaryColor}" stroke="#0A0A0A" stroke-width="1.6" stroke-linejoin="round"/>
         </svg>
         <div class="weborient-ring" style="
           position: absolute; top: -11px; left: -10px; width: 28px; height: 28px;
-          border: 2.5px solid ${this.accentColor}; border-radius: 50%;
+          border: 2.5px solid ${this.primaryColor}; border-radius: 50%;
           opacity: 0; transform: scale(0.5);
           transition: transform 0.28s ease-out, opacity 0.28s ease-out;
         "></div>
@@ -166,7 +190,7 @@ export class GhostCursor {
     this.container.appendChild(this.spotlight);
     this.container.appendChild(this.tooltip);
     this.container.appendChild(this.cursor);
-    document.body.appendChild(this.container);
+    this.shadowRoot.appendChild(this.container);
 
     this._boundSyncPosition = () => this._syncSpotlightPosition();
     window.addEventListener('scroll', this._boundSyncPosition, { passive: true, capture: true });
@@ -200,8 +224,7 @@ export class GhostCursor {
   }
 
   /**
-   * Deterministic smooth scroll that waits until window.scrollY actually reaches targetScrollY
-   * (or scroll velocity settles to 0) so downstream getBoundingClientRect() is 100% accurate.
+   * Deterministic smooth scroll that waits until window.scrollY reaches targetScrollY
    */
   async _smoothScrollTo(targetScrollY, maxWaitMs = 680) {
     const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
@@ -255,8 +278,7 @@ export class GhostCursor {
   }
 
   /**
-   * Moves cursor along a human-like Cubic Bézier trajectory with Fitts's Law easing.
-   * Properly resolves any superseded move promise so callers never hang mid-flight.
+   * Moves cursor along a human-like Cubic Bézier trajectory with Fitts's Law easing
    */
   async moveTo(targetX, targetY, durationMs = 460) {
     if (this._rafId) {
@@ -269,7 +291,6 @@ export class GhostCursor {
       prevResolve();
     }
 
-    // Full-screen bounds without artificial 260px speech-bubble margin
     const clampedX = Math.max(8, Math.min(window.innerWidth - 16, targetX));
     const clampedY = Math.max(8, Math.min(window.innerHeight - 16, targetY));
 
@@ -355,7 +376,6 @@ export class GhostCursor {
       return;
     }
 
-    // Check if the target itself is inside the sticky header (e.g., navigation links)
     const header = document.querySelector('#global-site-header, header, [data-site-header]');
     const isInsideHeader = header && header.contains(this.activeTarget);
     const headerBottom = (!isInsideHeader && header) ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
@@ -380,8 +400,8 @@ export class GhostCursor {
 
     if (this.activeExplanation) {
       this.tooltip.innerHTML = `
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${this.accentColor};flex-shrink:0;"></span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${this.primaryColor};flex-shrink:0;"></span>
           <span>${this._escapeHtml(this.activeExplanation)}</span>
         </div>
       `;
@@ -389,7 +409,7 @@ export class GhostCursor {
       const topPos = canPlaceAbove
         ? Math.max(headerBottom + 8, safeTop - 42)
         : Math.min(window.innerHeight - 56, safeTop + safeHeight + 10);
-      const leftPos = Math.max(12, Math.min(window.innerWidth - 350, safeLeft));
+      const leftPos = Math.max(12, Math.min(window.innerWidth - 360, safeLeft));
 
       this.tooltip.style.top = `${topPos}px`;
       this.tooltip.style.left = `${leftPos}px`;
@@ -403,7 +423,6 @@ export class GhostCursor {
   /**
    * Resolves landmark sections or containers down to their ACTUAL substantive component
    * (e.g., interactive tabs + code viewer, table, carousel, cards grid, form, sliders, or accordion)
-   * so the spotlight and cursor show the actual interactive feature rather than just the title block at the top.
    */
   _resolveActualContent(el, explanation = '') {
     if (!el || !(el instanceof Element)) return el;
@@ -473,11 +492,6 @@ export class GhostCursor {
     return el;
   }
 
-  /**
-   * Computes exact landing coordinates for an element:
-   * - Interactive controls (buttons, links, switches, inputs, tabs) -> exact visual center
-   * - Containers with tabs/carousels/tables/cards -> lands directly on the active control/content
-   */
   _computeTargetCoordinates(el, rect, headerHeight, isInsideHeader) {
     const tag = el.tagName.toLowerCase();
     const role = (el.getAttribute('role') || '').toLowerCase();
@@ -501,7 +515,6 @@ export class GhostCursor {
       };
     }
 
-    // If the resolved element has active tabs, place cursor directly on the active tab!
     const activeTab = el.querySelector?.('[role="tab"][aria-selected="true"], [role="tab"].active, [role="tab"]');
     if (activeTab) {
       const tabRect = activeTab.getBoundingClientRect();
@@ -511,7 +524,6 @@ export class GhostCursor {
       };
     }
 
-    // If the resolved element has an active carousel slide, place cursor on the slide card!
     const activeSlide = el.querySelector?.('[data-carousel-slide]:not(.hidden), .carousel-slide:not(.hidden)');
     if (activeSlide) {
       const slideRect = activeSlide.getBoundingClientRect();
@@ -521,7 +533,6 @@ export class GhostCursor {
       };
     }
 
-    // If the resolved element has pricing cards, place cursor directly on Pro Co-Pilot card!
     const proCard = el.querySelector?.('#plan-pro, [data-plan="pro"], .pricing-card:nth-child(3), .pricing-card');
     if (proCard) {
       const proRect = proCard.getBoundingClientRect();
@@ -531,7 +542,6 @@ export class GhostCursor {
       };
     }
 
-    // If table, place cursor on the first row/cell!
     const firstCell = el.querySelector?.('tbody tr:first-child td:first-child, thead th:first-child');
     if (firstCell) {
       const cellRect = firstCell.getBoundingClientRect();
@@ -558,7 +568,6 @@ export class GhostCursor {
       return { success: false, elementFound: false, error: `Element not found: ${selector}` };
     }
 
-    // Resolve landmark sections to the ACTUAL substantive feature (tabs, table, carousel, cards, form)
     const el = this._resolveActualContent(rawEl, explanation);
 
     const header = document.querySelector('#global-site-header, header, [data-site-header]');
@@ -567,7 +576,6 @@ export class GhostCursor {
     const viewportHeight = window.innerHeight;
     const usableHeight = Math.max(200, viewportHeight - headerHeight);
 
-    // 1. Center the actual element in the visible viewport BEFORE moving the cursor (unless it's in the sticky header)
     if (!isInsideHeader) {
       const initialRect = el.getBoundingClientRect();
       let targetTopInViewport;
@@ -583,14 +591,12 @@ export class GhostCursor {
       }
     }
 
-    // 2. Lock spotlight onto the settled element immediately so user sees the highlight as cursor lands
     if (highlight) {
       this.activeTarget = el;
       this.activeExplanation = explanation || null;
       this._syncSpotlightPosition();
     }
 
-    // 3. Re-measure settled bounding box and move cursor to exact coordinates
     const settledRect = el.getBoundingClientRect();
     const { x: targetX, y: targetY } = this._computeTargetCoordinates(el, settledRect, headerHeight, isInsideHeader);
 
@@ -614,7 +620,7 @@ export class GhostCursor {
     };
   }
 
-  async guideTour(steps = [], speechSync = null) {
+  async guideTour(steps = []) {
     if (!Array.isArray(steps) || steps.length === 0) {
       return { success: false, error: 'No tour steps provided' };
     }
@@ -627,7 +633,7 @@ export class GhostCursor {
     for (let i = 0; i < steps.length; i++) {
       if (controller.signal.aborted) break;
       const step = steps[i];
-      const badgeText = `[${i + 1}/${steps.length}] ${step.explanation || 'Tour Stop'}`;
+      const badgeText = `[0${i + 1}/0${steps.length}] ${step.explanation || 'Tour Stop'}`;
       const res = await this.moveToElement(step.selector, true, badgeText);
 
       const dwell = Math.min(4000, Math.max(600, step.dwellMs || 1200));
@@ -757,7 +763,6 @@ export class GhostCursor {
       const numVal = parseFloat(String(normalizedValue).replace(/[^0-9.-]/g, ''));
       const clampedVal = Number.isFinite(numVal) ? Math.max(min, Math.min(max, numVal)) : min;
 
-      // Animate cursor dragging slider thumb to exact percentage position
       const rect = el.getBoundingClientRect();
       const ratio = max > min ? (clampedVal - min) / (max - min) : 0.5;
       const thumbX = rect.left + Math.max(8, Math.min(rect.width - 8, rect.width * ratio));
@@ -930,7 +935,7 @@ export class GhostCursor {
       }
     }
 
-    // 4. Carousel / Swipeable Container (Also handles when parent <section> is passed!)
+    // 4. Carousel / Swipeable Container
     const carouselBox = el.hasAttribute('data-carousel')
       ? el
       : (el.querySelector('[data-carousel]') || el);

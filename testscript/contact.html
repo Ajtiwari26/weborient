@@ -3,179 +3,190 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Enterprise Contact & 11-Field Voice Intake Portal — Acme WebOrient</title>
+  <title>Enterprise Consultation & Voice Form Co-Pilot — WebOrient by DeployMate</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
+<body class="bg-white text-[#0A0A0A] min-h-screen antialiased">
 
-  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20">
+  <main class="max-w-7xl mx-auto px-6 py-12 space-y-24">
 
-    <!-- 1. Enterprise Intake Form Section -->
+    <!-- 01. 11-FIELD ENTERPRISE CONSULTATION FORM -->
     <section id="intake-form-section" class="space-y-8">
-      <div class="space-y-2">
-        <div class="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-full text-emerald-300 text-xs font-semibold">
-          Page 5 of 5 • Multi-Control Voice Form Co-Pilot &amp; Enterprise Intake
+      <div class="border-b border-[#0A0A0A] pb-8 grid-fine">
+        <div class="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E] mb-3">
+          <span>● PAGE 05 OF 05 · LIVE VOICE FORM CO-PILOT &amp; ENTERPRISE ONBOARDING</span>
         </div>
-        <h1 class="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">
-          Book an <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-indigo-400">Enterprise Architecture Review</span>
+        <h1 class="font-display font-light text-[clamp(2.4rem,5.4vw,4.8rem)] leading-[0.94] tracking-[-0.03em] text-[#0A0A0A]">
+          Dictate your details.<br/>
+          Watch the <span class="text-[#E6391E] font-medium">Ghost Cursor fill the form.</span>
         </h1>
-        <p class="text-sm text-slate-300 max-w-3xl">
-          Test WebOrient's voice form co-pilot across 11 controls: text inputs, spoken email normalization (<code>"ajay at deploymate dot in"</code>), phone numbers, URLs, dropdown selects, range sliders, checkboxes, and textareas.
+        <p class="text-sm sm:text-base text-[#0A0A0A]/80 max-w-3xl mt-4 leading-relaxed">
+          Speak naturally to M.A.T.E. / WebOrient (e.g., <em>"My name is Ajay Tiwari, email is tiwariajay033 at gmail dot com, company is DeployMate, and we use Next.js"</em>) and watch the Ghost Cursor populate every text input, dropdown, slider, and checkbox below.
         </p>
       </div>
 
-      <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl space-y-6">
-        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-4">
+      <form id="contact-form" class="p-8 sm:p-10 border border-[#0A0A0A] bg-white space-y-6" onsubmit="event.preventDefault(); document.getElementById('form-status-banner').classList.remove('hidden');">
+        <div class="flex items-center justify-between border-b border-[#0A0A0A]/20 pb-4">
+          <span class="font-mono text-xs uppercase tracking-[0.16em] text-[#E6391E] font-semibold">01 / 11-FIELD ENTERPRISE INTAKE SPECIFICATION</span>
+          <span class="font-mono text-[10px] uppercase tracking-[0.15em] text-[#0A0A0A]/60">REACT / VUE NATIVE SETTER COMPATIBLE</span>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-6">
           <div>
-            <h2 class="text-xl font-bold text-white">Technical Onboarding &amp; Deployment Intake</h2>
-            <p class="text-xs text-slate-400">Click "Go Contact + Fill 9 Fields" in the control bench or dictate by voice.</p>
+            <label for="contact-name" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">01 · Full Name *</label>
+            <input id="contact-name" name="fullName" type="text" required placeholder="e.g. Ajay Tiwari" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
           </div>
-          <button id="btn-demo-autofill-here" type="button" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition shadow-lg shadow-emerald-600/20">
-            ✨ Run Full 11-Field Voice Batch Fill
+
+          <div>
+            <label for="contact-email" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">02 · Work Email * (Voice Normalized)</label>
+            <input id="contact-email" name="email" type="email" required placeholder="tiwariajay033@gmail.com" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+          </div>
+
+          <div>
+            <label for="contact-phone" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">03 · Phone / WhatsApp Number</label>
+            <input id="contact-phone" name="phone" type="tel" placeholder="+91 93992 50600" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+          </div>
+
+          <div>
+            <label for="contact-company" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">04 · Company / Brand Name *</label>
+            <input id="contact-company" name="company" type="text" required placeholder="DeployMate AI" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+          </div>
+
+          <div>
+            <label for="contact-website" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">05 · Target Website URL</label>
+            <input id="contact-website" name="website" type="url" placeholder="https://www.deploymate.in" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+          </div>
+
+          <div>
+            <label for="contact-framework" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">06 · Frontend Tech Stack</label>
+            <select id="contact-framework" name="framework" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+              <option value="Next.js / React">Next.js / React</option>
+              <option value="Vue / Nuxt">Vue / Nuxt</option>
+              <option value="Shopify / Liquid">Shopify / Liquid</option>
+              <option value="WordPress / WooCommerce">WordPress / WooCommerce</option>
+              <option value="Webflow / Custom HTML">Webflow / Custom HTML</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="contact-plan" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">07 · Interested Plan Tier</label>
+            <select id="contact-plan" name="plan" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+              <option value="Starter ($29/mo)">Starter ($29/mo — 300 mins)</option>
+              <option value="Growth ($49/mo)">Growth ($49/mo — 1,000 mins)</option>
+              <option value="Pro Co-Pilot ($79/mo)" selected>Pro Co-Pilot ($79/mo — 3,500 mins)</option>
+              <option value="Enterprise Custom">Enterprise Custom (Unlimited)</option>
+            </select>
+          </div>
+
+          <div>
+            <div class="flex justify-between font-mono text-[11px] uppercase tracking-[0.14em] mb-2">
+              <label for="contact-team-size" class="text-[#0A0A0A]">08 · Engineering Team Size</label>
+              <span id="team-size-output" class="text-[#E6391E] font-bold">25 engineers</span>
+            </div>
+            <input id="contact-team-size" name="teamSize" type="range" min="1" max="200" value="25" class="w-full accent-[#E6391E] cursor-pointer mt-2" oninput="document.getElementById('team-size-output').innerText = this.value + ' engineers'">
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-4 pt-2">
+          <label class="flex items-center gap-3 p-4 border border-[#0A0A0A] cursor-pointer hover:bg-[#0A0A0A]/5">
+            <input id="contact-priority" name="priorityOnboarding" type="checkbox" class="w-4 h-4 accent-[#E6391E]">
+            <span class="font-mono text-xs uppercase tracking-wider text-[#0A0A0A]">09 · Request Priority White-Glove Setup</span>
+          </label>
+
+          <label class="flex items-center gap-3 p-4 border border-[#0A0A0A] cursor-pointer hover:bg-[#0A0A0A]/5">
+            <input id="contact-hipaa" name="hipaaCompliance" type="checkbox" class="w-4 h-4 accent-[#E6391E]">
+            <span class="font-mono text-xs uppercase tracking-wider text-[#0A0A0A]">10 · Require HIPAA / SOC2 Type II BAA</span>
+          </label>
+        </div>
+
+        <div>
+          <label for="contact-message" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">11 · Project Goals &amp; Co-Browsing Use Case</label>
+          <textarea id="contact-message" name="message" rows="3" placeholder="Tell us what workflows you want the Ghost Cursor to guide and automate..." class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]"></textarea>
+        </div>
+
+        <!-- Masked Guardrail Demonstration Row -->
+        <div class="p-4 bg-[#0A0A0A] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div class="font-mono text-[10px] uppercase tracking-[0.18em] text-[#E6391E]">🔒 SENSITIVE FIELD GUARDRAIL DEMO (IGNORED BY AGENT)</div>
+            <p class="text-xs text-white/70 mt-0.5">This password input is automatically blacklisted by <code>DOMScanner</code> and cannot be read or modified by the AI.</p>
+          </div>
+          <input type="password" value="deploymate-secret-token" readonly class="px-3 py-2 bg-white/10 border border-white/20 text-xs font-mono text-white/60 w-52">
+        </div>
+
+        <div id="form-status-banner" class="hidden p-4 bg-[#E6391E] text-white font-mono text-xs uppercase tracking-wider">
+          ✓ Enterprise Consultation Request Captured! DeployMate team will reach out within 15 minutes.
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
+          <span class="font-mono text-[10px] uppercase tracking-[0.15em] text-[#0A0A0A]/60">Direct Founder Line: +91 93992 50600 · tiwariajay033@gmail.com</span>
+          <button id="btn-submit-consultation" type="submit" data-confirm-required="true" class="px-8 py-4 bg-[#0A0A0A] hover:bg-[#E6391E] text-white rounded-full font-display text-sm font-semibold transition cursor-pointer">
+            Submit Consultation Request →
           </button>
         </div>
-
-        <form id="contact-form" class="space-y-5" onsubmit="event.preventDefault(); document.getElementById('form-status').innerText = '✅ Enterprise consultation request submitted and verified!';">
-          <!-- Row 1: Name, Email, Phone -->
-          <div class="grid sm:grid-cols-3 gap-4">
-            <div>
-              <label for="contact-name" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Full Name *</label>
-              <input id="contact-name" name="fullName" type="text" required placeholder="Ajay Tiwari" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm">
-            </div>
-            <div>
-              <label for="contact-email" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Work Email *</label>
-              <input id="contact-email" name="email" type="email" required placeholder="ajay@deploymate.in" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm">
-            </div>
-            <div>
-              <label for="contact-phone" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Phone Number</label>
-              <input id="contact-phone" name="phone" type="tel" placeholder="+91 98765 43210" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm">
-            </div>
-          </div>
-
-          <!-- Row 2: Company & Website URL -->
-          <div class="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label for="contact-company" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Company / Organization *</label>
-              <input id="contact-company" name="company" type="text" required placeholder="DeployMate AI Labs" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm">
-            </div>
-            <div>
-              <label for="contact-website" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Target Website URL</label>
-              <input id="contact-website" name="website" type="url" placeholder="https://deploymate.in" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm">
-            </div>
-          </div>
-
-          <!-- Row 3: Frontend Stack Select, Tier Select, Team Size Range Slider -->
-          <div class="grid sm:grid-cols-3 gap-4 items-center">
-            <div>
-              <label for="contact-framework" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Frontend Stack</label>
-              <select id="contact-framework" name="framework" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
-                <option value="nextjs">Next.js / React</option>
-                <option value="vue">Vue / Nuxt</option>
-                <option value="shopify">Shopify / WordPress</option>
-                <option value="html">Static HTML / Custom</option>
-              </select>
-            </div>
-            <div>
-              <label for="contact-plan" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Interested Tier</label>
-              <select id="contact-plan" name="plan" class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-indigo-500 text-sm">
-                <option value="starter">Starter ($29/mo)</option>
-                <option value="growth">Growth ($49/mo)</option>
-                <option value="pro">Pro Co-Pilot ($79/mo)</option>
-                <option value="enterprise">Enterprise (Custom SLA)</option>
-              </select>
-            </div>
-            <div>
-              <div class="flex justify-between text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                <label for="contact-team-size">Engineering Seats</label>
-                <span id="team-size-val" class="text-indigo-400 font-mono">15 seats</span>
-              </div>
-              <input id="contact-team-size" name="teamSize" type="range" min="1" max="200" value="15" class="w-full accent-indigo-500 cursor-pointer">
-            </div>
-          </div>
-
-          <!-- Row 4: Checkboxes -->
-          <div class="grid sm:grid-cols-2 gap-3 pt-1">
-            <label class="flex items-center gap-2.5 p-3 bg-slate-950/70 border border-slate-800 rounded-xl cursor-pointer">
-              <input id="contact-priority" name="priorityOnboarding" type="checkbox" class="w-4 h-4 rounded accent-indigo-500">
-              <span class="text-xs text-slate-200">Include Priority White-Glove Manifest Setup</span>
-            </label>
-            <label class="flex items-center gap-2.5 p-3 bg-slate-950/70 border border-slate-800 rounded-xl cursor-pointer">
-              <input id="contact-hipaa" name="hipaaCompliance" type="checkbox" class="w-4 h-4 rounded accent-emerald-500">
-              <span class="text-xs text-slate-200">Require SOC2 Type II / HIPAA BAA Relay</span>
-            </label>
-          </div>
-
-          <!-- Row 5: Protected Demo Field (Ignored by Agent) -->
-          <div class="p-3 bg-amber-950/20 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div class="text-xs text-amber-300">
-              <strong>Security Guardrail Test:</strong> This password field has <code>type="password"</code> and is automatically blacklisted from <code>DOMScanner</code>.
-            </div>
-            <input id="protected-secret-pin" type="password" placeholder="Protected PIN (Ignored)" class="px-3 py-1.5 bg-slate-950 border border-amber-500/40 rounded-lg text-xs text-white w-48">
-          </div>
-
-          <!-- Row 6: Project Details Textarea -->
-          <div>
-            <label for="contact-message" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Project Requirements &amp; Use Case</label>
-            <textarea id="contact-message" name="message" rows="3" placeholder="Tell us about your website routes, forms, and voice goals..." class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm"></textarea>
-          </div>
-
-          <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
-            <span id="form-status" class="text-xs text-emerald-400 font-semibold"></span>
-            <button id="btn-submit-contact" type="submit" class="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 font-semibold rounded-xl text-white text-xs transition shadow-lg shadow-indigo-600/30">
-              Submit Enterprise Consultation Request
-            </button>
-          </div>
-        </form>
-      </div>
+      </form>
     </section>
 
-    <!-- 2. Global Engineering & Support Hubs -->
-    <section id="offices-section" class="space-y-4">
-      <h2 class="text-2xl font-bold text-white">Global Engineering &amp; Low-Latency Relay Regions</h2>
-      <div class="grid sm:grid-cols-3 gap-5">
-        <div id="office-sf" class="p-5 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-1">
-          <div class="text-xs font-mono text-indigo-400">US-WEST • SAN FRANCISCO</div>
-          <div class="font-bold text-white">Americas Relay Hub</div>
-          <p class="text-xs text-slate-400">548 Market St, San Francisco, CA • Average WSS ping: 18ms</p>
+    <!-- 02. GLOBAL ENGINEERING & RELAY HUBS -->
+    <section id="offices-section" class="space-y-6">
+      <div class="border-b border-[#0A0A0A] pb-4">
+        <div class="font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E]">02 / LOW-LATENCY EDGE RELAYS</div>
+        <h2 class="font-display font-light text-3xl sm:text-5xl text-[#0A0A0A] mt-1">Global Engineering &amp; Support Hubs</h2>
+      </div>
+
+      <div class="grid sm:grid-cols-3 border border-[#0A0A0A] bg-white">
+        <div class="p-7 border-b sm:border-b-0 sm:border-r border-[#0A0A0A] space-y-2">
+          <div class="font-mono text-[10px] uppercase tracking-[0.18em] text-[#E6391E]">01 · INDIA HQ (BHOPAL / BENGALURU)</div>
+          <h3 class="font-display text-xl font-bold text-[#0A0A0A]">DeployMate India</h3>
+          <p class="text-xs text-[#0A0A0A]/75">Bhopal, Madhya Pradesh &amp; HSR Layout, Bengaluru · Primary APAC &amp; India Edge Relay (`ap-south-1`).</p>
         </div>
-        <div id="office-london" class="p-5 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-1">
-          <div class="text-xs font-mono text-pink-400">EU-WEST • LONDON</div>
-          <div class="font-bold text-white">EMEA GDPR-Compliant Hub</div>
-          <p class="text-xs text-slate-400">30 St Mary Axe, London, UK • Average WSS ping: 21ms</p>
+        <div class="p-7 border-b sm:border-b-0 sm:border-r border-[#0A0A0A] space-y-2">
+          <div class="font-mono text-[10px] uppercase tracking-[0.18em] text-[#E6391E]">02 · NORTH AMERICA RELAY</div>
+          <h3 class="font-display text-xl font-bold text-[#0A0A0A]">San Francisco &amp; US-East</h3>
+          <p class="text-xs text-[#0A0A0A]/75">Low-latency WebSocket cluster serving US/Canada SaaS and Shopify Plus merchants (`us-east-1` / `us-west-1`).</p>
         </div>
-        <div id="office-india" class="p-5 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-1">
-          <div class="text-xs font-mono text-emerald-400">AP-SOUTH • BENGALURU &amp; BHOPAL</div>
-          <div class="font-bold text-white">APAC Engineering &amp; Relay Hub</div>
-          <p class="text-xs text-slate-400"> Outer Ring Rd, Bengaluru / MP Nagar, Bhopal • Average WSS ping: 14ms</p>
+        <div class="p-7 space-y-2">
+          <div class="font-mono text-[10px] uppercase tracking-[0.18em] text-[#E6391E]">03 · EUROPE GDPR RELAY</div>
+          <h3 class="font-display text-xl font-bold text-[#0A0A0A]">London &amp; Frankfurt</h3>
+          <p class="text-xs text-[#0A0A0A]/75">Zero-retention EU audio relay compliant with GDPR &amp; enterprise data residency (`eu-central-1`).</p>
         </div>
       </div>
     </section>
 
-    <!-- 3. Support SLA Table -->
-    <section id="sla-section" class="space-y-4 pb-16">
-      <h2 class="text-2xl font-bold text-white">Enterprise Support SLA &amp; Response Guarantees</h2>
-      <div class="overflow-x-auto bg-slate-900/60 border border-slate-800 rounded-2xl">
+    <!-- 03. SUPPORT RESPONSE TIME & SLA MATRIX -->
+    <section id="sla-section" class="space-y-6">
+      <div class="border-b border-[#0A0A0A] pb-4">
+        <div class="font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E]">03 / GUARANTEED RESPONSE TIMES</div>
+        <h2 class="font-display font-light text-3xl sm:text-5xl text-[#0A0A0A] mt-1">Support &amp; Uptime SLA Matrix</h2>
+      </div>
+
+      <div class="overflow-x-auto border border-[#0A0A0A] bg-white">
         <table class="w-full text-left text-xs">
-          <thead class="bg-slate-900 text-slate-400 uppercase font-mono border-b border-slate-800">
+          <thead class="bg-[#0A0A0A] text-white uppercase font-mono tracking-[0.14em] border-b border-[#0A0A0A]">
             <tr>
-              <th class="py-3 px-4">Severity Level</th>
-              <th class="py-3 px-4">Pro Co-Pilot Response</th>
-              <th class="py-3 px-4 text-emerald-400">Enterprise Dedicated SLA</th>
+              <th class="py-4 px-5">Plan Tier</th>
+              <th class="py-4 px-5">Initial Response SLA</th>
+              <th class="py-4 px-5">Dedicated Relay Cluster</th>
+              <th class="py-4 px-5">Onboarding Support</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-800/70 text-slate-300">
-            <tr>
-              <td class="py-2.5 px-4 font-semibold text-white">P1: Critical Live Relay Outage</td>
-              <td class="py-2.5 px-4">&lt; 2 hours</td>
-              <td class="py-2.5 px-4 text-emerald-400 font-semibold">&lt; 15 minutes (24/7 Slack + PagerDuty)</td>
+          <tbody class="divide-y divide-[#0A0A0A]/20 text-[#0A0A0A]">
+            <tr class="hover:bg-[#0A0A0A]/5">
+              <td class="py-3.5 px-5 font-display font-bold text-sm">Starter &amp; Growth</td>
+              <td class="py-3.5 px-5 font-mono">&lt; 12 Hours</td>
+              <td class="py-3.5 px-5">Shared Global Multi-Tenant Edge</td>
+              <td class="py-3.5 px-5">1-Line Self-Serve + Auto-Crawler</td>
             </tr>
-            <tr>
-              <td class="py-2.5 px-4 font-semibold text-white">P2: Custom DOM Widget Tuning</td>
-              <td class="py-2.5 px-4">&lt; 12 hours</td>
-              <td class="py-2.5 px-4 text-emerald-400 font-semibold">&lt; 2 hours (Dedicated Solutions Engineer)</td>
+            <tr class="hover:bg-[#0A0A0A]/5">
+              <td class="py-3.5 px-5 font-display font-bold text-sm text-[#E6391E]">Pro Co-Pilot</td>
+              <td class="py-3.5 px-5 font-mono font-bold text-[#E6391E]">&lt; 2 Hours (Priority Slack/WhatsApp)</td>
+              <td class="py-3.5 px-5">Priority Low-Jitter Audio Pool</td>
+              <td class="py-3.5 px-5">Custom Manifest Tuning Included</td>
+            </tr>
+            <tr class="hover:bg-[#0A0A0A]/5">
+              <td class="py-3.5 px-5 font-display font-bold text-sm">Enterprise Custom</td>
+              <td class="py-3.5 px-5 font-mono font-bold">&lt; 15 Minutes (24/7 PagerDuty)</td>
+              <td class="py-3.5 px-5">Dedicated VPC / Custom Domain</td>
+              <td class="py-3.5 px-5">Dedicated DeployMate Solutions Architect</td>
             </tr>
           </tbody>
         </table>
@@ -187,13 +198,7 @@
   <script type="module">
     import { initMultiPageDemo } from './demo-shared.js';
 
-    const teamSlider = document.getElementById('contact-team-size');
-    const teamLabel = document.getElementById('team-size-val');
-    teamSlider.addEventListener('input', () => {
-      teamLabel.innerText = `${teamSlider.value} seats`;
-    });
-
-    const weborient = initMultiPageDemo({
+    initMultiPageDemo({
       sectionLinks: [
         { label: '11-Field Enterprise Form', selector: '#contact-form' },
         { label: 'Global Relay Offices', selector: '#offices-section .grid' },
@@ -205,17 +210,12 @@
       },
       tourSteps: [
         { selector: '#contact-email', explanation: '1. Spoken Email Normalization ("at" -> @, "dot" -> .)', dwellMs: 900 },
-        { selector: '#contact-plan', explanation: '2. Native Select & Range Slider Actuation', dwellMs: 900 },
-        { selector: '#protected-secret-pin', explanation: '3. Password Field Automatically Blacklisted from Scanner', dwellMs: 900 },
-        { selector: '#office-india', explanation: '4. APAC Low-Latency Relay Hub (Bengaluru & Bhopal)', dwellMs: 900 }
+        { selector: '#contact-framework', explanation: '2. Native Select Dropdown Actuation', dwellMs: 900 },
+        { selector: '#contact-team-size', explanation: '3. Interactive Range Slider Interpolation', dwellMs: 900 }
       ],
       tabSelector: '#contact-framework',
       swipeSelector: '#contact-team-size',
       qaTarget: { query: 'SLA', selector: '#sla-section' }
-    });
-
-    document.getElementById('btn-demo-autofill-here').addEventListener('click', () => {
-      document.getElementById('btn-xpage-contact').click();
     });
   </script>
 </body>

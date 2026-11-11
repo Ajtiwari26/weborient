@@ -869,23 +869,23 @@ class DOMScanner {
 
 // --- MODULE: ghost-cursor.js ---
 /**
- * WebOrient Ghost Cursor & Deterministic UI Actuator (v0.5.0 — Precision Trajectory & Scroll-Sync Edition)
+ * WebOrient Ghost Cursor & Deterministic UI Actuator (v0.5.0 — DeployMate Shadow DOM Edition)
+ * - Encapsulated inside an open ShadowRoot (`#weborient-shadow-host` on `document.documentElement`)
+ *   so client website CSS (Tailwind/Bootstrap resets, body transforms) never distorts the cursor or spotlight
+ * - DeployMate Signal (`#E6391E`) & Ink (`#0A0A0A`) Brutalist-Editorial Coachmark & Spotlight aesthetic
  * - True Cubic Bézier + Fitts's Law human-like 60fps cursor trajectory with tip hotspot offset
- * - Exact smooth scroll completion listener (`_smoothScrollTo`) so elements are 100% settled in center before measuring coordinates
- * - Cross-page cursor coordinate persistence (`weborient_cursor_pos_v5`) so page redirects never jump the cursor
- * - Exact center targeting for interactive controls (buttons, links, switches, tabs, inputs)
- * - Scroll-locked element spotlight + floating glassmorphic explanation coachmark
+ * - Exact smooth scroll completion listener (`_smoothScrollTo`) so elements are 100% settled in center
+ * - Cross-page cursor coordinate persistence (`weborient_cursor_pos_v5`)
  * - React/Vue/Angular compatible form filling (`HTMLInputElement.prototype.value` setter)
- * - Gesture & swap actuation (`swipeOrSwap`) for carousels, tabs, toggle switches, and range sliders
  */
 
 const CURSOR_POS_STORAGE_KEY = 'weborient_cursor_pos_v5';
 
 class GhostCursor {
   constructor(options = {}) {
-    this.primaryColor = options.primaryColor || '#6366f1';
-    this.accentColor = options.accentColor || '#ec4899';
-    this.cursorStyle = options.cursorStyle || 'modern-glow';
+    this.primaryColor = options.primaryColor || '#E6391E';
+    this.accentColor = options.accentColor || '#0A0A0A';
+    this.cursorStyle = options.cursorStyle || 'deploymate-signal';
     this.scanner = options.scanner || null;
 
     this.currentPosition = this._loadStoredPosition();
@@ -931,9 +931,32 @@ class GhostCursor {
     } catch (_) {}
   }
 
+  /**
+   * Mounts or reuses `#weborient-shadow-host` on `document.documentElement` (`<html>`)
+   * with an open ShadowRoot so host website CSS rules can never collide with WebOrient UI.
+   */
+  getOrCreateShadowRoot() {
+    if (typeof document === 'undefined') return null;
+    let host = document.getElementById('weborient-shadow-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'weborient-shadow-host';
+      host.setAttribute('data-agent-ignore', 'true');
+      host.style.cssText = 'all: initial; position: fixed; inset: 0; width: 0; height: 0; pointer-events: none; z-index: 2147483647;';
+      (document.documentElement || document.body).appendChild(host);
+    }
+    return host.shadowRoot || host.attachShadow({ mode: 'open' });
+  }
+
   _initOverlay() {
     if (typeof document === 'undefined') return;
-    const existing = document.getElementById('weborient-overlay');
+    const legacyOverlay = document.getElementById('weborient-overlay');
+    if (legacyOverlay) legacyOverlay.remove();
+
+    this.shadowRoot = this.getOrCreateShadowRoot();
+    if (!this.shadowRoot) return;
+
+    const existing = this.shadowRoot.getElementById('weborient-overlay');
     if (existing) existing.remove();
 
     this.container = document.createElement('div');
@@ -946,43 +969,44 @@ class GhostCursor {
       pointer-events: none;
       z-index: 2147483647;
       overflow: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     `;
 
-    // Spotlight Element Bounding Box
+    // Spotlight Element Bounding Box (DeployMate Signal #E6391E crisp architectural frame)
     this.spotlight = document.createElement('div');
     this.spotlight.id = 'weborient-spotlight';
     this.spotlight.style.cssText = `
       position: fixed;
       border: 2px solid ${this.primaryColor};
-      border-radius: 10px;
-      box-shadow: 0 0 26px ${this.primaryColor}88, inset 0 0 12px ${this.primaryColor}33;
+      border-radius: 6px;
+      box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.25), 0 0 28px ${this.primaryColor}55, inset 0 0 14px ${this.primaryColor}22;
       pointer-events: none;
       opacity: 0;
-      transition: opacity 0.22s ease, top 0.12s ease-out, left 0.12s ease-out, width 0.16s ease-out, height 0.16s ease-out;
+      transition: opacity 0.2s ease, top 0.12s cubic-bezier(0.215, 0.61, 0.355, 1), left 0.12s cubic-bezier(0.215, 0.61, 0.355, 1), width 0.16s cubic-bezier(0.215, 0.61, 0.355, 1), height 0.16s cubic-bezier(0.215, 0.61, 0.355, 1);
       z-index: 2147483645;
     `;
 
-    // Floating Explanation Coachmark / Tooltip
+    // Floating Explanation Coachmark / Tooltip (DeployMate Ink #0A0A0A + Signal #E6391E border)
     this.tooltip = document.createElement('div');
     this.tooltip.id = 'weborient-tooltip';
     this.tooltip.style.cssText = `
       position: fixed;
-      max-width: 340px;
-      padding: 8px 13px;
-      background: rgba(15, 23, 42, 0.95);
-      backdrop-filter: blur(10px);
-      border: 1px solid ${this.primaryColor};
-      border-radius: 10px;
-      color: #f8fafc;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 12px;
-      line-height: 1.45;
+      max-width: 360px;
+      padding: 8px 14px;
+      background: #0A0A0A;
+      border: 1.5px solid ${this.primaryColor};
+      border-radius: 999px;
+      color: #FFFFFF;
+      font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.4;
       font-weight: 500;
-      box-shadow: 0 12px 28px -5px rgba(0, 0, 0, 0.6), 0 0 16px ${this.primaryColor}44;
+      letter-spacing: 0.04em;
+      box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.45);
       pointer-events: none;
       opacity: 0;
       transform: translateY(4px);
-      transition: opacity 0.22s ease, transform 0.22s ease, top 0.12s ease-out, left 0.12s ease-out;
+      transition: opacity 0.2s ease, transform 0.2s ease, top 0.12s ease-out, left 0.12s ease-out;
       z-index: 2147483646;
     `;
 
@@ -999,7 +1023,7 @@ class GhostCursor {
     `;
     this.trailPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     this.trailPath.setAttribute('fill', 'none');
-    this.trailPath.setAttribute('stroke', this.accentColor);
+    this.trailPath.setAttribute('stroke', this.primaryColor);
     this.trailPath.setAttribute('stroke-width', '3.5');
     this.trailPath.setAttribute('stroke-linecap', 'round');
     this.trailPath.setAttribute('stroke-dasharray', '7 5');
@@ -1007,17 +1031,17 @@ class GhostCursor {
     this.trailPath.style.transition = 'opacity 0.35s ease';
     this.trailSvg.appendChild(this.trailPath);
 
-    // Ghost Cursor Pointer (Tip hotspot at SVG (4, 3) is aligned to (0, 0) via margin offset)
+    // Ghost Cursor Pointer (Tip hotspot at SVG (4, 3) aligned to (0, 0) via margin offset)
     this.cursor = document.createElement('div');
     this.cursor.id = 'weborient-cursor';
     this.cursor.innerHTML = `
       <div class="weborient-pointer" style="position: relative; width: 30px; height: 30px; margin-left: -4px; margin-top: -3px; transition: transform 0.18s ease-out;">
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" style="filter: drop-shadow(0 3px 10px rgba(0,0,0,0.45));">
-          <path d="M4 3L11 20L14.5 13.5L21 11L4 3Z" fill="${this.primaryColor}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" style="filter: drop-shadow(0 4px 10px rgba(10,10,10,0.38));">
+          <path d="M4 3L11 20L14.5 13.5L21 11L4 3Z" fill="${this.primaryColor}" stroke="#0A0A0A" stroke-width="1.6" stroke-linejoin="round"/>
         </svg>
         <div class="weborient-ring" style="
           position: absolute; top: -11px; left: -10px; width: 28px; height: 28px;
-          border: 2.5px solid ${this.accentColor}; border-radius: 50%;
+          border: 2.5px solid ${this.primaryColor}; border-radius: 50%;
           opacity: 0; transform: scale(0.5);
           transition: transform 0.28s ease-out, opacity 0.28s ease-out;
         "></div>
@@ -1036,7 +1060,7 @@ class GhostCursor {
     this.container.appendChild(this.spotlight);
     this.container.appendChild(this.tooltip);
     this.container.appendChild(this.cursor);
-    document.body.appendChild(this.container);
+    this.shadowRoot.appendChild(this.container);
 
     this._boundSyncPosition = () => this._syncSpotlightPosition();
     window.addEventListener('scroll', this._boundSyncPosition, { passive: true, capture: true });
@@ -1070,8 +1094,7 @@ class GhostCursor {
   }
 
   /**
-   * Deterministic smooth scroll that waits until window.scrollY actually reaches targetScrollY
-   * (or scroll velocity settles to 0) so downstream getBoundingClientRect() is 100% accurate.
+   * Deterministic smooth scroll that waits until window.scrollY reaches targetScrollY
    */
   async _smoothScrollTo(targetScrollY, maxWaitMs = 680) {
     const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
@@ -1125,8 +1148,7 @@ class GhostCursor {
   }
 
   /**
-   * Moves cursor along a human-like Cubic Bézier trajectory with Fitts's Law easing.
-   * Properly resolves any superseded move promise so callers never hang mid-flight.
+   * Moves cursor along a human-like Cubic Bézier trajectory with Fitts's Law easing
    */
   async moveTo(targetX, targetY, durationMs = 460) {
     if (this._rafId) {
@@ -1139,7 +1161,6 @@ class GhostCursor {
       prevResolve();
     }
 
-    // Full-screen bounds without artificial 260px speech-bubble margin
     const clampedX = Math.max(8, Math.min(window.innerWidth - 16, targetX));
     const clampedY = Math.max(8, Math.min(window.innerHeight - 16, targetY));
 
@@ -1225,7 +1246,6 @@ class GhostCursor {
       return;
     }
 
-    // Check if the target itself is inside the sticky header (e.g., navigation links)
     const header = document.querySelector('#global-site-header, header, [data-site-header]');
     const isInsideHeader = header && header.contains(this.activeTarget);
     const headerBottom = (!isInsideHeader && header) ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
@@ -1250,8 +1270,8 @@ class GhostCursor {
 
     if (this.activeExplanation) {
       this.tooltip.innerHTML = `
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${this.accentColor};flex-shrink:0;"></span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${this.primaryColor};flex-shrink:0;"></span>
           <span>${this._escapeHtml(this.activeExplanation)}</span>
         </div>
       `;
@@ -1259,7 +1279,7 @@ class GhostCursor {
       const topPos = canPlaceAbove
         ? Math.max(headerBottom + 8, safeTop - 42)
         : Math.min(window.innerHeight - 56, safeTop + safeHeight + 10);
-      const leftPos = Math.max(12, Math.min(window.innerWidth - 350, safeLeft));
+      const leftPos = Math.max(12, Math.min(window.innerWidth - 360, safeLeft));
 
       this.tooltip.style.top = `${topPos}px`;
       this.tooltip.style.left = `${leftPos}px`;
@@ -1273,7 +1293,6 @@ class GhostCursor {
   /**
    * Resolves landmark sections or containers down to their ACTUAL substantive component
    * (e.g., interactive tabs + code viewer, table, carousel, cards grid, form, sliders, or accordion)
-   * so the spotlight and cursor show the actual interactive feature rather than just the title block at the top.
    */
   _resolveActualContent(el, explanation = '') {
     if (!el || !(el instanceof Element)) return el;
@@ -1343,11 +1362,6 @@ class GhostCursor {
     return el;
   }
 
-  /**
-   * Computes exact landing coordinates for an element:
-   * - Interactive controls (buttons, links, switches, inputs, tabs) -> exact visual center
-   * - Containers with tabs/carousels/tables/cards -> lands directly on the active control/content
-   */
   _computeTargetCoordinates(el, rect, headerHeight, isInsideHeader) {
     const tag = el.tagName.toLowerCase();
     const role = (el.getAttribute('role') || '').toLowerCase();
@@ -1371,7 +1385,6 @@ class GhostCursor {
       };
     }
 
-    // If the resolved element has active tabs, place cursor directly on the active tab!
     const activeTab = el.querySelector?.('[role="tab"][aria-selected="true"], [role="tab"].active, [role="tab"]');
     if (activeTab) {
       const tabRect = activeTab.getBoundingClientRect();
@@ -1381,7 +1394,6 @@ class GhostCursor {
       };
     }
 
-    // If the resolved element has an active carousel slide, place cursor on the slide card!
     const activeSlide = el.querySelector?.('[data-carousel-slide]:not(.hidden), .carousel-slide:not(.hidden)');
     if (activeSlide) {
       const slideRect = activeSlide.getBoundingClientRect();
@@ -1391,7 +1403,6 @@ class GhostCursor {
       };
     }
 
-    // If the resolved element has pricing cards, place cursor directly on Pro Co-Pilot card!
     const proCard = el.querySelector?.('#plan-pro, [data-plan="pro"], .pricing-card:nth-child(3), .pricing-card');
     if (proCard) {
       const proRect = proCard.getBoundingClientRect();
@@ -1401,7 +1412,6 @@ class GhostCursor {
       };
     }
 
-    // If table, place cursor on the first row/cell!
     const firstCell = el.querySelector?.('tbody tr:first-child td:first-child, thead th:first-child');
     if (firstCell) {
       const cellRect = firstCell.getBoundingClientRect();
@@ -1428,7 +1438,6 @@ class GhostCursor {
       return { success: false, elementFound: false, error: `Element not found: ${selector}` };
     }
 
-    // Resolve landmark sections to the ACTUAL substantive feature (tabs, table, carousel, cards, form)
     const el = this._resolveActualContent(rawEl, explanation);
 
     const header = document.querySelector('#global-site-header, header, [data-site-header]');
@@ -1437,7 +1446,6 @@ class GhostCursor {
     const viewportHeight = window.innerHeight;
     const usableHeight = Math.max(200, viewportHeight - headerHeight);
 
-    // 1. Center the actual element in the visible viewport BEFORE moving the cursor (unless it's in the sticky header)
     if (!isInsideHeader) {
       const initialRect = el.getBoundingClientRect();
       let targetTopInViewport;
@@ -1453,14 +1461,12 @@ class GhostCursor {
       }
     }
 
-    // 2. Lock spotlight onto the settled element immediately so user sees the highlight as cursor lands
     if (highlight) {
       this.activeTarget = el;
       this.activeExplanation = explanation || null;
       this._syncSpotlightPosition();
     }
 
-    // 3. Re-measure settled bounding box and move cursor to exact coordinates
     const settledRect = el.getBoundingClientRect();
     const { x: targetX, y: targetY } = this._computeTargetCoordinates(el, settledRect, headerHeight, isInsideHeader);
 
@@ -1484,7 +1490,7 @@ class GhostCursor {
     };
   }
 
-  async guideTour(steps = [], speechSync = null) {
+  async guideTour(steps = []) {
     if (!Array.isArray(steps) || steps.length === 0) {
       return { success: false, error: 'No tour steps provided' };
     }
@@ -1497,7 +1503,7 @@ class GhostCursor {
     for (let i = 0; i < steps.length; i++) {
       if (controller.signal.aborted) break;
       const step = steps[i];
-      const badgeText = `[${i + 1}/${steps.length}] ${step.explanation || 'Tour Stop'}`;
+      const badgeText = `[0${i + 1}/0${steps.length}] ${step.explanation || 'Tour Stop'}`;
       const res = await this.moveToElement(step.selector, true, badgeText);
 
       const dwell = Math.min(4000, Math.max(600, step.dwellMs || 1200));
@@ -1627,7 +1633,6 @@ class GhostCursor {
       const numVal = parseFloat(String(normalizedValue).replace(/[^0-9.-]/g, ''));
       const clampedVal = Number.isFinite(numVal) ? Math.max(min, Math.min(max, numVal)) : min;
 
-      // Animate cursor dragging slider thumb to exact percentage position
       const rect = el.getBoundingClientRect();
       const ratio = max > min ? (clampedVal - min) / (max - min) : 0.5;
       const thumbX = rect.left + Math.max(8, Math.min(rect.width - 8, rect.width * ratio));
@@ -1800,7 +1805,7 @@ class GhostCursor {
       }
     }
 
-    // 4. Carousel / Swipeable Container (Also handles when parent <section> is passed!)
+    // 4. Carousel / Swipeable Container
     const carouselBox = el.hasAttribute('data-carousel')
       ? el
       : (el.querySelector('[data-carousel]') || el);
@@ -2324,31 +2329,35 @@ class LiveClient {
 
 // --- MODULE: weborient.js ---
 /**
- * WebOrient: Adaptive Gemini Live Voice Co-Pilot & Non-Linear To-Do Memory SDK (v0.4.0)
- * - ZERO Browser TTS: All spoken orientation comes natively from the Gemini Live Model
- * - Non-Linear To-Do Checklist Memory (`SessionMemory`): tracks completed vs. remaining sections
- *   in ANY order as the user explores or asks questions
- * - 100% Visual DOM Grounding:
- *   1) Explicit Tool Grounding (`move_and_highlight`, `show_and_describe`, `click_element`, `swipe_or_swap`, `fill_form_field`)
- *   2) Real-Time Transcript-to-DOM Auto-Highlighting (`_autoGroundFromModelSpeech`): whenever the Live Model
- *      speaks about a DOM section/card/control on the page, the Ghost Cursor automatically scrolls to it,
- *      spotlights it, displays the live spoken subtitle, and checks off its To-Do item!
- * - Refresh-Safe & Redirect-Safe Session Management:
- *   Persists session state, locked `userLanguage`, and To-Do checklist in `localStorage` so page redirects
- *   and hard browser refreshes (`F5`/`Cmd+R`) automatically resume the session in the user's language.
+ * WebOrient by DeployMate: Multi-Tenant Voice Co-Pilot & Shadow DOM SDK (`src/sdk/weborient.js` v0.5.0)
+ * - 1-Line Embed Ready (`<script async src="..." data-site-key="wo_live_..." data-theme="signal" data-lang="en-IN">`)
+ * - Shadow DOM Encapsulation: Mounts both the Ghost Cursor overlay and the Siri-like Assist Pill
+ *   inside `#weborient-shadow-host` (`ShadowRoot`) so client CSS never collides with WebOrient
+ * - Multi-Tenant Gateway Handshake: Passes `siteKey`, `siteId`, `sessionId`, `lang`, and `origin`
+ * - Non-Linear To-Do Checklist Memory (`SessionMemory`) & Refresh-Safe Continuity
  */
 
 
 
 
+const THEME_PRESETS = {
+  signal: { primaryColor: '#E6391E', accentColor: '#0A0A0A' },
+  deploymate: { primaryColor: '#E6391E', accentColor: '#0A0A0A' },
+  indigo: { primaryColor: '#6366f1', accentColor: '#ec4899' }
+};
+
 class WebOrient {
   constructor(options = {}) {
+    const preset = THEME_PRESETS[options.theme] || THEME_PRESETS.signal;
+
     this.options = Object.assign({
-      endpoint: null,
-      siteId: 'acme_default',
-      themeColor: '#6366f1',
-      accentColor: '#ec4899',
-      cursorStyle: 'modern-glow',
+      endpoint: 'ws://localhost:8088',
+      siteKey: 'wo_live_deploymate_demo',
+      siteId: 'deploymate_weborient',
+      themeColor: preset.primaryColor,
+      accentColor: preset.accentColor,
+      cursorStyle: 'deploymate-signal',
+      defaultLanguage: null,
       manifestUrl: null,
       requireSubmitConfirmation: false,
       autoMountLauncher: false,
@@ -2365,16 +2374,23 @@ class WebOrient {
 
     this.memory = new SessionMemory({
       endpoint: this.options.endpoint,
+      defaultLanguage: this.options.defaultLanguage,
       onChange: (memState) => {
         queueMicrotask(() => this._emit('memoryUpdate', memState));
       }
     });
 
+    if (this.options.defaultLanguage && !this.memory.state.languageLocked) {
+      this.memory.setLanguage(this.options.defaultLanguage, false);
+    }
+
     this.client = null;
     this.manifest = null;
+    this.remainingCredits = null;
     this._modelSpeechBuffer = '';
     this._lastAutoGroundedSelector = null;
     this._lastExplicitToolTime = 0;
+    this._isExecutingTool = false;
 
     if (typeof window !== 'undefined') {
       const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
@@ -2386,7 +2402,7 @@ class WebOrient {
       : Promise.resolve(null);
 
     if (this.options.autoMountLauncher && typeof document !== 'undefined') {
-      this._mountFloatingLauncher();
+      this._mountShadowAssistWidget();
     }
 
     this._checkRestoredSession();
@@ -2405,25 +2421,26 @@ class WebOrient {
   }
 
   /**
-   * Connects microphone audio to the Gemini Live Model and injects the persistent
-   * Non-Linear To-Do Checklist, Locked Language, and Recent Conversation Continuity.
+   * Connects microphone audio to the DeployMate Multi-Tenant Relay & Gemini Live Model
    */
   async start() {
-    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint;
-    if (!endpoint) {
-      console.warn('[WebOrient] No WebSocket endpoint provided.');
-      return;
-    }
+    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || 'ws://localhost:8088';
     this.options.endpoint = endpoint;
 
     const sep = endpoint.includes('?') ? '&' : '?';
-    const wsUrl = `${endpoint}${sep}siteId=${encodeURIComponent(this.options.siteId)}&sessionId=${encodeURIComponent(this.memory.state.sessionId)}&lang=${encodeURIComponent(this.memory.state.userLanguage)}`;
+    const wsUrl =
+      `${endpoint}${sep}` +
+      `siteKey=${encodeURIComponent(this.options.siteKey)}` +
+      `&siteId=${encodeURIComponent(this.options.siteId)}` +
+      `&sessionId=${encodeURIComponent(this.memory.state.sessionId)}` +
+      `&lang=${encodeURIComponent(this.memory.state.userLanguage)}`;
 
     this.client = new LiveClient({
       endpoint: wsUrl,
       onToolCall: (name, args, callId) => this.handleToolCall(name, args, callId),
       onStatusChange: (status) => {
         console.log(`[WebOrient] Status: ${status}`);
+        this._syncShadowWidgetState(status === 'connected', 'idle');
         this._emit('status', { status });
       },
       onTranscript: (text, role) => {
@@ -2431,27 +2448,29 @@ class WebOrient {
         if (role === 'model') {
           this._autoGroundFromModelSpeech(text);
         }
+        this._syncShadowWidgetState(true, role === 'model' ? 'speaking' : 'listening');
         this._emit('transcript', { text, role });
       },
       onPlaybackChange: (isPlaying) => {
         if (!isPlaying) {
           this._modelSpeechBuffer = '';
-          setTimeout(() => {
-            if (!this.client?.isPlaying) this.cursor.hideSpeechBubble();
-          }, 800);
+          this._syncShadowWidgetState(Boolean(this.client), 'listening');
+        } else {
+          this._syncShadowWidgetState(true, 'speaking');
         }
       },
       onInterrupted: () => {
         this._modelSpeechBuffer = '';
         this.cursor.cancelActiveActions();
+        this._syncShadowWidgetState(true, 'listening');
         this._emit('interrupted', {});
       }
     });
 
     await this.client.connect();
     this.memory.setLiveSessionStatus(true, endpoint);
+    this._syncShadowWidgetState(true, 'listening');
 
-    // Send full Non-Linear To-Do Checklist + Active Viewport Elements + Language Continuity Handoff
     const initialSnapshot = this.scanner.captureStateSnapshot();
     const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 35);
     const memorySummary = this.memory.buildModelContextSummary();
@@ -2463,16 +2482,9 @@ class WebOrient {
     );
   }
 
-  /**
-   * Real-Time Transcript-to-DOM Auto-Grounding:
-   * Guarantees that EVERY part of the DOM described by the Live Model is automatically
-   * scrolled into view, spotlighted, and pointed to by the Ghost Cursor—even if the model
-   * mentions a section in speech before or without emitting an explicit tool call!
-   */
   _autoGroundFromModelSpeech(chunk) {
     this._modelSpeechBuffer = `${this._modelSpeechBuffer} ${chunk}`.slice(-260);
 
-    // Avoid overriding an explicit tool call (like navigate_route, swipe, or click) that is currently in-flight or just fired
     if (this._isExecutingTool || Date.now() - this._lastExplicitToolTime < 2200) return;
 
     const match = this.scanner.matchElementFromSpeech(
@@ -2492,16 +2504,11 @@ class WebOrient {
     }
   }
 
-  /**
-   * Sends a user request or topic selection to the Live Model (or executes locally if offline)
-   */
   async orientTopic(todoOrQuery) {
     if (!todoOrQuery) return;
     const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
 
-    // If passed a structured To-Do item from the checklist
     if (typeof todoOrQuery === 'object' && todoOrQuery.selector) {
-      // If it lives on another page, queue highlight + Live Model prompt and redirect
       if (todoOrQuery.page && todoOrQuery.page !== currentFile) {
         this.queuePostNavigationActions([
           {
@@ -2513,7 +2520,6 @@ class WebOrient {
         return;
       }
 
-      // Same page: highlight with Ghost Cursor, mark To-Do done, and ask Live Model to explain it in user's language
       await this.handleToolCall('move_and_highlight', {
         selector: todoOrQuery.selector,
         explanation: todoOrQuery.title
@@ -2528,7 +2534,6 @@ class WebOrient {
       return;
     }
 
-    // String prompt
     if (this.client) {
       this.memory.appendTranscript('user', String(todoOrQuery));
       const langCfg = this.memory.getLanguageConfig();
@@ -2550,9 +2555,6 @@ class WebOrient {
     this.memory.setPendingNavigationActions(actions);
   }
 
-  /**
-   * Routes model tool calls to DOM actuators with closed-loop settle, verification & To-Do completion
-   */
   async handleToolCall(name, args = {}, callId = null) {
     console.log(`[WebOrient] Executing Tool Call: ${name}`, args);
     this._lastExplicitToolTime = Date.now();
@@ -2650,7 +2652,6 @@ class WebOrient {
             selector: args.selector || '',
             manifest: this.manifest
           });
-          // Always visually highlight the matched section on screen when reading content!
           const secToHighlight = args.selector || result.matchingSections?.[0]?.selector;
           if (secToHighlight) {
             await this.cursor.moveToElement(
@@ -2802,7 +2803,6 @@ class WebOrient {
       return res;
     }
 
-    // Complete full trajectory to the exact navigation link, spotlight it, and play click ripple BEFORE page redirect
     const navLink = document.querySelector(`#global-site-header a[href*="${targetFile}"], a[href*="${targetFile}"]`);
     if (navLink) {
       await this.cursor.moveToElement(navLink, true, `Navigating to ${matchedPage?.title || targetFile}...`);
@@ -2861,15 +2861,10 @@ class WebOrient {
     });
   }
 
-  /**
-   * Automatically restores the active Gemini Live voice session AND executes any queued
-   * actions after a cross-page redirect OR a hard browser refresh (`F5` / `Cmd+R`).
-   */
   _checkRestoredSession() {
     const runRestore = async () => {
       const memState = this.memory.getState();
 
-      // 1. If the Live Voice session was active before the page redirect or refresh, reconnect automatically!
       if (memState.isLiveActive && memState.liveEndpoint && !this.client) {
         this.options.endpoint = memState.liveEndpoint;
         try {
@@ -2883,7 +2878,6 @@ class WebOrient {
         }
       }
 
-      // 2. Execute any queued post-navigation DOM actions
       const pendingActions = this.memory.consumePendingNavigationActions();
       if (pendingActions.length > 0) {
         await new Promise(r => setTimeout(r, 320));
@@ -2905,32 +2899,169 @@ class WebOrient {
     }
   }
 
-  _mountFloatingLauncher() {
-    if (document.getElementById('weborient-floating-launcher')) return;
-    const launcher = document.createElement('div');
-    launcher.id = 'weborient-floating-launcher';
-    launcher.setAttribute('data-agent-ignore', 'true');
-    launcher.style.cssText = `
-      position: fixed; bottom: 20px; left: 20px; z-index: 2147483640;
-      display: flex; gap: 8px; align-items: center;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  /**
+   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave inside the
+   * isolated Shadow DOM (`#weborient-shadow-host`) so 1-line `<script>` embeds
+   * work on any external website with zero CSS leakage or collision.
+   */
+  _mountShadowAssistWidget() {
+    const shadowRoot = this.cursor?.getOrCreateShadowRoot();
+    if (!shadowRoot || shadowRoot.getElementById('wo-shadow-assist')) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.id = 'wo-shadow-assist';
+    wrapper.innerHTML = `
+      <style>
+        #wo-assist-root {
+          position: fixed;
+          bottom: 24px;
+          right: 24px;
+          z-index: 2147483647;
+          pointer-events: auto;
+          font-family: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          user-select: none;
+        }
+        @keyframes wo-siri-wave {
+          0%, 100% { transform: scaleY(0.28); opacity: 0.65; }
+          50% { transform: scaleY(1); opacity: 1; }
+        }
+        .wo-pill-btn {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          padding: 10px 18px;
+          border-radius: 999px;
+          background: #0A0A0A;
+          color: #FFFFFF;
+          border: 2px solid ${this.options.themeColor};
+          box-shadow: 0 14px 34px rgba(10, 10, 10, 0.35);
+          cursor: pointer;
+          transition: transform 0.2s cubic-bezier(0.215, 0.61, 0.355, 1), background 0.2s ease;
+        }
+        .wo-pill-btn:hover {
+          transform: translateY(-2px);
+        }
+        .wo-pill-btn:active {
+          transform: scale(0.96);
+        }
+        .wo-mic-circle {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          background: ${this.options.themeColor};
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #FFFFFF;
+          flex-shrink: 0;
+        }
+        .wo-wave-box {
+          display: none;
+          align-items: center;
+          gap: 3.5px;
+          height: 24px;
+          padding: 0 2px;
+        }
+        .wo-bar {
+          width: 3.5px;
+          height: 20px;
+          border-radius: 999px;
+          background: ${this.options.themeColor};
+          animation: wo-siri-wave 1s ease-in-out infinite;
+        }
+        .wo-bar:nth-child(2) { animation-delay: 0.15s; height: 24px; background: #FFFFFF; }
+        .wo-bar:nth-child(3) { animation-delay: 0.3s; height: 28px; background: ${this.options.themeColor}; }
+        .wo-bar:nth-child(4) { animation-delay: 0.45s; height: 22px; background: #FFFFFF; }
+        .wo-bar:nth-child(5) { animation-delay: 0.6s; height: 16px; background: ${this.options.themeColor}; }
+        .wo-meta {
+          display: flex;
+          flex-direction: column;
+          text-align: left;
+        }
+        .wo-title {
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.03em;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .wo-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: ${this.options.themeColor};
+        }
+        .wo-sub {
+          font-family: 'Fira Code', monospace;
+          font-size: 9px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: rgba(255, 255, 255, 0.65);
+        }
+      </style>
+      <div id="wo-assist-root">
+        <button type="button" class="wo-pill-btn" id="wo-shadow-btn" aria-label="Toggle WebOrient Voice Co-Pilot">
+          <div class="wo-mic-circle" id="wo-shadow-mic">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="22"></line>
+            </svg>
+          </div>
+          <div class="wo-wave-box" id="wo-shadow-wave">
+            <div class="wo-bar"></div>
+            <div class="wo-bar"></div>
+            <div class="wo-bar"></div>
+            <div class="wo-bar"></div>
+            <div class="wo-bar"></div>
+          </div>
+          <div class="wo-meta">
+            <span class="wo-title">
+              <span>Assist</span>
+              <span class="wo-dot" id="wo-shadow-dot"></span>
+            </span>
+            <span class="wo-sub" id="wo-shadow-sub">Click to talk</span>
+          </div>
+        </button>
+      </div>
     `;
-    launcher.innerHTML = `
-      <button id="wo-launcher-live" style="
-        background: linear-gradient(135deg, ${this.options.themeColor}, ${this.options.accentColor});
-        color: #fff; border: none; padding: 10px 16px; border-radius: 999px;
-        font-size: 12px; font-weight: 700; cursor: pointer;
-        box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
-      ">🎙️ Talk to Live Co-Pilot</button>
-    `;
-    document.body.appendChild(launcher);
-    launcher.querySelector('#wo-launcher-live').addEventListener('click', () => {
-      if (this.client) {
-        this.stop();
-      } else {
-        this.start();
-      }
-    });
+
+    shadowRoot.appendChild(wrapper);
+    const btn = shadowRoot.getElementById('wo-shadow-btn');
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        if (!this.client) {
+          this._syncShadowWidgetState(true, 'connecting');
+          try {
+            await this.start();
+          } catch (_) {
+            this._syncShadowWidgetState(false, 'offline');
+          }
+        } else {
+          this.stop();
+        }
+      });
+    }
+  }
+
+  _syncShadowWidgetState(connected, state = 'idle') {
+    const shadowRoot = this.cursor?.shadowRoot;
+    if (!shadowRoot) return;
+    const mic = shadowRoot.getElementById('wo-shadow-mic');
+    const wave = shadowRoot.getElementById('wo-shadow-wave');
+    const sub = shadowRoot.getElementById('wo-shadow-sub');
+    if (!mic || !wave || !sub) return;
+
+    if (connected) {
+      mic.style.display = 'none';
+      wave.style.display = 'flex';
+      sub.textContent = state === 'speaking' ? 'Speaking...' : (state === 'connecting' ? 'Connecting...' : 'Listening...');
+    } else {
+      mic.style.display = 'flex';
+      wave.style.display = 'none';
+      sub.textContent = state === 'offline' ? 'Relay offline' : 'Click to talk';
+    }
   }
 
   _emit(eventType, detail) {
@@ -2949,22 +3080,47 @@ class WebOrient {
       this.cursor.hideSpeechBubble();
       this.cursor.hideSpotlight();
     }
+    this._syncShadowWidgetState(false, 'idle');
   }
 }
 
+/**
+ * 1-Line Embed Auto-Bootstrap:
+ * Works with both synchronous and `<script async src=".../weborient.js" data-site-key="wo_live_...">` tags!
+ */
 if (typeof window !== 'undefined') {
   window.WebOrient = WebOrient;
 
-  const currentScript = document.currentScript;
-  if (currentScript && (currentScript.dataset.endpoint || currentScript.dataset.siteId)) {
-    window.weborientInstance = new WebOrient({
-      endpoint: currentScript.dataset.endpoint || null,
-      siteId: currentScript.dataset.siteId || 'client_default',
-      themeColor: currentScript.dataset.themeColor || '#6366f1',
-      accentColor: currentScript.dataset.accentColor || '#ec4899',
-      manifestUrl: currentScript.dataset.manifest || null,
-      autoMountLauncher: currentScript.dataset.autoMount !== 'false'
-    });
+  const bootstrapFromScriptTag = () => {
+    if (window.weborient || window.weborientInstance) return;
+    const scriptEl =
+      document.currentScript ||
+      document.querySelector('script[data-site-key], script[data-site-id], script[data-endpoint]');
+
+    if (scriptEl && (scriptEl.dataset.siteKey || scriptEl.dataset.siteId || scriptEl.dataset.endpoint)) {
+      const siteKey = scriptEl.dataset.siteKey || 'wo_live_deploymate_demo';
+      const themeAttr = scriptEl.dataset.theme || 'signal';
+      const preset = THEME_PRESETS[themeAttr] || THEME_PRESETS.signal;
+
+      window.weborientInstance = new WebOrient({
+        endpoint: scriptEl.dataset.endpoint || 'ws://localhost:8088',
+        siteKey,
+        siteId: scriptEl.dataset.siteId || siteKey,
+        theme: themeAttr,
+        themeColor: scriptEl.dataset.themeColor || preset.primaryColor,
+        accentColor: scriptEl.dataset.accentColor || preset.accentColor,
+        defaultLanguage: scriptEl.dataset.lang || 'en-IN',
+        manifestUrl: scriptEl.dataset.manifest || null,
+        autoMountLauncher: scriptEl.dataset.autoMount !== 'false'
+      });
+      window.weborient = window.weborientInstance;
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', bootstrapFromScriptTag, { once: true });
+  } else {
+    bootstrapFromScriptTag();
   }
 }
 

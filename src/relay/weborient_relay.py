@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """
-WebOrient Live Relay Server (v0.4.0 — Refresh-Safe & Redirect-Safe Session Continuity)
-- Bridges browser clients (via WebSocket) with the Gemini 3.8 Live API
-- Persists Session Memory to disk (`config/.session_store.json`) and memory keyed by `sessionId`
-  so page redirects, browser refreshes (F5/Cmd+R), or server restarts never lose the potential user!
-- Maintains a Non-Linear To-Do Checklist (`completedTodoIds` & `remainingTodos`) so the Live Model
-  follows the user in ANY order while knowing what has been oriented vs. what remains
-- Locks and maintains the user's native language (`userLanguage`) across the entire session
-- Forwards both `input_audio_transcription` (user speech) and `output_audio_transcription` (model speech)
+WebOrient by DeployMate — Multi-Tenant Live Relay Gateway (`src/relay/weborient_relay.py` v0.5.0)
+- Multi-Tenant `siteKey` & HTTP `Origin` Verification (`config/tenants.json`)
+- Real-Time Credit Balance Gate & 30-Second Atomic Credit Metering Loop
+- Persistent Cross-Page & Refresh-Safe Session Memory (`config/.session_store.json`)
+- Bridges 16kHz Mic PCM <-> Gemini 3.8 Live API <-> 24kHz Audio + 11 DOM Function Tools
 """
 import asyncio
 import base64
@@ -19,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SESSION_CACHE_FILE = PROJECT_ROOT / "config" / ".session_store.json"
+TENANTS_FILE = PROJECT_ROOT / "config" / "tenants.json"
 
 env_file = PROJECT_ROOT / ".env"
 if env_file.exists():
@@ -47,24 +45,75 @@ except ImportError as e:
     sys.exit(1)
 
 
-def load_session_store() -> dict:
-    if SESSION_CACHE_FILE.exists():
+def load_json_file(path: Path) -> dict:
+    if path.exists():
         try:
-            return json.loads(SESSION_CACHE_FILE.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return {}
     return {}
 
 
-def save_session_store(store: dict):
+def save_json_file(path: Path, data: dict):
     try:
-        SESSION_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        SESSION_CACHE_FILE.write_text(json.dumps(store, indent=2), encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception as e:
-        print(f"[WARN] Could not persist session store: {e}")
+        print(f"[WARN] Could not persist {path.name}: {e}")
 
 
-SESSION_MEMORY_STORE = load_session_store()
+SESSION_MEMORY_STORE = load_json_file(SESSION_CACHE_FILE)
+TENANT_STORE = load_json_file(TENANTS_FILE)
+
+
+def verify_tenant_and_origin(site_key: str, origin_header: str) -> tuple[bool, str, dict]:
+    """
+    Validates tenant siteKey, checks HTTP Origin against allowed domains,
+    and verifies positive voice credit balance.
+    """
+    global TENANT_STORE
+    TENANT_STORE = load_json_file(TENANTS_FILE) or TENANT_STORE
+
+    tenant = TENANT_STORE.get(site_key)
+    if not tenant:
+        # Check if site_id matches any registered tenant
+        for t in TENANT_STORE.values():
+            if t.get("siteId") == site_key:
+                tenant = t
+                break
+
+    if not tenant:
+        return False, f"Invalid or unregistered siteKey '{site_key}'. Please register at weborient.deploymate.in", {}
+
+    allowed = tenant.get("allowedOrigins", ["*"])
+    if "*" not in allowed and origin_header and not site_key.startswith("wo_test_"):
+        parsed_origin = urlparse(origin_header)
+        origin_host = (parsed_origin.hostname or origin_header).lower().lstrip("www.")
+        matched = False
+        for domain in allowed:
+            clean_domain = domain.lower().lstrip("www.")
+            if origin_host == clean_domain or origin_host.endswith(f".{clean_domain}") or origin_host in ("localhost", "127.0.0.1"):
+                matched = True
+                break
+        if not matched:
+            return False, f"Origin '{origin_header}' is not authorized for siteKey '{site_key}'", tenant
+
+    credits = float(tenant.get("creditsMinutes", 100.0))
+    if credits <= 0:
+        return False, f"Credit balance exhausted for {tenant.get('companyName', site_key)} (0.0 mins remaining)", tenant
+
+    return True, "OK", tenant
+
+
+def deduct_tenant_credits(site_key: str, minutes_used: float = 0.5) -> float:
+    global TENANT_STORE
+    if site_key in TENANT_STORE:
+        current = float(TENANT_STORE[site_key].get("creditsMinutes", 0.0))
+        updated = max(0.0, round(current - minutes_used, 2))
+        TENANT_STORE[site_key]["creditsMinutes"] = updated
+        save_json_file(TENANTS_FILE, TENANT_STORE)
+        return updated
+    return 250.0
 
 
 def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> dict:
@@ -73,7 +122,7 @@ def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> di
             "sessionId": session_id,
             "siteId": site_id,
             "userLanguage": lang or "en-IN",
-            "userGoal": "Explore platform capabilities, pricing ROI, and voice form co-pilot",
+            "userGoal": "Explore DeployMate WebOrient capabilities, pricing ROI, and voice form co-pilot",
             "interestedTier": "Pro Co-Pilot",
             "completedTodoIds": [],
             "remainingTodos": [],
@@ -85,16 +134,17 @@ def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> di
         if lang:
             SESSION_MEMORY_STORE[session_id]["userLanguage"] = lang
 
-    save_session_store(SESSION_MEMORY_STORE)
+    save_json_file(SESSION_CACHE_FILE, SESSION_MEMORY_STORE)
     return SESSION_MEMORY_STORE[session_id]
 
 
-def load_system_prompt_and_manifest(site_id: str, session_mem: dict) -> str:
+def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dict) -> str:
     prompt_file = PROJECT_ROOT / "config" / "agent-prompt.md"
+    manifest_name = tenant.get("manifestFile", "sample-manifest.json")
     tenant_manifest = PROJECT_ROOT / "config" / "manifests" / f"{site_id}.json"
-    manifest_file = tenant_manifest if tenant_manifest.exists() else (PROJECT_ROOT / "config" / "sample-manifest.json")
+    manifest_file = tenant_manifest if tenant_manifest.exists() else (PROJECT_ROOT / "config" / manifest_name)
 
-    prompt_text = "You are WebOrient, an intelligent on-screen voice salesperson and website co-pilot."
+    prompt_text = "You are WebOrient by DeployMate, an intelligent on-screen voice salesperson and website co-pilot."
     if prompt_file.exists():
         prompt_text = prompt_file.read_text(encoding="utf-8")
 
@@ -120,12 +170,13 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict) -> str:
             print(f"[WARN] Failed to parse manifest: {e}")
 
     memory_block = (
-        f"\n\n### PERSISTENT SESSION & NON-LINEAR TO-DO MEMORY (Session ID: {session_mem['sessionId']}, Reconnects: {session_mem.get('reconnectCount', 0)}):\n"
+        f"\n\n### DEPLOYMATE MULTI-TENANT SESSION & NON-LINEAR TO-DO MEMORY "
+        f"(Tenant: {tenant.get('companyName', 'DeployMate')} | Session ID: {session_mem['sessionId']} | Credits: {tenant.get('creditsMinutes', 250)} mins):\n"
         f"- LOCKED NATIVE LANGUAGE: {session_mem['userLanguage']} (Maintain this language strictly across all page redirects and refreshes)\n"
         f"- USER GOAL / WANT: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
         f"- COMPLETED TO-DO ITEMS (Any order): {json.dumps(session_mem.get('completedTodoIds', []))}\n"
         f"- REMAINING TO-DO ITEMS: {json.dumps(session_mem.get('remainingTodos', [])[:6])}\n"
-        f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its selector so the user sees it highlighted or clicked on screen while you speak."
+        f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its selector so the user sees the actual component highlighted or clicked on screen while you speak."
     )
 
     return prompt_text + manifest_context + memory_block
@@ -137,7 +188,7 @@ def get_gemini_tools():
             function_declarations=[
                 types.FunctionDeclaration(
                     name="move_and_highlight",
-                    description="Smoothly glides the Ghost Cursor to any DOM element being described, scrolls it into view, spotlights it, and marks its To-Do item complete.",
+                    description="Smoothly glides the Ghost Cursor to any DOM element being described, scrolls it into the center of the viewport, spotlights it, and marks its To-Do item complete.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
@@ -298,15 +349,34 @@ async def handle_browser_client(websocket):
     raw_path = getattr(websocket, "path", "") or (websocket.request.path if hasattr(websocket, "request") and websocket.request else "/")
     parsed_url = urlparse(raw_path)
     qs = parse_qs(parsed_url.query)
-    site_id = qs.get("siteId", ["acme_default"])[0]
+
+    site_key = qs.get("siteKey", ["wo_live_deploymate_demo"])[0]
+    site_id = qs.get("siteId", [site_key])[0]
     session_id = qs.get("sessionId", ["default_session"])[0]
     lang = qs.get("lang", ["en-IN"])[0]
 
+    origin_header = ""
+    if hasattr(websocket, "request") and websocket.request and hasattr(websocket.request, "headers"):
+        origin_header = websocket.request.headers.get("Origin", "")
+    elif hasattr(websocket, "request_headers"):
+        origin_header = websocket.request_headers.get("Origin", "")
+
+    authorized, auth_msg, tenant = verify_tenant_and_origin(site_key, origin_header)
+    if not authorized:
+        print(f"[RELAY] ❌ Rejected connection: {auth_msg}")
+        await websocket.send(json.dumps({"error": auth_msg, "code": "UNAUTHORIZED_OR_NO_CREDITS"}))
+        await websocket.close(code=4002, reason=auth_msg[:120])
+        return
+
     session_mem = get_or_create_session_memory(session_id, site_id, lang)
-    print(f"[RELAY] Client connected | siteId={site_id} | sessionId={session_id} | lang={session_mem['userLanguage']} | reconnects={session_mem.get('reconnectCount', 0)}")
+    print(
+        f"[RELAY] ✅ Client connected | tenant={tenant.get('companyName')} ({site_key}) | "
+        f"origin={origin_header or 'local'} | credits={tenant.get('creditsMinutes')}m | "
+        f"sessionId={session_id} | lang={session_mem['userLanguage']}"
+    )
 
     client = genai.Client(api_key=API_KEY)
-    full_prompt = load_system_prompt_and_manifest(site_id, session_mem)
+    full_prompt = load_system_prompt_and_manifest(site_id, session_mem, tenant)
     tools = get_gemini_tools()
 
     config = types.LiveConnectConfig(
@@ -320,6 +390,35 @@ async def handle_browser_client(websocket):
     try:
         async with client.aio.live.connect(model=MODEL_NAME, config=config) as gemini_session:
             print(f"[RELAY] Active session established with {MODEL_NAME} for {session_id}!")
+
+            async def credit_metering_loop():
+                """Meters active voice co-browsing credits every 30 seconds."""
+                try:
+                    while True:
+                        await asyncio.sleep(30)
+                        remaining = deduct_tenant_credits(site_key, 0.5)
+                        print(f"[RELAY] ⏱️ Credit tick for {site_key}: {remaining} mins remaining")
+                        await websocket.send(json.dumps({
+                            "creditUpdate": {
+                                "siteKey": site_key,
+                                "remainingMinutes": remaining
+                            }
+                        }))
+                        if remaining == 0.5:
+                            await gemini_session.send_realtime_input(
+                                text="[SYSTEM NOTICE: Only 30 seconds of voice credits remain. Wrap up your current action concisely.]"
+                            )
+                        elif remaining <= 0:
+                            await gemini_session.send_realtime_input(
+                                text="[SYSTEM NOTICE: Voice credits for this session have ended. Politely say: 'Your voice assistant minutes for this session have ended. You can continue browsing manually.' and stop.]"
+                            )
+                            await asyncio.sleep(5)
+                            await websocket.close(code=4002, reason="Voice credits exhausted")
+                            break
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    print(f"[RELAY] Metering loop stopped: {e}")
 
             async def forward_gemini_to_browser():
                 try:
@@ -430,7 +529,7 @@ async def handle_browser_client(websocket):
                                         session_mem["remainingTodos"] = digest.get("remainingTodos", session_mem.get("remainingTodos", []))
                                     if out.get("selector"):
                                         session_mem["orientedHistory"].append(out.get("selector"))
-                                    save_session_store(SESSION_MEMORY_STORE)
+                                    save_json_file(SESSION_CACHE_FILE, SESSION_MEMORY_STORE)
 
                                     fn_responses.append(
                                         types.FunctionResponse(
@@ -452,7 +551,11 @@ async def handle_browser_client(websocket):
                 except websockets.exceptions.ConnectionClosed:
                     pass
 
-            await asyncio.gather(forward_gemini_to_browser(), forward_browser_to_gemini())
+            meter_task = asyncio.create_task(credit_metering_loop())
+            try:
+                await asyncio.gather(forward_gemini_to_browser(), forward_browser_to_gemini())
+            finally:
+                meter_task.cancel()
 
     except websockets.exceptions.ConnectionClosed:
         print(f"[RELAY] Client {session_id} disconnected (session persisted in config/.session_store.json).")
@@ -461,11 +564,11 @@ async def handle_browser_client(websocket):
 
 
 async def main():
-    print("=========================================================")
-    print(" WebOrient Live Relay Server (v0.4.0 Persistent Session)")
+    print("=================================================================")
+    print(" WebOrient by DeployMate — Multi-Tenant Relay Gateway (v0.5.0)")
     print(f" Target Model : {MODEL_NAME}")
-    print(f" WebSocket URI: ws://localhost:{PORT}?siteId=...&sessionId=...")
-    print("=========================================================")
+    print(f" WebSocket URI: ws://localhost:{PORT}?siteKey=wo_live_deploymate_demo")
+    print("=================================================================")
     async with websockets.serve(
         handle_browser_client,
         "0.0.0.0",

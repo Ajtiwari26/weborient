@@ -1,0 +1,44 @@
+{
+  "wo_live_deploymate_demo": {
+    "tenantId": "tenant_deploymate_01",
+    "siteId": "deploymate_weborient",
+    "siteKey": "wo_live_deploymate_demo",
+    "companyName": "DeployMate",
+    "domain": "weborient.deploymate.in",
+    "allowedOrigins": [
+      "localhost",
+      "127.0.0.1",
+      "deploymate.in",
+      "www.deploymate.in",
+      "weborient.deploymate.in"
+    ],
+    "creditsMinutes": 249.5,
+    "plan": "Pro Co-Pilot",
+    "theme": {
+      "primaryColor": "#E6391E",
+      "accentColor": "#0A0A0A",
+      "themeName": "signal"
+    },
+    "defaultLanguage": "en-IN",
+    "manifestFile": "sample-manifest.json"
+  },
+  "wo_test_sandbox": {
+    "tenantId": "tenant_sandbox_dev",
+    "siteId": "sandbox_dev",
+    "siteKey": "wo_test_sandbox",
+    "companyName": "DeployMate Sandbox",
+    "domain": "localhost",
+    "allowedOrigins": [
+      "*"
+    ],
+    "creditsMinutes": 50.0,
+    "plan": "Starter",
+    "theme": {
+      "primaryColor": "#E6391E",
+      "accentColor": "#0A0A0A",
+      "themeName": "signal"
+    },
+    "defaultLanguage": "en-IN",
+    "manifestFile": "sample-manifest.json"
+  }
+}

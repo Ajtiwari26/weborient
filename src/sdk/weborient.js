@@ -1,30 +1,34 @@
 /**
- * WebOrient: Adaptive Gemini Live Voice Co-Pilot & Non-Linear To-Do Memory SDK (v0.4.0)
- * - ZERO Browser TTS: All spoken orientation comes natively from the Gemini Live Model
- * - Non-Linear To-Do Checklist Memory (`SessionMemory`): tracks completed vs. remaining sections
- *   in ANY order as the user explores or asks questions
- * - 100% Visual DOM Grounding:
- *   1) Explicit Tool Grounding (`move_and_highlight`, `show_and_describe`, `click_element`, `swipe_or_swap`, `fill_form_field`)
- *   2) Real-Time Transcript-to-DOM Auto-Highlighting (`_autoGroundFromModelSpeech`): whenever the Live Model
- *      speaks about a DOM section/card/control on the page, the Ghost Cursor automatically scrolls to it,
- *      spotlights it, displays the live spoken subtitle, and checks off its To-Do item!
- * - Refresh-Safe & Redirect-Safe Session Management:
- *   Persists session state, locked `userLanguage`, and To-Do checklist in `localStorage` so page redirects
- *   and hard browser refreshes (`F5`/`Cmd+R`) automatically resume the session in the user's language.
+ * WebOrient by DeployMate: Multi-Tenant Voice Co-Pilot & Shadow DOM SDK (`src/sdk/weborient.js` v0.5.0)
+ * - 1-Line Embed Ready (`<script async src="..." data-site-key="wo_live_..." data-theme="signal" data-lang="en-IN">`)
+ * - Shadow DOM Encapsulation: Mounts both the Ghost Cursor overlay and the Siri-like Assist Pill
+ *   inside `#weborient-shadow-host` (`ShadowRoot`) so client CSS never collides with WebOrient
+ * - Multi-Tenant Gateway Handshake: Passes `siteKey`, `siteId`, `sessionId`, `lang`, and `origin`
+ * - Non-Linear To-Do Checklist Memory (`SessionMemory`) & Refresh-Safe Continuity
  */
 import { GhostCursor } from './ghost-cursor.js';
 import { DOMScanner } from './dom-scanner.js';
 import { LiveClient } from './live-client.js';
 import { SessionMemory, SUPPORTED_LANGUAGES } from './session-memory.js';
 
+const THEME_PRESETS = {
+  signal: { primaryColor: '#E6391E', accentColor: '#0A0A0A' },
+  deploymate: { primaryColor: '#E6391E', accentColor: '#0A0A0A' },
+  indigo: { primaryColor: '#6366f1', accentColor: '#ec4899' }
+};
+
 export class WebOrient {
   constructor(options = {}) {
+    const preset = THEME_PRESETS[options.theme] || THEME_PRESETS.signal;
+
     this.options = Object.assign({
-      endpoint: null,
-      siteId: 'acme_default',
-      themeColor: '#6366f1',
-      accentColor: '#ec4899',
-      cursorStyle: 'modern-glow',
+      endpoint: 'ws://localhost:8088',
+      siteKey: 'wo_live_deploymate_demo',
+      siteId: 'deploymate_weborient',
+      themeColor: preset.primaryColor,
+      accentColor: preset.accentColor,
+      cursorStyle: 'deploymate-signal',
+      defaultLanguage: null,
       manifestUrl: null,
       requireSubmitConfirmation: false,
       autoMountLauncher: false,
@@ -41,16 +45,23 @@ export class WebOrient {
 
     this.memory = new SessionMemory({
       endpoint: this.options.endpoint,
+      defaultLanguage: this.options.defaultLanguage,
       onChange: (memState) => {
         queueMicrotask(() => this._emit('memoryUpdate', memState));
       }
     });
 
+    if (this.options.defaultLanguage && !this.memory.state.languageLocked) {
+      this.memory.setLanguage(this.options.defaultLanguage, false);
+    }
+
     this.client = null;
     this.manifest = null;
+    this.remainingCredits = null;
     this._modelSpeechBuffer = '';
     this._lastAutoGroundedSelector = null;
     this._lastExplicitToolTime = 0;
+    this._isExecutingTool = false;
 
     if (typeof window !== 'undefined') {
       const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
@@ -62,7 +73,7 @@ export class WebOrient {
       : Promise.resolve(null);
 
     if (this.options.autoMountLauncher && typeof document !== 'undefined') {
-      this._mountFloatingLauncher();
+      this._mountShadowAssistWidget();
     }
 
     this._checkRestoredSession();
@@ -81,25 +92,26 @@ export class WebOrient {
   }
 
   /**
-   * Connects microphone audio to the Gemini Live Model and injects the persistent
-   * Non-Linear To-Do Checklist, Locked Language, and Recent Conversation Continuity.
+   * Connects microphone audio to the DeployMate Multi-Tenant Relay & Gemini Live Model
    */
   async start() {
-    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint;
-    if (!endpoint) {
-      console.warn('[WebOrient] No WebSocket endpoint provided.');
-      return;
-    }
+    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || 'ws://localhost:8088';
     this.options.endpoint = endpoint;
 
     const sep = endpoint.includes('?') ? '&' : '?';
-    const wsUrl = `${endpoint}${sep}siteId=${encodeURIComponent(this.options.siteId)}&sessionId=${encodeURIComponent(this.memory.state.sessionId)}&lang=${encodeURIComponent(this.memory.state.userLanguage)}`;
+    const wsUrl =
+      `${endpoint}${sep}` +
+      `siteKey=${encodeURIComponent(this.options.siteKey)}` +
+      `&siteId=${encodeURIComponent(this.options.siteId)}` +
+      `&sessionId=${encodeURIComponent(this.memory.state.sessionId)}` +
+      `&lang=${encodeURIComponent(this.memory.state.userLanguage)}`;
 
     this.client = new LiveClient({
       endpoint: wsUrl,
       onToolCall: (name, args, callId) => this.handleToolCall(name, args, callId),
       onStatusChange: (status) => {
         console.log(`[WebOrient] Status: ${status}`);
+        this._syncShadowWidgetState(status === 'connected', 'idle');
         this._emit('status', { status });
       },
       onTranscript: (text, role) => {
@@ -107,27 +119,29 @@ export class WebOrient {
         if (role === 'model') {
           this._autoGroundFromModelSpeech(text);
         }
+        this._syncShadowWidgetState(true, role === 'model' ? 'speaking' : 'listening');
         this._emit('transcript', { text, role });
       },
       onPlaybackChange: (isPlaying) => {
         if (!isPlaying) {
           this._modelSpeechBuffer = '';
-          setTimeout(() => {
-            if (!this.client?.isPlaying) this.cursor.hideSpeechBubble();
-          }, 800);
+          this._syncShadowWidgetState(Boolean(this.client), 'listening');
+        } else {
+          this._syncShadowWidgetState(true, 'speaking');
         }
       },
       onInterrupted: () => {
         this._modelSpeechBuffer = '';
         this.cursor.cancelActiveActions();
+        this._syncShadowWidgetState(true, 'listening');
         this._emit('interrupted', {});
       }
     });
 
     await this.client.connect();
     this.memory.setLiveSessionStatus(true, endpoint);
+    this._syncShadowWidgetState(true, 'listening');
 
-    // Send full Non-Linear To-Do Checklist + Active Viewport Elements + Language Continuity Handoff
     const initialSnapshot = this.scanner.captureStateSnapshot();
     const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 35);
     const memorySummary = this.memory.buildModelContextSummary();
@@ -139,16 +153,9 @@ export class WebOrient {
     );
   }
 
-  /**
-   * Real-Time Transcript-to-DOM Auto-Grounding:
-   * Guarantees that EVERY part of the DOM described by the Live Model is automatically
-   * scrolled into view, spotlighted, and pointed to by the Ghost Cursor—even if the model
-   * mentions a section in speech before or without emitting an explicit tool call!
-   */
   _autoGroundFromModelSpeech(chunk) {
     this._modelSpeechBuffer = `${this._modelSpeechBuffer} ${chunk}`.slice(-260);
 
-    // Avoid overriding an explicit tool call (like navigate_route, swipe, or click) that is currently in-flight or just fired
     if (this._isExecutingTool || Date.now() - this._lastExplicitToolTime < 2200) return;
 
     const match = this.scanner.matchElementFromSpeech(
@@ -168,16 +175,11 @@ export class WebOrient {
     }
   }
 
-  /**
-   * Sends a user request or topic selection to the Live Model (or executes locally if offline)
-   */
   async orientTopic(todoOrQuery) {
     if (!todoOrQuery) return;
     const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
 
-    // If passed a structured To-Do item from the checklist
     if (typeof todoOrQuery === 'object' && todoOrQuery.selector) {
-      // If it lives on another page, queue highlight + Live Model prompt and redirect
       if (todoOrQuery.page && todoOrQuery.page !== currentFile) {
         this.queuePostNavigationActions([
           {
@@ -189,7 +191,6 @@ export class WebOrient {
         return;
       }
 
-      // Same page: highlight with Ghost Cursor, mark To-Do done, and ask Live Model to explain it in user's language
       await this.handleToolCall('move_and_highlight', {
         selector: todoOrQuery.selector,
         explanation: todoOrQuery.title
@@ -204,7 +205,6 @@ export class WebOrient {
       return;
     }
 
-    // String prompt
     if (this.client) {
       this.memory.appendTranscript('user', String(todoOrQuery));
       const langCfg = this.memory.getLanguageConfig();
@@ -226,9 +226,6 @@ export class WebOrient {
     this.memory.setPendingNavigationActions(actions);
   }
 
-  /**
-   * Routes model tool calls to DOM actuators with closed-loop settle, verification & To-Do completion
-   */
   async handleToolCall(name, args = {}, callId = null) {
     console.log(`[WebOrient] Executing Tool Call: ${name}`, args);
     this._lastExplicitToolTime = Date.now();
@@ -326,7 +323,6 @@ export class WebOrient {
             selector: args.selector || '',
             manifest: this.manifest
           });
-          // Always visually highlight the matched section on screen when reading content!
           const secToHighlight = args.selector || result.matchingSections?.[0]?.selector;
           if (secToHighlight) {
             await this.cursor.moveToElement(
@@ -478,7 +474,6 @@ export class WebOrient {
       return res;
     }
 
-    // Complete full trajectory to the exact navigation link, spotlight it, and play click ripple BEFORE page redirect
     const navLink = document.querySelector(`#global-site-header a[href*="${targetFile}"], a[href*="${targetFile}"]`);
     if (navLink) {
       await this.cursor.moveToElement(navLink, true, `Navigating to ${matchedPage?.title || targetFile}...`);
@@ -537,15 +532,10 @@ export class WebOrient {
     });
   }
 
-  /**
-   * Automatically restores the active Gemini Live voice session AND executes any queued
-   * actions after a cross-page redirect OR a hard browser refresh (`F5` / `Cmd+R`).
-   */
   _checkRestoredSession() {
     const runRestore = async () => {
       const memState = this.memory.getState();
 
-      // 1. If the Live Voice session was active before the page redirect or refresh, reconnect automatically!
       if (memState.isLiveActive && memState.liveEndpoint && !this.client) {
         this.options.endpoint = memState.liveEndpoint;
         try {
@@ -559,7 +549,6 @@ export class WebOrient {
         }
       }
 
-      // 2. Execute any queued post-navigation DOM actions
       const pendingActions = this.memory.consumePendingNavigationActions();
       if (pendingActions.length > 0) {
         await new Promise(r => setTimeout(r, 320));
@@ -581,32 +570,169 @@ export class WebOrient {
     }
   }
 
-  _mountFloatingLauncher() {
-    if (document.getElementById('weborient-floating-launcher')) return;
-    const launcher = document.createElement('div');
-    launcher.id = 'weborient-floating-launcher';
-    launcher.setAttribute('data-agent-ignore', 'true');
-    launcher.style.cssText = `
-      position: fixed; bottom: 20px; left: 20px; z-index: 2147483640;
-      display: flex; gap: 8px; align-items: center;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  /**
+   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave inside the
+   * isolated Shadow DOM (`#weborient-shadow-host`) so 1-line `<script>` embeds
+   * work on any external website with zero CSS leakage or collision.
+   */
+  _mountShadowAssistWidget() {
+    const shadowRoot = this.cursor?.getOrCreateShadowRoot();
+    if (!shadowRoot || shadowRoot.getElementById('wo-shadow-assist')) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.id = 'wo-shadow-assist';
+    wrapper.innerHTML = `
+      <style>
+        #wo-assist-root {
+          position: fixed;
+          bottom: 24px;
+          right: 24px;
+          z-index: 2147483647;
+          pointer-events: auto;
+          font-family: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          user-select: none;
+        }
+        @keyframes wo-siri-wave {
+          0%, 100% { transform: scaleY(0.28); opacity: 0.65; }
+          50% { transform: scaleY(1); opacity: 1; }
+        }
+        .wo-pill-btn {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          padding: 10px 18px;
+          border-radius: 999px;
+          background: #0A0A0A;
+          color: #FFFFFF;
+          border: 2px solid ${this.options.themeColor};
+          box-shadow: 0 14px 34px rgba(10, 10, 10, 0.35);
+          cursor: pointer;
+          transition: transform 0.2s cubic-bezier(0.215, 0.61, 0.355, 1), background 0.2s ease;
+        }
+        .wo-pill-btn:hover {
+          transform: translateY(-2px);
+        }
+        .wo-pill-btn:active {
+          transform: scale(0.96);
+        }
+        .wo-mic-circle {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          background: ${this.options.themeColor};
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #FFFFFF;
+          flex-shrink: 0;
+        }
+        .wo-wave-box {
+          display: none;
+          align-items: center;
+          gap: 3.5px;
+          height: 24px;
+          padding: 0 2px;
+        }
+        .wo-bar {
+          width: 3.5px;
+          height: 20px;
+          border-radius: 999px;
+          background: ${this.options.themeColor};
+          animation: wo-siri-wave 1s ease-in-out infinite;
+        }
+        .wo-bar:nth-child(2) { animation-delay: 0.15s; height: 24px; background: #FFFFFF; }
+        .wo-bar:nth-child(3) { animation-delay: 0.3s; height: 28px; background: ${this.options.themeColor}; }
+        .wo-bar:nth-child(4) { animation-delay: 0.45s; height: 22px; background: #FFFFFF; }
+        .wo-bar:nth-child(5) { animation-delay: 0.6s; height: 16px; background: ${this.options.themeColor}; }
+        .wo-meta {
+          display: flex;
+          flex-direction: column;
+          text-align: left;
+        }
+        .wo-title {
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.03em;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .wo-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: ${this.options.themeColor};
+        }
+        .wo-sub {
+          font-family: 'Fira Code', monospace;
+          font-size: 9px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: rgba(255, 255, 255, 0.65);
+        }
+      </style>
+      <div id="wo-assist-root">
+        <button type="button" class="wo-pill-btn" id="wo-shadow-btn" aria-label="Toggle WebOrient Voice Co-Pilot">
+          <div class="wo-mic-circle" id="wo-shadow-mic">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="22"></line>
+            </svg>
+          </div>
+          <div class="wo-wave-box" id="wo-shadow-wave">
+            <div class="wo-bar"></div>
+            <div class="wo-bar"></div>
+            <div class="wo-bar"></div>
+            <div class="wo-bar"></div>
+            <div class="wo-bar"></div>
+          </div>
+          <div class="wo-meta">
+            <span class="wo-title">
+              <span>Assist</span>
+              <span class="wo-dot" id="wo-shadow-dot"></span>
+            </span>
+            <span class="wo-sub" id="wo-shadow-sub">Click to talk</span>
+          </div>
+        </button>
+      </div>
     `;
-    launcher.innerHTML = `
-      <button id="wo-launcher-live" style="
-        background: linear-gradient(135deg, ${this.options.themeColor}, ${this.options.accentColor});
-        color: #fff; border: none; padding: 10px 16px; border-radius: 999px;
-        font-size: 12px; font-weight: 700; cursor: pointer;
-        box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
-      ">🎙️ Talk to Live Co-Pilot</button>
-    `;
-    document.body.appendChild(launcher);
-    launcher.querySelector('#wo-launcher-live').addEventListener('click', () => {
-      if (this.client) {
-        this.stop();
-      } else {
-        this.start();
-      }
-    });
+
+    shadowRoot.appendChild(wrapper);
+    const btn = shadowRoot.getElementById('wo-shadow-btn');
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        if (!this.client) {
+          this._syncShadowWidgetState(true, 'connecting');
+          try {
+            await this.start();
+          } catch (_) {
+            this._syncShadowWidgetState(false, 'offline');
+          }
+        } else {
+          this.stop();
+        }
+      });
+    }
+  }
+
+  _syncShadowWidgetState(connected, state = 'idle') {
+    const shadowRoot = this.cursor?.shadowRoot;
+    if (!shadowRoot) return;
+    const mic = shadowRoot.getElementById('wo-shadow-mic');
+    const wave = shadowRoot.getElementById('wo-shadow-wave');
+    const sub = shadowRoot.getElementById('wo-shadow-sub');
+    if (!mic || !wave || !sub) return;
+
+    if (connected) {
+      mic.style.display = 'none';
+      wave.style.display = 'flex';
+      sub.textContent = state === 'speaking' ? 'Speaking...' : (state === 'connecting' ? 'Connecting...' : 'Listening...');
+    } else {
+      mic.style.display = 'flex';
+      wave.style.display = 'none';
+      sub.textContent = state === 'offline' ? 'Relay offline' : 'Click to talk';
+    }
   }
 
   _emit(eventType, detail) {
@@ -625,23 +751,48 @@ export class WebOrient {
       this.cursor.hideSpeechBubble();
       this.cursor.hideSpotlight();
     }
+    this._syncShadowWidgetState(false, 'idle');
   }
 }
 
 export { SUPPORTED_LANGUAGES };
 
+/**
+ * 1-Line Embed Auto-Bootstrap:
+ * Works with both synchronous and `<script async src=".../weborient.js" data-site-key="wo_live_...">` tags!
+ */
 if (typeof window !== 'undefined') {
   window.WebOrient = WebOrient;
 
-  const currentScript = document.currentScript;
-  if (currentScript && (currentScript.dataset.endpoint || currentScript.dataset.siteId)) {
-    window.weborientInstance = new WebOrient({
-      endpoint: currentScript.dataset.endpoint || null,
-      siteId: currentScript.dataset.siteId || 'client_default',
-      themeColor: currentScript.dataset.themeColor || '#6366f1',
-      accentColor: currentScript.dataset.accentColor || '#ec4899',
-      manifestUrl: currentScript.dataset.manifest || null,
-      autoMountLauncher: currentScript.dataset.autoMount !== 'false'
-    });
+  const bootstrapFromScriptTag = () => {
+    if (window.weborient || window.weborientInstance) return;
+    const scriptEl =
+      document.currentScript ||
+      document.querySelector('script[data-site-key], script[data-site-id], script[data-endpoint]');
+
+    if (scriptEl && (scriptEl.dataset.siteKey || scriptEl.dataset.siteId || scriptEl.dataset.endpoint)) {
+      const siteKey = scriptEl.dataset.siteKey || 'wo_live_deploymate_demo';
+      const themeAttr = scriptEl.dataset.theme || 'signal';
+      const preset = THEME_PRESETS[themeAttr] || THEME_PRESETS.signal;
+
+      window.weborientInstance = new WebOrient({
+        endpoint: scriptEl.dataset.endpoint || 'ws://localhost:8088',
+        siteKey,
+        siteId: scriptEl.dataset.siteId || siteKey,
+        theme: themeAttr,
+        themeColor: scriptEl.dataset.themeColor || preset.primaryColor,
+        accentColor: scriptEl.dataset.accentColor || preset.accentColor,
+        defaultLanguage: scriptEl.dataset.lang || 'en-IN',
+        manifestUrl: scriptEl.dataset.manifest || null,
+        autoMountLauncher: scriptEl.dataset.autoMount !== 'false'
+      });
+      window.weborient = window.weborientInstance;
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', bootstrapFromScriptTag, { once: true });
+  } else {
+    bootstrapFromScriptTag();
   }
 }

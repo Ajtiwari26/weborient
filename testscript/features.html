@@ -3,185 +3,185 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Product & Deep Architecture — Acme WebOrient</title>
+  <title>5-Layer Architecture & Benchmarks — WebOrient by DeployMate</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
+<body class="bg-white text-[#0A0A0A] min-h-screen antialiased">
 
-  <main class="max-w-6xl mx-auto px-6 py-12 space-y-20">
+  <main class="max-w-7xl mx-auto px-6 py-12 space-y-24">
 
-    <!-- 1. Architecture Hero -->
-    <section id="features-hero" class="space-y-4">
-      <div class="inline-flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300 text-xs font-semibold">
-        Page 2 of 5 • Deep System Architecture &amp; Benchmarks
+    <!-- 01. ARCHITECTURE HERO -->
+    <section id="features-hero" class="border-b border-[#0A0A0A] pb-12 grid-fine">
+      <div class="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E] mb-4">
+        <span>● PAGE 02 OF 05 · DEEP SYSTEM ARCHITECTURE &amp; BENCHMARKS</span>
       </div>
-      <h1 class="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">
-        Inside the <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-500">5-Layer Co-Browsing Engine</span>
+      <h1 class="font-display font-light text-[clamp(2.4rem,5.4vw,4.8rem)] leading-[0.94] tracking-[-0.03em] text-[#0A0A0A]">
+        Inside the <span class="text-[#E6391E] font-medium">5-Layer Co-Browsing Engine.</span>
       </h1>
-      <p class="text-slate-300 text-base max-w-3xl">
-        Explore how WebOrient combines low-latency audio streaming, deterministic DOM indexing, human-like Bézier cursor physics, and closed-loop mutation verification.
+      <p class="text-[#0A0A0A]/80 text-base sm:text-lg max-w-3xl mt-5 leading-relaxed">
+        Explore how WebOrient by DeployMate combines Shadow DOM UI encapsulation, 16kHz/24kHz PCM audio streaming, deterministic DOM indexing, human-like Cubic Bézier cursor physics, and closed-loop mutation verification.
       </p>
     </section>
 
-    <!-- 2. 5-Layer Subsystem Explorer Tabs -->
+    <!-- 02. 5-LAYER SUBSYSTEM EXPLORER TABS -->
     <section id="subsystem-tabs-section" class="space-y-6">
-      <div class="space-y-1">
-        <h2 class="text-2xl font-bold text-white">Interactive 5-Layer Subsystem Explorer</h2>
-        <p class="text-sm text-slate-400">Click or ask the voice assistant to swap between architectural layers.</p>
+      <div class="border-b border-[#0A0A0A] pb-4 flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+        <div>
+          <div class="font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E]">01 / RUNTIME SUBSYSTEMS</div>
+          <h2 class="font-display font-light text-3xl sm:text-5xl text-[#0A0A0A] mt-1">Interactive 5-Layer Explorer</h2>
+        </div>
+        <p class="font-mono text-[10px] uppercase tracking-[0.15em] text-[#0A0A0A]/60">Click or ask the voice assistant to swap architectural layers</p>
       </div>
 
-      <div id="subsystem-tabs" role="tablist" data-tab-group="arch-subsystems" class="flex flex-wrap gap-2 bg-slate-900 p-1.5 rounded-xl border border-slate-800">
-        <button role="tab" data-tab="audio" data-target-panel="sub-audio" aria-selected="true" class="active flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold bg-indigo-600 text-white transition">
-          L1: AudioWorklet Stream
+      <div id="subsystem-tabs" role="tablist" data-tab-group="arch-subsystems" class="grid grid-cols-2 sm:grid-cols-5 border border-[#0A0A0A] bg-white">
+        <button role="tab" data-tab="audio" data-target-panel="sub-audio" aria-selected="true" class="active py-3.5 px-3 font-mono text-[11px] uppercase tracking-[0.12em] font-semibold bg-[#E6391E] text-white border-r border-[#0A0A0A] transition cursor-pointer">
+          L1 · AudioWorklet
         </button>
-        <button role="tab" data-tab="bezier" data-target-panel="sub-bezier" aria-selected="false" class="flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
-          L2: Cubic Bézier Physics
+        <button role="tab" data-tab="bezier" data-target-panel="sub-bezier" aria-selected="false" class="py-3.5 px-3 font-mono text-[11px] uppercase tracking-[0.12em] font-semibold text-[#0A0A0A]/60 hover:text-[#0A0A0A] border-r border-[#0A0A0A] transition cursor-pointer">
+          L2 · Shadow &amp; Bézier
         </button>
-        <button role="tab" data-tab="scanner" data-target-panel="sub-scanner" aria-selected="false" class="flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
-          L3: DOM &amp; A11y Scanner
+        <button role="tab" data-tab="scanner" data-target-panel="sub-scanner" aria-selected="false" class="py-3.5 px-3 font-mono text-[11px] uppercase tracking-[0.12em] font-semibold text-[#0A0A0A]/60 hover:text-[#0A0A0A] border-r border-[#0A0A0A] transition cursor-pointer">
+          L3 · DOM Scanner
         </button>
-        <button role="tab" data-tab="actuator" data-target-panel="sub-actuator" aria-selected="false" class="flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
-          L4: Form &amp; Swipe Actuator
+        <button role="tab" data-tab="actuator" data-target-panel="sub-actuator" aria-selected="false" class="py-3.5 px-3 font-mono text-[11px] uppercase tracking-[0.12em] font-semibold text-[#0A0A0A]/60 hover:text-[#0A0A0A] border-r border-[#0A0A0A] transition cursor-pointer">
+          L4 · Form Actuator
         </button>
-        <button role="tab" data-tab="verifier" data-target-panel="sub-verifier" aria-selected="false" class="flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">
-          L5: Closed-Loop Verifier
+        <button role="tab" data-tab="verifier" data-target-panel="sub-verifier" aria-selected="false" class="py-3.5 px-3 font-mono text-[11px] uppercase tracking-[0.12em] font-semibold text-[#0A0A0A]/60 hover:text-[#0A0A0A] transition cursor-pointer">
+          L5 · Relay &amp; Credits
         </button>
       </div>
 
-      <div class="p-6 bg-slate-900/75 border border-slate-800 rounded-2xl">
+      <div class="p-8 border border-[#0A0A0A] bg-white">
         <div id="sub-audio" data-panel-group="arch-subsystems" class="space-y-3">
-          <div class="text-xs font-mono text-indigo-400">src/sdk/live-client.js • 16kHz In / 24kHz Out</div>
-          <h3 class="text-xl font-bold text-white">Bidirectional PCM Streaming &amp; Sub-50ms Barge-In</h3>
-          <p class="text-sm text-slate-300 leading-relaxed">
-            Microphone audio is captured inside a dedicated <code>AudioWorkletProcessor</code> (with automatic fallback to <code>ScriptProcessorNode</code>), converted to 16-bit PCM, and streamed to the Gemini Live relay. Downstream 24kHz PCM chunks are decoded into Float32 <code>AudioBuffer</code> nodes and scheduled gaplessly along <code>nextPlayTime</code>.
+          <div class="font-mono text-xs text-[#E6391E] uppercase tracking-[0.16em]">src/sdk/live-client.js • 16kHz In / 24kHz Out</div>
+          <h3 class="font-display text-2xl font-medium text-[#0A0A0A]">Bidirectional PCM Streaming &amp; Sub-50ms Barge-In</h3>
+          <p class="text-sm text-[#0A0A0A]/80 leading-relaxed max-w-3xl">
+            Microphone audio is captured inside a dedicated <code>AudioWorkletProcessor</code>, converted to 16-bit PCM, and streamed to <code>relay.deploymate.in</code>. Downstream 24kHz PCM chunks are decoded into Float32 <code>AudioBuffer</code> nodes and scheduled gaplessly along <code>nextPlayTime</code>.
           </p>
         </div>
 
         <div id="sub-bezier" data-panel-group="arch-subsystems" class="hidden space-y-3">
-          <div class="text-xs font-mono text-pink-400">src/sdk/ghost-cursor.js • 60fps requestAnimationFrame</div>
-          <h3 class="text-xl font-bold text-white">Fitts's Law Trajectory &amp; Scroll-Locked Coachmarks</h3>
-          <p class="text-sm text-slate-300 leading-relaxed">
-            Instead of robotic linear CSS transitions, the Ghost Cursor computes perpendicular control points $P_1, P_2$ proportional to travel distance, adds subtle overshoot on long jumps (&gt;180px), and locks a glowing spotlight + glassmorphic explanation tooltip onto target elements across scroll and resize events.
+          <div class="font-mono text-xs text-[#E6391E] uppercase tracking-[0.16em]">src/sdk/ghost-cursor.js • Shadow DOM + 60fps rAF</div>
+          <h3 class="font-display text-2xl font-medium text-[#0A0A0A]">Isolated ShadowRoot Overlay, Viewport Centering &amp; Fitts's Law Physics</h3>
+          <p class="text-sm text-[#0A0A0A]/80 leading-relaxed max-w-3xl">
+            Mounted inside an open <code>ShadowRoot</code> on <code>document.documentElement</code> so client CSS never leaks in. Before flying to a target, the engine smoothly centers the actual component in the usable viewport, waits for scroll velocity to settle to zero, and glides along a Cubic Bézier curve.
           </p>
         </div>
 
         <div id="sub-scanner" data-panel-group="arch-subsystems" class="hidden space-y-3">
-          <div class="text-xs font-mono text-emerald-400">src/sdk/dom-scanner.js • Shadow DOM + Manifest RAG</div>
-          <h3 class="text-xl font-bold text-white">Persistent `data-wo-id` Tagging &amp; 3-Tier Q&amp;A</h3>
-          <p class="text-sm text-slate-300 leading-relaxed">
-            Every interactive node receives a deterministic <code>data-wo-id="wo-N"</code> attribute and can be resolved by CSS selector, ID, <code>data-wo-id</code>, or fuzzy accessible label. When a user asks a domain question, <code>read_page_content</code> merges live DOM section text with <code>site-manifest.json</code> knowledge chunks.
+          <div class="font-mono text-xs text-[#E6391E] uppercase tracking-[0.16em]">src/sdk/dom-scanner.js • Light DOM + Shadow Piercing</div>
+          <h3 class="font-display text-2xl font-medium text-[#0A0A0A]">Persistent `data-wo-id` Tagging &amp; Substantive Component Resolution</h3>
+          <p class="text-sm text-[#0A0A0A]/80 leading-relaxed max-w-3xl">
+            Every interactive node receives a deterministic <code>data-wo-id="wo-N"</code> attribute and can be resolved by CSS selector, ID, or accessible label. Landmark section selectors automatically resolve past title headers directly onto the actual table, tablist, carousel, or form.
           </p>
         </div>
 
         <div id="sub-actuator" data-panel-group="arch-subsystems" class="hidden space-y-3">
-          <div class="text-xs font-mono text-amber-400">src/sdk/ghost-cursor.js • React/Vue Setters + Pointer Gestures</div>
-          <h3 class="text-xl font-bold text-white">Universal Form Co-Pilot &amp; Multi-Modal Gesture Synthesis</h3>
-          <p class="text-sm text-slate-300 leading-relaxed">
-            Normalizes spoken email addresses (<code>"ajay at company dot com"</code> → <code>ajay@company.com</code>), invokes native <code>HTMLInputElement.prototype.value</code> setters for React/Vue compatibility, selects dropdown options, interpolates range sliders, and renders dashed SVG swipe trails while dispatching <code>PointerEvent</code> drag sequences.
+          <div class="font-mono text-xs text-[#E6391E] uppercase tracking-[0.16em]">src/sdk/ghost-cursor.js • React/Vue Setters + Pointer Gestures</div>
+          <h3 class="font-display text-2xl font-medium text-[#0A0A0A]">Universal Form Co-Pilot &amp; Multi-Modal Gesture Synthesis</h3>
+          <p class="text-sm text-[#0A0A0A]/80 leading-relaxed max-w-3xl">
+            Normalizes spoken email addresses (<code>"ajay at deploymate dot in"</code> → <code>ajay@deploymate.in</code>), invokes native <code>HTMLInputElement.prototype.value</code> setters for React/Vue state compatibility, selects dropdown options, interpolates range sliders, and renders dashed SVG swipe trails.
           </p>
         </div>
 
         <div id="sub-verifier" data-panel-group="arch-subsystems" class="hidden space-y-3">
-          <div class="text-xs font-mono text-sky-400">src/sdk/weborient.js • Act → Settle → Diff → Respond</div>
-          <h3 class="text-xl font-bold text-white">MutationObserver Settle &amp; Cross-Page Task Queue</h3>
-          <p class="text-sm text-slate-300 leading-relaxed">
-            Every tool execution waits for DOM mutations to settle and attaches a <code>viewportSummary</code> (active section, visible element count, validation errors) to the <code>FunctionResponse</code>. Cross-page navigations preserve queued actions inside <code>sessionStorage</code>.
+          <div class="font-mono text-xs text-[#E6391E] uppercase tracking-[0.16em]">src/relay/weborient_relay.py • Multi-Tenant Auth &amp; Credit Metering</div>
+          <h3 class="font-display text-2xl font-medium text-[#0A0A0A]">Origin Verification, 30s Credit Ticks &amp; Cross-Page Session Handoff</h3>
+          <p class="text-sm text-[#0A0A0A]/80 leading-relaxed max-w-3xl">
+            Validates the customer's <code>data-site-key</code> against registered domains via the HTTP <code>Origin</code> header, deducts voice credits every 30 seconds of active streaming, and persists non-linear To-Do progress across page redirects and hard refreshes.
           </p>
         </div>
       </div>
     </section>
 
-    <!-- 3. 4-Slide Industry Deployment Carousel -->
-    <section id="industry-carousel-section" class="space-y-6">
-      <div class="flex items-center justify-between">
+    <!-- 03. 4-SLIDE INDUSTRY DEPLOYMENT CAROUSEL (DARK SANDBOX) -->
+    <section id="industry-carousel-section" class="bg-[#0A0A0A] text-white border-y-[5px] border-[#E6391E] p-8 sm:p-12 space-y-8 grid-fine-invert">
+      <div class="flex flex-wrap items-end justify-between gap-4 border-b border-white/15 pb-5">
         <div>
-          <h2 class="text-2xl font-bold text-white">Industry Deployment Blueprints</h2>
-          <p class="text-sm text-slate-400">Swipe through 4 vertical architectures powered by WebOrient.</p>
+          <div class="font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E]">02 / VERTICAL ARCHITECTURES</div>
+          <h2 class="font-display font-light text-3xl sm:text-5xl text-white mt-1">Industry Deployment Blueprints</h2>
         </div>
-        <div class="flex items-center gap-2">
-          <span data-carousel-counter class="text-xs font-mono text-slate-400 mr-2">Slide 1 of 4</span>
-          <button data-carousel-prev class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition">← Prev</button>
-          <button data-carousel-next class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition">Next →</button>
+        <div class="flex items-center gap-3">
+          <span data-carousel-counter class="font-mono text-xs text-[#E6391E] mr-2">01 / 04</span>
+          <button data-carousel-prev class="px-4 py-2 border border-white/30 hover:border-[#E6391E] hover:bg-[#E6391E] rounded-full font-mono text-xs uppercase tracking-wider text-white transition cursor-pointer">← Prev</button>
+          <button data-carousel-next class="px-4 py-2 border border-white/30 hover:border-[#E6391E] hover:bg-[#E6391E] rounded-full font-mono text-xs uppercase tracking-wider text-white transition cursor-pointer">Next →</button>
         </div>
       </div>
 
-      <div id="industry-carousel" data-carousel="true" class="p-8 bg-gradient-to-br from-slate-900 via-purple-950/30 to-slate-900 border border-slate-800 rounded-2xl select-none">
-        <div data-carousel-slide="0" class="carousel-slide space-y-2">
-          <span class="text-xs font-mono uppercase text-indigo-400">Vertical 1 of 4 • B2B SaaS Onboarding</span>
-          <h3 class="text-xl font-bold text-white">Interactive Product Tours &amp; Workspace Setup</h3>
-          <p class="text-sm text-slate-300">Walks users across multi-page dashboards, explains analytics charts with spotlights, and configures API keys and webhooks hands-free.</p>
+      <div id="industry-carousel" data-carousel="true" class="p-8 border border-white/20 bg-white/5 select-none">
+        <div data-carousel-slide="0" class="carousel-slide space-y-3">
+          <span class="inline-block px-3 py-1 bg-[#E6391E] text-white font-mono text-[10px] uppercase tracking-[0.18em]">VERTICAL 01 / 04 • B2B SAAS ONBOARDING</span>
+          <h3 class="font-display text-2xl sm:text-3xl text-white">Interactive Product Tours &amp; Workspace Setup</h3>
+          <p class="text-sm text-white/75 max-w-3xl leading-relaxed">Walks users across multi-page dashboards, explains analytics charts with spotlights, and configures API keys and webhooks hands-free.</p>
         </div>
-        <div data-carousel-slide="1" class="carousel-slide hidden space-y-2">
-          <span class="text-xs font-mono uppercase text-pink-400">Vertical 2 of 4 • FinTech &amp; Banking KYC</span>
-          <h3 class="text-xl font-bold text-white">Voice-Guided Loan &amp; Account Applications</h3>
-          <p class="text-sm text-slate-300">Explains APR tiers, adjusts loan calculators via sliders, and fills multi-page KYC forms while masking SSN and card fields automatically.</p>
+        <div data-carousel-slide="1" class="carousel-slide hidden space-y-3">
+          <span class="inline-block px-3 py-1 bg-[#E6391E] text-white font-mono text-[10px] uppercase tracking-[0.18em]">VERTICAL 02 / 04 • FINTECH &amp; BANKING KYC</span>
+          <h3 class="font-display text-2xl sm:text-3xl text-white">Voice-Guided Loan &amp; Account Applications</h3>
+          <p class="text-sm text-white/75 max-w-3xl leading-relaxed">Explains APR tiers, adjusts loan calculators via sliders, and fills multi-page KYC forms while masking SSN and card fields automatically.</p>
         </div>
-        <div data-carousel-slide="2" class="carousel-slide hidden space-y-2">
-          <span class="text-xs font-mono uppercase text-emerald-400">Vertical 3 of 4 • E-Commerce Shopping Concierge</span>
-          <h3 class="text-xl font-bold text-white">Visual Product Comparison &amp; Zero-Click Checkout</h3>
-          <p class="text-sm text-slate-300">Answers sizing and fabric questions from product tables, swipes photo galleries, and populates shipping addresses by voice.</p>
+        <div data-carousel-slide="2" class="carousel-slide hidden space-y-3">
+          <span class="inline-block px-3 py-1 bg-[#E6391E] text-white font-mono text-[10px] uppercase tracking-[0.18em]">VERTICAL 03 / 04 • E-COMMERCE SHOPPING CONCIERGE</span>
+          <h3 class="font-display text-2xl sm:text-3xl text-white">Visual Product Comparison &amp; Zero-Click Checkout</h3>
+          <p class="text-sm text-white/75 max-w-3xl leading-relaxed">Answers sizing and fabric questions from product tables, swipes photo galleries, and populates shipping addresses by voice.</p>
         </div>
-        <div data-carousel-slide="3" class="carousel-slide hidden space-y-2">
-          <span class="text-xs font-mono uppercase text-amber-400">Vertical 4 of 4 • Healthcare Patient Triage</span>
-          <h3 class="text-xl font-bold text-white">Hands-Free Symptom &amp; Appointment Booking</h3>
-          <p class="text-sm text-slate-300">Guides patients to the right specialist department, reads preparation instructions aloud, and completes intake questionnaires.</p>
+        <div data-carousel-slide="3" class="carousel-slide hidden space-y-3">
+          <span class="inline-block px-3 py-1 bg-[#E6391E] text-white font-mono text-[10px] uppercase tracking-[0.18em]">VERTICAL 04 / 04 • HEALTHCARE &amp; EDUCATION ADMISSIONS</span>
+          <h3 class="font-display text-2xl sm:text-3xl text-white">Hands-Free Student Counseling &amp; Patient Triage</h3>
+          <p class="text-sm text-white/75 max-w-3xl leading-relaxed">Guides students and patients to the right department in Hindi, Hinglish, or English, reads fee structures aloud, and completes intake forms.</p>
         </div>
       </div>
     </section>
 
-    <!-- 4. Quantitative Benchmark Comparison Table -->
-    <section id="benchmark-section" class="space-y-6 pb-16">
-      <div class="space-y-1">
-        <h2 class="text-2xl font-bold text-white">Architecture Benchmark: WebOrient vs. Alternatives</h2>
-        <p class="text-sm text-slate-400">Why client-side DOM + Multimodal Live outperforms corner text bots and headless cloud browsers.</p>
+    <!-- 04. QUANTITATIVE BENCHMARK COMPARISON TABLE -->
+    <section id="benchmark-section" class="space-y-6">
+      <div class="border-b border-[#0A0A0A] pb-4">
+        <div class="font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E]">03 / PERFORMANCE TELEMETRY</div>
+        <h2 class="font-display font-light text-3xl sm:text-5xl text-[#0A0A0A] mt-1">WebOrient vs. Legacy Alternatives</h2>
       </div>
 
-      <div id="benchmark-table" class="overflow-x-auto bg-slate-900/60 border border-slate-800 rounded-2xl">
+      <div id="benchmark-table" class="overflow-x-auto border border-[#0A0A0A] bg-white">
         <table class="w-full text-left text-xs">
-          <thead class="bg-slate-900 text-slate-400 uppercase font-mono border-b border-slate-800">
+          <thead class="bg-[#0A0A0A] text-white uppercase font-mono tracking-[0.14em] border-b border-[#0A0A0A]">
             <tr>
-              <th class="py-3.5 px-4">Metric / Capability</th>
-              <th class="py-3.5 px-4 text-indigo-400">WebOrient v0.2.0</th>
-              <th class="py-3.5 px-4">Corner Text Chatbot</th>
-              <th class="py-3.5 px-4">Headless Cloud Browser (Playwright)</th>
+              <th class="py-4 px-5">Metric / Capability</th>
+              <th class="py-4 px-5 text-[#E6391E]">WebOrient by DeployMate</th>
+              <th class="py-4 px-5">Corner Text Chatbot</th>
+              <th class="py-4 px-5">Headless Cloud Browser (Playwright)</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-800/70 text-slate-300">
-            <tr>
-              <td class="py-3 px-4 font-semibold text-white">Voice Turn Latency</td>
-              <td class="py-3 px-4 text-emerald-400 font-bold">~310ms (Native Live PCM)</td>
-              <td class="py-3 px-4">2,800ms+ (STT → LLM → TTS)</td>
-              <td class="py-3 px-4">4,500ms+ (Screenshot → VLM loop)</td>
+          <tbody class="divide-y divide-[#0A0A0A]/20 text-[#0A0A0A]">
+            <tr class="hover:bg-[#0A0A0A]/5">
+              <td class="py-4 px-5 font-display font-bold text-sm">Voice Turn Latency</td>
+              <td class="py-4 px-5 font-mono font-bold text-[#E6391E]">~310ms (Native Live PCM)</td>
+              <td class="py-4 px-5">2,800ms+ (STT → LLM → TTS)</td>
+              <td class="py-4 px-5">4,500ms+ (Screenshot → VLM loop)</td>
             </tr>
-            <tr>
-              <td class="py-3 px-4 font-semibold text-white">On-Screen Visual Guidance</td>
-              <td class="py-3 px-4 text-emerald-400 font-bold">60fps Bézier Cursor + Spotlight</td>
-              <td class="py-3 px-4">None (Text links only)</td>
-              <td class="py-3 px-4">Remote video stream lag</td>
+            <tr class="hover:bg-[#0A0A0A]/5">
+              <td class="py-4 px-5 font-display font-bold text-sm">On-Screen Visual Guidance</td>
+              <td class="py-4 px-5 font-mono font-bold text-[#E6391E]">60fps Bézier Cursor + Spotlight</td>
+              <td class="py-4 px-5">None (Text links only)</td>
+              <td class="py-4 px-5">Remote video stream lag</td>
             </tr>
-            <tr>
-              <td class="py-3 px-4 font-semibold text-white">React / Vue Form Filling</td>
-              <td class="py-3 px-4 text-emerald-400 font-bold">Native Prototype Setter + Validation</td>
-              <td class="py-3 px-4">User must type manually</td>
-              <td class="py-3 px-4">Breaks on client auth session</td>
+            <tr class="hover:bg-[#0A0A0A]/5">
+              <td class="py-4 px-5 font-display font-bold text-sm">Host CSS Isolation</td>
+              <td class="py-4 px-5 font-mono font-bold text-[#E6391E]">Encapsulated Shadow DOM</td>
+              <td class="py-4 px-5">Iframe only (Cannot touch DOM)</td>
+              <td class="py-4 px-5">Breaks on client auth session</td>
             </tr>
-            <tr>
-              <td class="py-3 px-4 font-semibold text-white">Infrastructure Cost per User</td>
-              <td class="py-3 px-4 text-emerald-400 font-bold">Lightweight WebSocket Relay</td>
-              <td class="py-3 px-4">Low (Text tokens)</td>
-              <td class="py-3 px-4">Very High (1 container/VM per user)</td>
+            <tr class="hover:bg-[#0A0A0A]/5">
+              <td class="py-4 px-5 font-display font-bold text-sm">Infrastructure Cost per User</td>
+              <td class="py-4 px-5 font-mono font-bold text-[#E6391E]">~$0.015/min (~80% Gross Margin)</td>
+              <td class="py-4 px-5">Low (Text tokens)</td>
+              <td class="py-4 px-5">Very High (1 container/VM per user)</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <div class="flex justify-between items-center pt-4">
-        <a href="test-demo.html" class="text-xs font-semibold text-slate-400 hover:text-white">← Back to Overview Hub</a>
-        <a href="pricing.html" id="cta-to-pricing" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition">
-          Next: Explore Pricing &amp; ROI Calculator →
+        <a href="test-demo.html" class="font-mono text-xs uppercase tracking-[0.15em] text-[#0A0A0A]/70 hover:text-[#0A0A0A]">← Back to Overview Hub</a>
+        <a href="pricing.html" id="cta-to-pricing" class="px-6 py-3 bg-[#0A0A0A] hover:bg-[#E6391E] text-white rounded-full font-display text-xs font-semibold uppercase tracking-wider transition">
+          Next: Pricing &amp; Credit Metering →
         </a>
       </div>
     </section>
@@ -200,7 +200,7 @@
       ],
       highlightTarget: {
         selector: '#benchmark-table',
-        explanation: 'WebOrient achieves ~310ms voice-to-action latency without costly cloud browser VMs'
+        explanation: 'WebOrient achieves ~310ms voice-to-action latency with ~80% gross SaaS margin'
       },
       tourSteps: [
         { selector: '#subsystem-tabs', explanation: '1. Five-Layer Runtime Explorer', dwellMs: 900 },

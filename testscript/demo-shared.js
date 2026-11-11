@@ -1,37 +1,45 @@
 /**
- * WebOrient Multi-Page Demo Shared Shell (v0.5.0 — Minimal Siri-Like Waveform & Assist Toggle)
- * - Zero site hijacking: Completely removes the big right-side panel and debug action logs.
- * - Minimal Assist Toggle: Sleek floating glassmorphic pill button in the bottom corner.
- * - Dynamic Siri-Like Waveform: Smooth organic soundwave animation that lights up and pulses
- *   when listening to user speech or when the Gemini Live model is speaking.
- * - Pure Co-Browsing: Only the Assist Toggle, Siri Waveform, and Ghost Cursor ever touch the site.
+ * WebOrient Multi-Page Demo Shared Shell (v0.6.0 — DeployMate Signature Design System)
+ * - Exact DeployMate design.md visual language: Paper (#FFFFFF), Ink (#0A0A0A), Signal (#E6391E)
+ * - Official DeployMate signature stacked SVG logo in header and footer
+ * - Minimal Siri-Like Waveform & Assist Toggle (Shadow DOM & Light DOM synchronized)
+ * - Substantive component resolution & viewport auto-centering
  */
 import { WebOrient } from '../src/sdk/weborient.js';
 
 const PAGES = [
-  { id: 'home', file: 'test-demo.html', route: '/', label: 'Overview Hub', badge: 'Home' },
-  { id: 'features', file: 'features.html', route: '/features', label: 'Architecture & Benchmarks', badge: '5 Layers' },
-  { id: 'pricing', file: 'pricing.html', route: '/pricing', label: 'Pricing & ROI Calculator', badge: 'Interactive' },
-  { id: 'docs', file: 'docs.html', route: '/docs', label: 'Developer Docs & API', badge: '11 Tools' },
-  { id: 'contact', file: 'contact.html', route: '/contact', label: 'Enterprise Intake Form', badge: 'Voice Fill' }
+  { id: 'home', file: 'test-demo.html', route: '/', label: 'Overview Hub', badge: '01' },
+  { id: 'features', file: 'features.html', route: '/features', label: 'Architecture', badge: '02' },
+  { id: 'pricing', file: 'pricing.html', route: '/pricing', label: 'Pricing & ROI', badge: '03' },
+  { id: 'docs', file: 'docs.html', route: '/docs', label: 'Docs & SDK', badge: '04' },
+  { id: 'contact', file: 'contact.html', route: '/contact', label: 'Enterprise', badge: '05' }
 ];
 
 export function initMultiPageDemo(pageConfig = {}) {
   const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
   const activePage = PAGES.find(p => p.file === currentFile) || PAGES[0];
 
-  // 1. Mount Clean Multi-Page Top Navigation Header
+  // 1. Inject DeployMate design.md CSS Variables & Architectural Grid Utilities
+  injectDeployMateBaseStyles();
+
+  // 2. Mount DeployMate Architectural Header & Sub-Navigation
   mountGlobalHeader(activePage, pageConfig.sectionLinks || []);
 
-  // 2. Mount Minimal Siri-Like Waveform & Assist Toggle
+  // 3. Mount DeployMate Architectural Footer
+  mountGlobalFooter();
+
+  // 4. Mount Minimal Siri-Like Waveform & Assist Toggle
   mountMinimalAssistWidget(activePage);
 
-  // 3. Initialize WebOrient SDK
+  // 5. Initialize WebOrient SDK with DeployMate Signal (#E6391E) & Ink (#0A0A0A)
   const weborient = new WebOrient({
-    themeColor: '#6366f1',
-    accentColor: '#ec4899',
-    cursorStyle: 'modern-glow',
+    siteKey: 'wo_live_deploymate_demo',
+    siteId: 'deploymate-weborient-showcase',
+    themeColor: '#E6391E',
+    accentColor: '#0A0A0A',
+    cursorStyle: 'deploymate-signal',
     manifestUrl: '../config/sample-manifest.json',
+    mountWidget: false,
     onEvent: (type, detail) => {
       if (type === 'status') {
         syncAssistUI(detail.status === 'connected', 'idle');
@@ -49,7 +57,7 @@ export function initMultiPageDemo(pageConfig = {}) {
   });
   window.weborient = weborient;
 
-  // 4. Wire Interactive Page Widgets
+  // 6. Wire Interactive Page Widgets
   wireGenericTabs(weborient);
   wireGenericCarousels(weborient);
   wireAssistToggleActions(weborient, activePage);
@@ -74,22 +82,77 @@ export function addPersistentLog(action, details) {
   console.log(`[WebOrient Log] ${action}:`, details);
 }
 
+function injectDeployMateBaseStyles() {
+  if (document.getElementById('deploymate-design-system-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'deploymate-design-system-styles';
+  style.textContent = `
+    :root {
+      --color-paper: #FFFFFF;
+      --color-ink: #0A0A0A;
+      --color-signal: #E6391E;
+      --color-signal-deep: #C90C0F;
+      --font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: "Fira Code", ui-monospace, SFMono-Regular, monospace;
+    }
+    body {
+      background-color: var(--color-paper);
+      color: var(--color-ink);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    .font-display {
+      font-family: var(--font-display);
+      letter-spacing: -0.03em;
+    }
+    .font-mono {
+      font-family: var(--font-mono);
+    }
+    .dm-grid-bg {
+      background-size: 48px 48px;
+      background-image:
+        linear-gradient(to right, rgba(10, 10, 10, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(10, 10, 10, 0.04) 1px, transparent 1px);
+    }
+    .dm-row-hover {
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+    .dm-row-hover:hover {
+      background-color: #0A0A0A;
+      color: #FFFFFF;
+    }
+    .dm-row-hover:hover .dm-muted {
+      color: rgba(255, 255, 255, 0.72) !important;
+    }
+    .dm-row-hover:hover .dm-badge {
+      border-color: rgba(255, 255, 255, 0.35) !important;
+      color: #FFFFFF !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 function mountGlobalHeader(activePage, sectionLinks) {
+  const existing = document.getElementById('global-site-header');
+  if (existing) existing.remove();
+
   const header = document.createElement('header');
   header.id = 'global-site-header';
-  header.className = 'sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80';
+  header.className = 'sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-[#0A0A0A]';
 
   const navItemsHtml = PAGES.map(p => {
     const isCurrent = p.id === activePage.id;
     return `
-      <a href="${p.file}" id="nav-link-${p.id}" data-page-file="${p.file}" class="px-3.5 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 ${
+      <a href="${p.file}" id="nav-link-${p.id}" data-page-file="${p.file}" class="px-3.5 py-2 text-xs font-mono uppercase tracking-[0.12em] transition-colors flex items-center gap-2 border ${
         isCurrent
-          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25'
-          : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+          ? 'bg-[#0A0A0A] text-white border-[#0A0A0A] font-medium'
+          : 'bg-white text-[#0A0A0A]/75 border-transparent hover:border-[#0A0A0A] hover:text-[#0A0A0A]'
       }">
         <span>${p.label}</span>
-        <span data-visit-badge="${p.file}" class="text-[10px] px-1.5 py-0.5 rounded-full ${
-          isCurrent ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-800 text-slate-400'
+        <span data-visit-badge="${p.file}" class="text-[10px] px-1.5 py-0.5 font-mono ${
+          isCurrent ? 'bg-[#E6391E] text-white' : 'bg-[#0A0A0A]/5 text-[#0A0A0A]/60'
         }">${p.badge}</span>
       </a>
     `;
@@ -97,13 +160,13 @@ function mountGlobalHeader(activePage, sectionLinks) {
 
   const subNavHtml = sectionLinks.length > 0
     ? `
-      <div class="bg-slate-900/70 border-t border-slate-800/60 px-6 py-2">
-        <div class="max-w-6xl mx-auto flex flex-wrap items-center gap-2 text-[11px]">
-          <span class="text-slate-400 font-mono uppercase tracking-wider mr-1">On this page (${activePage.file}):</span>
-          ${sectionLinks.map(s => `
-            <button type="button" data-section-target="${s.selector}" class="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-indigo-600 hover:text-white text-slate-300 border border-slate-700/60 transition cursor-pointer flex items-center gap-1.5 active:scale-95">
+      <div class="bg-[#0A0A0A] text-white border-t border-[#0A0A0A] px-6 md:px-12 py-2.5">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center gap-2 text-[11px]">
+          <span class="text-[#E6391E] font-mono uppercase tracking-[0.2em] mr-2">INDEX // ${activePage.file.toUpperCase()}</span>
+          ${sectionLinks.map((s, idx) => `
+            <button type="button" data-section-target="${s.selector}" class="px-3 py-1 bg-white/5 hover:bg-[#E6391E] text-white/85 hover:text-white border border-white/15 hover:border-[#E6391E] transition-colors cursor-pointer flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em]">
+              <span class="text-[#E6391E] group-hover:text-white">0${idx + 1}</span>
               <span>${s.label}</span>
-              <span class="text-[9px] text-indigo-400 font-mono">📍</span>
             </button>
           `).join('')}
         </div>
@@ -112,20 +175,18 @@ function mountGlobalHeader(activePage, sectionLinks) {
     : '';
 
   header.innerHTML = `
-    <div class="max-w-6xl mx-auto px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
-      <a href="test-demo.html" class="flex items-center gap-2.5 group">
-        <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-pink-500 flex items-center justify-center font-black text-white text-sm shadow-md">
-          W
-        </div>
-        <div>
-          <div class="font-extrabold text-sm tracking-tight text-white flex items-center gap-2">
-            <span>Acme WebOrient</span>
-            <span class="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full">v0.5 Minimal</span>
+    <div class="max-w-7xl mx-auto px-6 md:px-12 h-20 flex flex-wrap items-center justify-between gap-4">
+      <a href="test-demo.html" class="flex items-center gap-3.5 group" aria-label="DeployMate WebOrient Home">
+        <img src="deploymate-stacked-logo.svg" alt="DeployMate" class="h-11 w-auto object-contain transition-transform duration-300 group-hover:scale-105" />
+        <div class="border-l border-[#0A0A0A]/20 pl-3.5">
+          <div class="font-display font-bold text-sm tracking-tight text-[#0A0A0A] flex items-center gap-2">
+            <span>WEBORIENT</span>
+            <span class="text-[9px] font-mono uppercase tracking-[0.18em] px-2 py-0.5 bg-[#E6391E] text-white">LIVE SDK v1.0</span>
           </div>
-          <div class="text-[10px] text-slate-400">Non-Intrusive Voice Co-Browsing SDK</div>
+          <div class="text-[10px] font-mono uppercase tracking-[0.15em] text-[#0A0A0A]/55">DeployMate Voice Co-Pilot</div>
         </div>
       </a>
-      <nav aria-label="Primary Multi-Page Navigation" class="flex flex-wrap items-center gap-1.5">
+      <nav aria-label="Primary Multi-Page Navigation" class="flex flex-wrap items-center gap-1">
         ${navItemsHtml}
       </nav>
     </div>
@@ -137,7 +198,7 @@ function mountGlobalHeader(activePage, sectionLinks) {
   header.querySelectorAll('[data-section-target]').forEach(btn => {
     btn.addEventListener('click', () => {
       const sel = btn.getAttribute('data-section-target');
-      const label = btn.textContent.trim().replace('📍', '').trim();
+      const label = btn.textContent.trim();
       if (window.weborient) {
         window.weborient.handleToolCall('move_and_highlight', {
           selector: sel,
@@ -146,6 +207,34 @@ function mountGlobalHeader(activePage, sectionLinks) {
       }
     });
   });
+}
+
+function mountGlobalFooter() {
+  const existing = document.getElementById('global-site-footer');
+  if (existing) existing.remove();
+
+  const footer = document.createElement('footer');
+  footer.id = 'global-site-footer';
+  footer.className = 'border-t border-[#0A0A0A] bg-white text-[#0A0A0A] mt-20';
+  footer.innerHTML = `
+    <div class="max-w-7xl mx-auto px-6 md:px-12 py-12 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
+      <div class="flex items-center gap-4">
+        <img src="deploymate-stacked-logo.svg" alt="DeployMate" class="h-10 w-auto object-contain" />
+        <div class="text-xs text-[#0A0A0A]/65 max-w-sm">
+          <div class="font-display font-bold text-[#0A0A0A] uppercase tracking-tight">DeployMate WebOrient Cloud</div>
+          <div>Zero-Hijack Shadow DOM Co-Browsing &amp; Multimodal Voice Agent</div>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-6 font-mono text-[11px] uppercase tracking-[0.15em] text-[#0A0A0A]/60">
+        <a href="test-demo.html" class="hover:text-[#E6391E] transition-colors">01 Overview</a>
+        <a href="features.html" class="hover:text-[#E6391E] transition-colors">02 Architecture</a>
+        <a href="pricing.html" class="hover:text-[#E6391E] transition-colors">03 Pricing</a>
+        <a href="docs.html" class="hover:text-[#E6391E] transition-colors">04 SDK Docs</a>
+        <a href="contact.html" class="hover:text-[#E6391E] transition-colors">05 Intake</a>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(footer);
 }
 
 function updateHeaderVisitedBadges(memState) {
@@ -161,9 +250,7 @@ function updateHeaderVisitedBadges(memState) {
 }
 
 /**
- * Injects the minimal Siri-like Waveform & Assist Toggle.
- * Replaces the giant right-side panel with a discrete floating pill (~50px)
- * that expands into an organic Siri audio waveform when active.
+ * Injects the minimal Siri-like Waveform & Assist Toggle styled in DeployMate Ink (#0A0A0A) & Signal (#E6391E).
  */
 function mountMinimalAssistWidget(activePage) {
   const existing = document.getElementById('weborient-assist-widget');
@@ -177,28 +264,27 @@ function mountMinimalAssistWidget(activePage) {
   widget.innerHTML = `
     <style>
       @keyframes siri-wave {
-        0%, 100% { transform: scaleY(0.3); opacity: 0.6; }
+        0%, 100% { transform: scaleY(0.28); opacity: 0.65; }
         50% { transform: scaleY(1.0); opacity: 1; }
       }
       .siri-bar {
-        width: 3.5px;
-        height: 22px;
+        width: 3px;
+        height: 20px;
         border-radius: 999px;
         transform-origin: center;
-        animation: siri-wave 1.1s ease-in-out infinite;
+        animation: siri-wave 1.05s ease-in-out infinite;
       }
-      .siri-bar:nth-child(1) { animation-delay: 0.0s; background: #6366f1; }
-      .siri-bar:nth-child(2) { animation-delay: 0.15s; background: #a855f7; height: 26px; }
-      .siri-bar:nth-child(3) { animation-delay: 0.3s; background: #ec4899; height: 32px; }
-      .siri-bar:nth-child(4) { animation-delay: 0.45s; background: #38bdf8; height: 28px; }
-      .siri-bar:nth-child(5) { animation-delay: 0.6s; background: #34d399; height: 20px; }
+      .siri-bar:nth-child(1) { animation-delay: 0.0s; background: #E6391E; }
+      .siri-bar:nth-child(2) { animation-delay: 0.15s; background: #FF6B4A; height: 25px; }
+      .siri-bar:nth-child(3) { animation-delay: 0.3s; background: #FFFFFF; height: 30px; }
+      .siri-bar:nth-child(4) { animation-delay: 0.45s; background: #FF6B4A; height: 24px; }
+      .siri-bar:nth-child(5) { animation-delay: 0.6s; background: #E6391E; height: 18px; }
     </style>
 
     <div id="assist-pill-container" class="relative group flex items-center">
-      <!-- Minimal Assist Floating Button / Active Waveform Capsule -->
-      <button id="btn-assist-toggle" type="button" aria-label="Toggle WebOrient Voice Assist" class="flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-slate-900/95 hover:bg-slate-800/95 border border-slate-700/80 text-white shadow-2xl backdrop-blur-xl transition-all duration-300 hover:scale-105 active:scale-95 shadow-indigo-500/10">
+      <button id="btn-assist-toggle" type="button" aria-label="Toggle WebOrient Voice Assist" class="flex items-center gap-3 px-4 py-2.5 rounded-full bg-[#0A0A0A] hover:bg-[#181818] border border-[#0A0A0A] text-white shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer">
         <!-- Inactive Mic Icon -->
-        <div id="assist-idle-icon" class="w-6 h-6 rounded-full bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300">
+        <div id="assist-idle-icon" class="w-7 h-7 rounded-full bg-[#E6391E] flex items-center justify-center text-white shadow-sm">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
             <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
@@ -216,24 +302,24 @@ function mountMinimalAssistWidget(activePage) {
         </div>
 
         <!-- Label / State -->
-        <div class="flex flex-col text-left">
-          <span id="assist-label" class="text-xs font-bold tracking-tight text-white flex items-center gap-1.5">
-            <span>Assist</span>
-            <span id="assist-status-dot" class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+        <div class="flex flex-col text-left pr-1">
+          <span id="assist-label" class="text-[11px] font-mono uppercase tracking-[0.14em] font-semibold text-white flex items-center gap-1.5">
+            <span>WebOrient</span>
+            <span id="assist-status-dot" class="w-1.5 h-1.5 rounded-full bg-[#E6391E]"></span>
           </span>
-          <span id="assist-sublabel" class="text-[9px] text-slate-400 font-medium">Click to talk</span>
+          <span id="assist-sublabel" class="text-[9px] font-mono uppercase tracking-[0.1em] text-white/60">Click to co-browse</span>
         </div>
       </button>
 
-      <!-- Language selector dropdown (discreet popover on hover/click) -->
-      <div id="assist-lang-popover" class="hidden absolute bottom-full right-0 mb-2 p-2 bg-slate-900/95 border border-slate-800 rounded-xl shadow-xl backdrop-blur-md text-[11px] w-44 space-y-1">
-        <div class="text-[9px] font-mono uppercase text-slate-400 px-1.5 pt-0.5">Voice Language</div>
-        <select id="quick-lang-select" class="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-white focus:outline-none">
-          <option value="en-IN">English (India/Global)</option>
-          <option value="hinglish">Hinglish (Hindi + Eng)</option>
-          <option value="hi-IN">Hindi (हिन्दी)</option>
-          <option value="es-ES">Español (Spanish)</option>
-          <option value="fr-FR">Français (French)</option>
+      <!-- Language selector dropdown (right-click popover) -->
+      <div id="assist-lang-popover" class="hidden absolute bottom-full right-0 mb-2 p-2.5 bg-[#0A0A0A] border border-white/20 shadow-2xl text-[11px] w-48 space-y-1.5">
+        <div class="text-[9px] font-mono uppercase tracking-[0.18em] text-[#E6391E] px-1">Session Voice Language</div>
+        <select id="quick-lang-select" class="w-full px-2 py-1.5 bg-white/10 border border-white/20 text-[11px] font-mono text-white focus:outline-none">
+          <option value="en-IN" class="text-black">English (India/Global)</option>
+          <option value="hinglish" class="text-black">Hinglish (Hindi + Eng)</option>
+          <option value="hi-IN" class="text-black">Hindi (हिन्दी)</option>
+          <option value="es-ES" class="text-black">Español (Spanish)</option>
+          <option value="fr-FR" class="text-black">Français (French)</option>
         </select>
       </div>
     </div>
@@ -248,7 +334,6 @@ function wireAssistToggleActions(weborient, activePage) {
   const langPopover = document.getElementById('assist-lang-popover');
 
   btnToggle.addEventListener('click', async (e) => {
-    // If clicking right edge, toggle language popover
     if (e.target.closest('#quick-lang-select')) return;
 
     if (!weborient.client) {
@@ -267,7 +352,6 @@ function wireAssistToggleActions(weborient, activePage) {
     }
   });
 
-  // Long press / right-click or secondary click opens language popover
   btnToggle.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     langPopover.classList.toggle('hidden');
@@ -289,7 +373,6 @@ function syncAssistUI(connected, state = 'idle') {
   const btn = document.getElementById('btn-assist-toggle');
   const idleIcon = document.getElementById('assist-idle-icon');
   const waveform = document.getElementById('assist-waveform');
-  const label = document.getElementById('assist-label');
   const sublabel = document.getElementById('assist-sublabel');
   const dot = document.getElementById('assist-status-dot');
 
@@ -299,30 +382,30 @@ function syncAssistUI(connected, state = 'idle') {
     idleIcon.classList.add('hidden');
     waveform.classList.remove('hidden');
     waveform.style.display = 'flex';
-    btn.className = 'flex items-center gap-3 px-4 py-2.5 rounded-full bg-slate-900/95 hover:bg-slate-800/95 border border-indigo-500/60 text-white shadow-2xl backdrop-blur-xl transition-all duration-300 ring-2 ring-indigo-500/30';
+    btn.className = 'flex items-center gap-3 px-4 py-2.5 rounded-full bg-[#0A0A0A] border-2 border-[#E6391E] text-white shadow-2xl transition-all duration-300 cursor-pointer';
 
     if (state === 'speaking') {
-      sublabel.textContent = 'Speaking...';
-      dot.className = 'w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse';
+      sublabel.textContent = 'AI Co-Browsing...';
+      dot.className = 'w-1.5 h-1.5 rounded-full bg-[#E6391E] animate-ping';
     } else if (state === 'listening') {
-      sublabel.textContent = 'Listening...';
+      sublabel.textContent = 'Listening Live...';
       dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
     } else {
       sublabel.textContent = 'Live Session';
-      dot.className = 'w-1.5 h-1.5 rounded-full bg-indigo-400';
+      dot.className = 'w-1.5 h-1.5 rounded-full bg-[#E6391E]';
     }
   } else {
     idleIcon.classList.remove('hidden');
     waveform.classList.add('hidden');
     waveform.style.display = 'none';
-    btn.className = 'flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-slate-900/95 hover:bg-slate-800/95 border border-slate-700/80 text-white shadow-2xl backdrop-blur-xl transition-all duration-300 hover:scale-105 active:scale-95';
+    btn.className = 'flex items-center gap-3 px-4 py-2.5 rounded-full bg-[#0A0A0A] hover:bg-[#181818] border border-[#0A0A0A] text-white shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer';
 
     if (state === 'offline') {
       sublabel.textContent = 'Relay offline';
       dot.className = 'w-1.5 h-1.5 rounded-full bg-amber-500';
     } else {
-      sublabel.textContent = 'Click to talk';
-      dot.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+      sublabel.textContent = 'Click to co-browse';
+      dot.className = 'w-1.5 h-1.5 rounded-full bg-[#E6391E]';
     }
   }
 }
@@ -334,12 +417,12 @@ function wireGenericTabs(weborient) {
       tab.addEventListener('click', () => {
         tabs.forEach(t => {
           t.setAttribute('aria-selected', 'false');
-          t.classList.remove('active', 'bg-indigo-600', 'text-white');
-          t.classList.add('text-slate-400');
+          t.classList.remove('active', 'bg-[#0A0A0A]', 'bg-[#E6391E]', 'text-white');
+          t.classList.add('bg-white', 'text-[#0A0A0A]');
         });
         tab.setAttribute('aria-selected', 'true');
-        tab.classList.add('active', 'bg-indigo-600', 'text-white');
-        tab.classList.remove('text-slate-400');
+        tab.classList.add('active', 'bg-[#0A0A0A]', 'text-white');
+        tab.classList.remove('bg-white', 'text-[#0A0A0A]');
 
         const targetPanelId = tab.getAttribute('data-target-panel');
         if (targetPanelId) {
@@ -373,7 +456,7 @@ function wireGenericCarousels(weborient) {
       current = (idx + slides.length) % slides.length;
       slides.forEach((s, i) => s.classList.toggle('hidden', i !== current));
       const counter = carousel.parentElement?.querySelector('[data-carousel-counter]');
-      if (counter) counter.innerText = `Slide ${current + 1} of ${slides.length}`;
+      if (counter) counter.innerText = `0${current + 1} / 0${slides.length}`;
       const parentSec = carousel.closest('section[id]');
       if (parentSec && weborient) {
         weborient.memory.markOriented({ selector: `#${parentSec.id}`, title: `Viewed carousel slide ${current + 1}` });
