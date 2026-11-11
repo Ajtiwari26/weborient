@@ -1,0 +1,28 @@
+name: Keep-Alive Relay Ping
+
+on:
+  schedule:
+    # Ping every 10 minutes to prevent Render free instance cold sleep
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping WebOrient Relay Health & Keep Instance Warm
+        run: |
+          echo "Pinging WebOrient Live Relay to prevent sleep..."
+          # Primary vanity domain
+          PRIMARY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "https://relay.deploymate.in/ping" || echo "failed")
+          echo "relay.deploymate.in/ping status: $PRIMARY_STATUS"
+          
+          # Render canonical fallback
+          FALLBACK_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "https://weborient-relay.onrender.com/ping" || echo "failed")
+          echo "weborient-relay.onrender.com/ping status: $FALLBACK_STATUS"
+          
+          if [ "$PRIMARY_STATUS" != "200" ] && [ "$FALLBACK_STATUS" != "200" ]; then
+            echo "Both endpoints failed to respond with HTTP 200"
+            exit 1
+          fi
+          echo "Keep-alive ping successful!"

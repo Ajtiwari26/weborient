@@ -43,6 +43,7 @@ API_KEY = os.getenv("GEMINI_LIVE_API_KEY") or os.getenv("GEMINI_API_KEY")
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.8-live")
 PORT = int(os.getenv("PORT", "8088"))
 MONGODB_URI = os.getenv("MONGODB_URI", "")
+SERVER_START_TIME = datetime.datetime.now(datetime.timezone.utc)
 
 if not API_KEY:
     print("[ERROR] GEMINI_LIVE_API_KEY not found in environment or .env file.")
@@ -617,13 +618,17 @@ async def process_http_request(*args):
     path = parsed.path.rstrip("/") or "/"
     qs = parse_qs(parsed.query)
 
-    if path == "/health":
+    if path in ("/health", "/ping", "/healthz", "/"):
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        uptime_seconds = int((now_utc - SERVER_START_TIME).total_seconds()) if "SERVER_START_TIME" in globals() else 0
         return build_http_response(200, {
             "status": "ok",
             "service": "weborient-relay",
             "model": MODEL_NAME,
             "mongoConnected": mongo_db is not None,
-            "tenantCount": len(TENANT_STORE)
+            "tenantCount": len(TENANT_STORE),
+            "uptimeSeconds": uptime_seconds,
+            "timestamp": now_utc.isoformat()
         })
 
     if path == "/api/tenants":
