@@ -2,7 +2,7 @@ services:
   - type: web
     name: weborient-relay
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python3 src/relay/weborient_relay.py
     healthCheckPath: /health
