@@ -55,6 +55,14 @@
       "destination": "/dist/weborient.bundle.js"
     },
     {
+      "source": "/demo-shared.js",
+      "destination": "/testscript/demo-shared.js"
+    },
+    {
+      "source": "/deploymate-stacked-logo.svg",
+      "destination": "/testscript/deploymate-stacked-logo.svg"
+    },
+    {
       "source": "/",
       "destination": "/testscript/test-demo"
     },

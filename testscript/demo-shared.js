@@ -483,7 +483,7 @@ export function initPortalDashboard(weborient) {
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         const wsHost = isLocal ? 'localhost:8088' : 'weborient-relay.onrender.com';
         const ws = new WebSocket(`${wsProto}//${wsHost}/?mode=portal`);
-        const timer = setTimeout(() => { ws.close(); resolve(null); }, 1600);
+        const timer = setTimeout(() => { ws.close(); resolve(null); }, 6000);
         ws.onopen = () => ws.send(JSON.stringify(payload));
         ws.onmessage = (ev) => {
           clearTimeout(timer);
