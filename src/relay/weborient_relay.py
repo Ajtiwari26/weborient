@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
-WebOrient by DeployMate — Multi-Tenant Live Relay Gateway (`src/relay/weborient_relay.py` v0.5.0)
-- Multi-Tenant `siteKey` & HTTP `Origin` Verification (`config/tenants.json`)
-- Real-Time Credit Balance Gate & 30-Second Atomic Credit Metering Loop
-- Persistent Cross-Page & Refresh-Safe Session Memory (`config/.session_store.json`)
+WebOrient by DeployMate — Multi-Tenant Live Relay Gateway (`src/relay/weborient_relay.py` v1.0.0)
+- MongoDB Atlas Persistence (`MONGODB_URI` -> `db('deploymate').collection('weborient_tenants')` & `'weborient_sessions'`)
+  with automatic local JSON fallback (`config/tenants.json` & `config/.session_store.json`)
+- Built-in HTTP REST & Health Endpoints on the same port (`/health`, `/api/tenants`, `/api/tenants/register`, `/api/tenants/credits`)
+- Multi-Tenant `siteKey` & HTTP `Origin` Verification
+- Real-Time Credit Balance Gate & 30-Second Atomic Credit Metering Loop with Low-Balance Wrap-Up
 - Bridges 16kHz Mic PCM <-> Gemini 3.8 Live API <-> 24kHz Audio + 11 DOM Function Tools
 """
 import asyncio
 import base64
+import datetime
 import json
 import os
+import secrets
 import sys
+from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -18,18 +23,26 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SESSION_CACHE_FILE = PROJECT_ROOT / "config" / ".session_store.json"
 TENANTS_FILE = PROJECT_ROOT / "config" / "tenants.json"
 
-env_file = PROJECT_ROOT / ".env"
-if env_file.exists():
-    with open(env_file) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ[k.strip()] = v.strip().strip('"').strip("'")
+# Load environment from weborient/.env and optionally DeployMate/.env for shared MONGODB_URI
+for candidate_env in [PROJECT_ROOT / ".env", PROJECT_ROOT.parent / "DeployMate" / ".env"]:
+    if candidate_env.exists():
+        try:
+            with open(candidate_env, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip('"').strip("'")
+                        if k not in os.environ or not os.environ[k]:
+                            os.environ[k] = v
+        except Exception:
+            pass
 
 API_KEY = os.getenv("GEMINI_LIVE_API_KEY") or os.getenv("GEMINI_API_KEY")
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.8-live")
 PORT = int(os.getenv("PORT", "8088"))
+MONGODB_URI = os.getenv("MONGODB_URI", "")
 
 if not API_KEY:
     print("[ERROR] GEMINI_LIVE_API_KEY not found in environment or .env file.")
@@ -41,8 +54,20 @@ try:
     from google.genai import types
 except ImportError as e:
     print(f"[ERROR] Missing required libraries: {e}")
-    print("Install with: pip install websockets google-genai")
+    print("Install with: pip install -r requirements.txt")
     sys.exit(1)
+
+# Optional MongoDB Atlas driver (falls back to JSON files if pymongo is not installed or offline)
+mongo_db = None
+if MONGODB_URI:
+    try:
+        from pymongo import MongoClient
+        mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=3500)
+        mongo_db = mongo_client["deploymate"]
+        print("[RELAY] 🍃 Connected to MongoDB Atlas database: 'deploymate'")
+    except Exception as e:
+        print(f"[RELAY] ⚠️ MongoDB Atlas unavailable ({e}), using local JSON store fallback.")
+        mongo_db = None
 
 
 def load_json_file(path: Path) -> dict:
@@ -66,22 +91,172 @@ SESSION_MEMORY_STORE = load_json_file(SESSION_CACHE_FILE)
 TENANT_STORE = load_json_file(TENANTS_FILE)
 
 
+def sync_seed_tenants_to_mongo():
+    """Seeds default tenants from config/tenants.json into MongoDB Atlas if not present."""
+    if mongo_db is None:
+        return
+    try:
+        col = mongo_db["weborient_tenants"]
+        for key, tenant in TENANT_STORE.items():
+            col.update_one(
+                {"siteKey": key},
+                {"$setOnInsert": {**tenant, "siteKey": key}},
+                upsert=True
+            )
+    except Exception as e:
+        print(f"[WARN] Mongo tenant seed skipped: {e}")
+
+
+sync_seed_tenants_to_mongo()
+
+
+def get_tenant(site_key: str) -> dict | None:
+    global TENANT_STORE
+    TENANT_STORE = load_json_file(TENANTS_FILE) or TENANT_STORE
+
+    if mongo_db is not None:
+        try:
+            doc = mongo_db["weborient_tenants"].find_one(
+                {"$or": [{"siteKey": site_key}, {"siteId": site_key}]},
+                {"_id": 0}
+            )
+            if doc:
+                TENANT_STORE[doc["siteKey"]] = doc
+                return doc
+        except Exception:
+            pass
+
+    tenant = TENANT_STORE.get(site_key)
+    if not tenant:
+        for t in TENANT_STORE.values():
+            if t.get("siteId") == site_key:
+                return t
+    return tenant
+
+
+def list_all_tenants() -> list[dict]:
+    global TENANT_STORE
+    TENANT_STORE = load_json_file(TENANTS_FILE) or TENANT_STORE
+    if mongo_db is not None:
+        try:
+            docs = list(mongo_db["weborient_tenants"].find({}, {"_id": 0}).sort("createdAt", -1).limit(100))
+            if docs:
+                for d in docs:
+                    if "siteKey" in d:
+                        TENANT_STORE[d["siteKey"]] = d
+                return docs
+        except Exception:
+            pass
+    return list(TENANT_STORE.values())
+
+
+def register_new_tenant(
+    company_name: str,
+    domain: str,
+    email: str = "",
+    plan: str = "Starter ($29/mo)",
+    theme: str = "signal",
+    lang: str = "en-IN",
+    initial_credits: float = 25.0
+) -> dict:
+    global TENANT_STORE
+    TENANT_STORE = load_json_file(TENANTS_FILE) or TENANT_STORE
+
+    clean_domain = (
+        domain.strip()
+        .lower()
+        .replace("https://", "")
+        .replace("http://", "")
+        .split("/")[0]
+        .lstrip("www.")
+    ) or "localhost"
+
+    slug = "".join(c if c.isalnum() else "-" for c in company_name.lower()).strip("-") or "client"
+    token_hex = secrets.token_hex(6)
+    site_key = f"wo_live_{token_hex}"
+
+    theme_palette = {
+        "signal": {"primaryColor": "#E6391E", "accentColor": "#0A0A0A"},
+        "indigo": {"primaryColor": "#6366f1", "accentColor": "#ec4899"},
+        "emerald": {"primaryColor": "#10b981", "accentColor": "#0A0A0A"},
+        "ink": {"primaryColor": "#0A0A0A", "accentColor": "#E6391E"}
+    }.get(theme, {"primaryColor": "#E6391E", "accentColor": "#0A0A0A"})
+
+    tenant_doc = {
+        "siteKey": site_key,
+        "siteId": f"{slug}-{token_hex[:4]}",
+        "companyName": company_name.strip() or "DeployMate Customer",
+        "email": email.strip(),
+        "plan": plan,
+        "creditsMinutes": float(initial_credits),
+        "allowedOrigins": [
+            clean_domain,
+            f"www.{clean_domain}",
+            "localhost",
+            "127.0.0.1",
+            "weborient.deploymate.in",
+            "deploymate.in"
+        ],
+        "defaultLanguage": lang or "en-IN",
+        "theme": {
+            "name": theme,
+            **theme_palette,
+            "cursorStyle": "deploymate-signal"
+        },
+        "manifestFile": "sample-manifest.json",
+        "status": "active",
+        "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+
+    TENANT_STORE[site_key] = tenant_doc
+    save_json_file(TENANTS_FILE, TENANT_STORE)
+
+    if mongo_db is not None:
+        try:
+            mongo_db["weborient_tenants"].update_one(
+                {"siteKey": site_key},
+                {"$set": tenant_doc},
+                upsert=True
+            )
+        except Exception as e:
+            print(f"[WARN] Could not save tenant to MongoDB: {e}")
+
+    print(f"[RELAY] 🆕 Registered new tenant: {company_name} ({clean_domain}) -> {site_key}")
+    return tenant_doc
+
+
+def add_tenant_credits(site_key: str, minutes_to_add: float = 150.0) -> dict | None:
+    global TENANT_STORE
+    tenant = get_tenant(site_key)
+    if not tenant:
+        return None
+
+    real_key = tenant.get("siteKey", site_key)
+    current = float(tenant.get("creditsMinutes", 0.0))
+    updated = round(current + float(minutes_to_add), 2)
+    tenant["creditsMinutes"] = updated
+    TENANT_STORE[real_key] = tenant
+    save_json_file(TENANTS_FILE, TENANT_STORE)
+
+    if mongo_db is not None:
+        try:
+            mongo_db["weborient_tenants"].update_one(
+                {"siteKey": real_key},
+                {"$set": {"creditsMinutes": updated}}
+            )
+        except Exception as e:
+            print(f"[WARN] MongoDB credit top-up update failed: {e}")
+
+    print(f"[RELAY] 💳 Added +{minutes_to_add}m credits to {real_key} -> New balance: {updated}m")
+    return tenant
+
+
 def verify_tenant_and_origin(site_key: str, origin_header: str) -> tuple[bool, str, dict]:
     """
     Validates tenant siteKey, checks HTTP Origin against allowed domains,
     and verifies positive voice credit balance.
     """
-    global TENANT_STORE
-    TENANT_STORE = load_json_file(TENANTS_FILE) or TENANT_STORE
-
-    tenant = TENANT_STORE.get(site_key)
-    if not tenant:
-        # Check if site_id matches any registered tenant
-        for t in TENANT_STORE.values():
-            if t.get("siteId") == site_key:
-                tenant = t
-                break
-
+    tenant = get_tenant(site_key)
     if not tenant:
         return False, f"Invalid or unregistered siteKey '{site_key}'. Please register at weborient.deploymate.in", {}
 
@@ -92,7 +267,11 @@ def verify_tenant_and_origin(site_key: str, origin_header: str) -> tuple[bool, s
         matched = False
         for domain in allowed:
             clean_domain = domain.lower().lstrip("www.")
-            if origin_host == clean_domain or origin_host.endswith(f".{clean_domain}") or origin_host in ("localhost", "127.0.0.1"):
+            if (
+                origin_host == clean_domain
+                or origin_host.endswith(f".{clean_domain}")
+                or origin_host in ("localhost", "127.0.0.1")
+            ):
                 matched = True
                 break
         if not matched:
@@ -107,13 +286,27 @@ def verify_tenant_and_origin(site_key: str, origin_header: str) -> tuple[bool, s
 
 def deduct_tenant_credits(site_key: str, minutes_used: float = 0.5) -> float:
     global TENANT_STORE
-    if site_key in TENANT_STORE:
-        current = float(TENANT_STORE[site_key].get("creditsMinutes", 0.0))
-        updated = max(0.0, round(current - minutes_used, 2))
-        TENANT_STORE[site_key]["creditsMinutes"] = updated
-        save_json_file(TENANTS_FILE, TENANT_STORE)
-        return updated
-    return 250.0
+    tenant = get_tenant(site_key)
+    if not tenant:
+        return 0.0
+
+    real_key = tenant.get("siteKey", site_key)
+    current = float(tenant.get("creditsMinutes", 0.0))
+    updated = max(0.0, round(current - minutes_used, 2))
+    tenant["creditsMinutes"] = updated
+    TENANT_STORE[real_key] = tenant
+    save_json_file(TENANTS_FILE, TENANT_STORE)
+
+    if mongo_db is not None:
+        try:
+            mongo_db["weborient_tenants"].update_one(
+                {"siteKey": real_key},
+                {"$set": {"creditsMinutes": updated}}
+            )
+        except Exception:
+            pass
+
+    return updated
 
 
 def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> dict:
@@ -135,6 +328,15 @@ def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> di
             SESSION_MEMORY_STORE[session_id]["userLanguage"] = lang
 
     save_json_file(SESSION_CACHE_FILE, SESSION_MEMORY_STORE)
+    if mongo_db is not None:
+        try:
+            mongo_db["weborient_sessions"].update_one(
+                {"sessionId": session_id},
+                {"$set": {**SESSION_MEMORY_STORE[session_id], "updatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat()}},
+                upsert=True
+            )
+        except Exception:
+            pass
     return SESSION_MEMORY_STORE[session_id]
 
 
@@ -157,7 +359,7 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
                 route_info = f"{p.get('route')} (file: {p.get('file', p.get('route'))})"
                 pages_desc.append(f"- {p.get('title')} [{route_info}]: {p.get('summary')}")
                 for sec in p.get("sections", []):
-                    pages_desc.append(f"  * Section '{sec.get('title')}' ({sec.get('selector')}): {sec.get('description', '')}")
+                    pages_desc.append(f"  * Component '{sec.get('title')}' ({sec.get('selector')}): {sec.get('description', '')}")
 
             kb_desc = []
             for kb in manifest_data.get("knowledgeBase", []):
@@ -176,7 +378,7 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
         f"- USER GOAL / WANT: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
         f"- COMPLETED TO-DO ITEMS (Any order): {json.dumps(session_mem.get('completedTodoIds', []))}\n"
         f"- REMAINING TO-DO ITEMS: {json.dumps(session_mem.get('remainingTodos', [])[:6])}\n"
-        f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its selector so the user sees the actual component highlighted or clicked on screen while you speak."
+        f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its actual interactive component selector (NEVER highlight h1/h2 titles or headers)."
     )
 
     return prompt_text + manifest_context + memory_block
@@ -188,12 +390,12 @@ def get_gemini_tools():
             function_declarations=[
                 types.FunctionDeclaration(
                     name="move_and_highlight",
-                    description="Smoothly glides the Ghost Cursor to any DOM element being described, scrolls it into the center of the viewport, spotlights it, and marks its To-Do item complete.",
+                    description="Smoothly glides the Ghost Cursor to the actual interactive DOM component being described, scrolls it into the center of the viewport, spotlights it, and marks its To-Do item complete.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
-                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or accessible label of the element"),
-                            "explanation": types.Schema(type=types.Type.STRING, description="Concise explanation badge text displayed beside the element")
+                            "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or accessible label of the interactive component"),
+                            "explanation": types.Schema(type=types.Type.STRING, description="Concise explanation badge text displayed with boundary clearance beside the component")
                         },
                         required=["selector"]
                     )
@@ -246,7 +448,7 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="scroll_page",
-                    description="Smoothly scrolls the page up, down, to the top/bottom, or directly to a specific section or element.",
+                    description="Smoothly scrolls the page up, down, to the top/bottom, or directly to a specific component.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
@@ -271,12 +473,12 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="navigate_route",
-                    description="Navigates the website to another page route (e.g. 'pricing.html', 'features.html', 'docs.html', 'contact.html') while preserving session memory.",
+                    description="Navigates the website to another page route (e.g. 'pricing.html', 'features.html', 'docs.html', 'contact.html', 'dashboard.html') while preserving session memory.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
                             "path": types.Schema(type=types.Type.STRING, description="Target route path or HTML file"),
-                            "targetSelector": types.Schema(type=types.Type.STRING, description="Optional section selector to highlight after landing on the new page"),
+                            "targetSelector": types.Schema(type=types.Type.STRING, description="Optional component selector to highlight after landing on the new page"),
                             "explanation": types.Schema(type=types.Type.STRING, description="Explanation badge to show upon landing")
                         },
                         required=["path"]
@@ -294,12 +496,12 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="read_page_content",
-                    description="Extracts semantic text, headings, pricing details, FAQs, and manifest knowledge to answer any user question accurately while spotlighting the source section.",
+                    description="Extracts semantic text, headings, pricing details, FAQs, and manifest knowledge to answer any user question accurately while spotlighting the source component.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
                             "query": types.Schema(type=types.Type.STRING, description="Topic, keyword, or question to look up"),
-                            "selector": types.Schema(type=types.Type.STRING, description="Optional CSS selector of a specific section to read")
+                            "selector": types.Schema(type=types.Type.STRING, description="Optional CSS selector of a specific component to read")
                         }
                     )
                 ),
@@ -345,10 +547,126 @@ def get_gemini_tools():
     ]
 
 
+def build_http_response(status_code: int, payload: dict):
+    """Compatible with both websockets >=13 (Response object) and older versions (tuple)."""
+    body_bytes = json.dumps(payload, indent=2).encode("utf-8")
+    headers_list = [
+        ("Content-Type", "application/json; charset=utf-8"),
+        ("Content-Length", str(len(body_bytes))),
+        ("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token")
+    ]
+    if hasattr(websockets, "http11") and hasattr(websockets.http11, "Response"):
+        from websockets.datastructures import Headers
+        return websockets.http11.Response(
+            status_code,
+            HTTPStatus(status_code).phrase,
+            Headers(headers_list),
+            body_bytes
+        )
+    return (HTTPStatus(status_code), headers_list, body_bytes)
+
+
+async def process_http_request(*args):
+    """
+    Handles HTTP health checks and tenant onboarding REST requests on the same port
+    before WebSocket upgrade:
+    - GET /health
+    - GET /api/tenants
+    - GET /api/tenants/status?siteKey=wo_live_...
+    - GET /api/tenants/register?companyName=...&domain=...&email=...&plan=...&theme=...&lang=...
+    - GET /api/tenants/credits?siteKey=...&minutes=150
+    """
+    if len(args) == 2 and hasattr(args[1], "path"):
+        request = args[1]
+        raw_path = request.path
+        headers = request.headers
+    else:
+        raw_path = args[0]
+        headers = args[1]
+
+    upgrade = headers.get("Upgrade", "")
+    if upgrade and upgrade.lower() == "websocket":
+        return None
+
+    parsed = urlparse(raw_path)
+    path = parsed.path.rstrip("/") or "/"
+    qs = parse_qs(parsed.query)
+
+    if path == "/health":
+        return build_http_response(200, {
+            "status": "ok",
+            "service": "weborient-relay",
+            "model": MODEL_NAME,
+            "mongoConnected": mongo_db is not None,
+            "tenantCount": len(TENANT_STORE)
+        })
+
+    if path == "/api/tenants":
+        tenants = list_all_tenants()
+        return build_http_response(200, {"ok": True, "tenants": tenants})
+
+    if path == "/api/tenants/status":
+        site_key = qs.get("siteKey", ["wo_live_deploymate_demo"])[0]
+        tenant = get_tenant(site_key)
+        if not tenant:
+            return build_http_response(404, {"ok": False, "error": f"Tenant '{site_key}' not found"})
+        return build_http_response(200, {"ok": True, "tenant": tenant})
+
+    if path == "/api/tenants/register":
+        company = qs.get("companyName", ["My Store"])[0]
+        domain = qs.get("domain", ["localhost"])[0]
+        email = qs.get("email", [""])[0]
+        plan = qs.get("plan", ["Starter ($29/mo)"])[0]
+        theme = qs.get("theme", ["signal"])[0]
+        lang = qs.get("lang", ["en-IN"])[0]
+        credits = float(qs.get("credits", ["25.0"])[0])
+        tenant_doc = register_new_tenant(company, domain, email, plan, theme, lang, credits)
+        return build_http_response(201, {"ok": True, "tenant": tenant_doc})
+
+    if path == "/api/tenants/credits":
+        site_key = qs.get("siteKey", ["wo_live_deploymate_demo"])[0]
+        minutes = float(qs.get("minutes", ["150.0"])[0])
+        updated = add_tenant_credits(site_key, minutes)
+        if not updated:
+            return build_http_response(404, {"ok": False, "error": f"Tenant '{site_key}' not found"})
+        return build_http_response(200, {"ok": True, "tenant": updated})
+
+    return None
+
+
 async def handle_browser_client(websocket):
     raw_path = getattr(websocket, "path", "") or (websocket.request.path if hasattr(websocket, "request") and websocket.request else "/")
     parsed_url = urlparse(raw_path)
     qs = parse_qs(parsed_url.query)
+
+    # Support lightweight WebSocket admin/portal RPC if mode=portal
+    mode = qs.get("mode", [""])[0]
+    if mode == "portal":
+        try:
+            async for raw_msg in websocket:
+                req = json.loads(raw_msg)
+                action = req.get("tenantAction")
+                if action == "register":
+                    doc = register_new_tenant(
+                        req.get("companyName", "Client Store"),
+                        req.get("domain", "localhost"),
+                        req.get("email", ""),
+                        req.get("plan", "Starter ($29/mo)"),
+                        req.get("theme", "signal"),
+                        req.get("lang", "en-IN"),
+                        float(req.get("credits", 25.0))
+                    )
+                    await websocket.send(json.dumps({"ok": True, "action": "register", "tenant": doc}))
+                elif action == "addCredits":
+                    doc = add_tenant_credits(req.get("siteKey", "wo_live_deploymate_demo"), float(req.get("minutes", 150.0)))
+                    await websocket.send(json.dumps({"ok": Boolean(doc), "action": "addCredits", "tenant": doc}))
+                elif action == "list":
+                    await websocket.send(json.dumps({"ok": True, "action": "list", "tenants": list_all_tenants()}))
+        except Exception:
+            pass
+        return
 
     site_key = qs.get("siteKey", ["wo_live_deploymate_demo"])[0]
     site_id = qs.get("siteId", [site_key])[0]
@@ -558,21 +876,24 @@ async def handle_browser_client(websocket):
                 meter_task.cancel()
 
     except websockets.exceptions.ConnectionClosed:
-        print(f"[RELAY] Client {session_id} disconnected (session persisted in config/.session_store.json).")
+        print(f"[RELAY] Client {session_id} disconnected (session persisted).")
     except Exception as exc:
         print(f"[RELAY] Session error: {exc}")
 
 
 async def main():
     print("=================================================================")
-    print(" WebOrient by DeployMate — Multi-Tenant Relay Gateway (v0.5.0)")
+    print(" WebOrient by DeployMate — Multi-Tenant Relay Gateway (v1.0.0)")
     print(f" Target Model : {MODEL_NAME}")
+    print(f" Storage Mode : {'MongoDB Atlas (deploymate)' if mongo_db is not None else 'Local JSON (config/tenants.json)'}")
     print(f" WebSocket URI: ws://localhost:{PORT}?siteKey=wo_live_deploymate_demo")
+    print(f" HTTP Health  : http://localhost:{PORT}/health")
     print("=================================================================")
     async with websockets.serve(
         handle_browser_client,
         "0.0.0.0",
         PORT,
+        process_request=process_http_request,
         ping_interval=None,
         ping_timeout=None,
         max_size=10 * 1024 * 1024

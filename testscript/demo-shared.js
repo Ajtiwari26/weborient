@@ -13,7 +13,8 @@ const PAGES = [
   { id: 'features', file: 'features.html', route: '/features', label: 'Architecture' },
   { id: 'pricing', file: 'pricing.html', route: '/pricing', label: 'Pricing & ROI' },
   { id: 'docs', file: 'docs.html', route: '/docs', label: 'Developer Docs' },
-  { id: 'contact', file: 'contact.html', route: '/contact', label: 'Enterprise' }
+  { id: 'contact', file: 'contact.html', route: '/contact', label: 'Enterprise' },
+  { id: 'dashboard', file: 'dashboard.html', route: '/dashboard', label: 'Client Portal' }
 ];
 
 export function initMultiPageDemo(pageConfig = {}) {
@@ -441,4 +442,217 @@ function wireGenericCarousels(weborient) {
     if (nextBtn) nextBtn.addEventListener('click', () => show(current + 1));
     if (prevBtn) prevBtn.addEventListener('click', () => show(current - 1));
   });
+}
+
+/**
+ * Wires the Customer Onboarding & 1-Line Script Generator Portal (dashboard.html)
+ */
+export function initPortalDashboard(weborient) {
+  const form = document.getElementById('tenant-register-form');
+  if (!form) return;
+
+  let activeSiteKey = 'wo_live_deploymate_demo';
+  const codeEl = document.getElementById('generated-script-code');
+  const templateBase = codeEl ? codeEl.textContent : '';
+
+  function updateSnippetPreview(siteKey, domain, theme, lang, credits) {
+    activeSiteKey = siteKey;
+    if (codeEl && templateBase) {
+      codeEl.textContent = templateBase
+        .replace(/data-site-key="[^"]*"/, `data-site-key="${siteKey}"`)
+        .replace(/data-theme="[^"]*"/, `data-theme="${theme}"`)
+        .replace(/data-lang="[^"]*"/, `data-lang="${lang}"`);
+    }
+    const originLock = document.getElementById('preview-origin-lock');
+    if (originLock) {
+      originLock.textContent = domain ? `*.${domain}` : '*.myshop.com';
+    }
+    const badge = document.getElementById('wallet-key-badge');
+    if (badge) badge.textContent = siteKey;
+    const minsEl = document.getElementById('wallet-minutes-value');
+    if (minsEl && credits !== undefined) {
+      minsEl.textContent = Number(credits).toFixed(1);
+    }
+  }
+
+  function callRelayPortalRpc(payload) {
+    return new Promise((resolve) => {
+      try {
+        const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+          ? 'localhost:8088'
+          : window.location.host;
+        const ws = new WebSocket(`${wsProto}//${wsHost}?mode=portal`);
+        const timer = setTimeout(() => { ws.close(); resolve(null); }, 1600);
+        ws.onopen = () => ws.send(JSON.stringify(payload));
+        ws.onmessage = (ev) => {
+          clearTimeout(timer);
+          try { resolve(JSON.parse(ev.data)); } catch (_) { resolve(null); }
+          ws.close();
+        };
+        ws.onerror = () => { clearTimeout(timer); resolve(null); };
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  }
+
+  async function loadTenantsRegistry() {
+    const tbody = document.getElementById('tenants-table-body');
+    if (!tbody) return;
+    let tenants = [];
+
+    const rpcRes = await callRelayPortalRpc({ tenantAction: 'list' });
+    if (rpcRes && Array.isArray(rpcRes.tenants)) {
+      tenants = rpcRes.tenants;
+    } else {
+      try {
+        const fallback = await fetch('../config/tenants.json');
+        if (fallback.ok) {
+          const obj = await fallback.json();
+          tenants = Object.values(obj);
+        }
+      } catch (_) {}
+    }
+
+    const localExtra = JSON.parse(localStorage.getItem('weborient_local_tenants_v1') || '[]');
+    for (const lt of localExtra) {
+      if (!tenants.some(t => t.siteKey === lt.siteKey)) tenants.unshift(lt);
+    }
+
+    if (!tenants.length) return;
+
+    const current = tenants.find(t => t.siteKey === activeSiteKey) || tenants[0];
+    if (current) {
+      const minsEl = document.getElementById('wallet-minutes-value');
+      const badge = document.getElementById('wallet-key-badge');
+      if (minsEl) minsEl.textContent = Number(current.creditsMinutes || 0).toFixed(1);
+      if (badge) badge.textContent = current.siteKey;
+    }
+
+    tbody.innerHTML = tenants.map(t => `
+      <tr class="hover:bg-[#0A0A0A]/5">
+        <td class="py-3.5 px-5 font-display font-bold text-sm">${t.companyName || t.siteId}</td>
+        <td class="py-3.5 px-5 font-mono text-[#E6391E] font-semibold">${t.siteKey}</td>
+        <td class="py-3.5 px-5 font-mono text-[11px]">${(t.allowedOrigins || []).slice(0, 3).join(', ')}</td>
+        <td class="py-3.5 px-5 font-mono">${t.plan || 'Pro Co-Pilot'}</td>
+        <td class="py-3.5 px-5 font-mono font-bold">${Number(t.creditsMinutes || 0).toFixed(1)} mins</td>
+        <td class="py-3.5 px-5">
+          <button type="button" data-select-key="${t.siteKey}" data-select-domain="${(t.allowedOrigins || [''])[0]}" data-select-credits="${t.creditsMinutes || 0}" class="px-3 py-1 bg-[#0A0A0A] hover:bg-[#E6391E] text-white font-mono text-[10px] uppercase tracking-wider transition cursor-pointer">
+            Use Key
+          </button>
+        </td>
+      </tr>
+    `).join('');
+
+    tbody.querySelectorAll('[data-select-key]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        updateSnippetPreview(
+          btn.getAttribute('data-select-key'),
+          btn.getAttribute('data-select-domain'),
+          document.getElementById('reg-theme')?.value || 'signal',
+          document.getElementById('reg-lang')?.value || 'en-IN',
+          btn.getAttribute('data-select-credits')
+        );
+      });
+    });
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const company = document.getElementById('reg-company').value.trim();
+    const domain = document.getElementById('reg-domain').value.trim();
+    const email = document.getElementById('reg-email').value.trim();
+    const planSelect = document.getElementById('reg-plan');
+    const plan = planSelect.value;
+    const credits = planSelect.options[planSelect.selectedIndex]?.getAttribute('data-credits') || '300';
+    const theme = document.getElementById('reg-theme').value;
+    const lang = document.getElementById('reg-lang').value;
+    const statusBox = document.getElementById('reg-status-msg');
+
+    let createdTenant = null;
+    const rpcRes = await callRelayPortalRpc({
+      tenantAction: 'register',
+      companyName: company,
+      domain,
+      email,
+      plan,
+      theme,
+      lang,
+      credits: parseFloat(credits)
+    });
+
+    if (rpcRes && rpcRes.tenant) {
+      createdTenant = rpcRes.tenant;
+    } else {
+      const randHex = Array.from({ length: 12 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+      createdTenant = {
+        siteKey: `wo_live_${randHex}`,
+        companyName: company,
+        allowedOrigins: [domain, `www.${domain}`],
+        plan,
+        creditsMinutes: parseFloat(credits)
+      };
+      const saved = JSON.parse(localStorage.getItem('weborient_local_tenants_v1') || '[]');
+      saved.unshift(createdTenant);
+      localStorage.setItem('weborient_local_tenants_v1', JSON.stringify(saved.slice(0, 20)));
+    }
+
+    updateSnippetPreview(createdTenant.siteKey, domain, theme, lang, createdTenant.creditsMinutes);
+    if (statusBox) {
+      statusBox.textContent = `✓ Provisioned ${createdTenant.siteKey} for ${company} (${domain}) with ${createdTenant.creditsMinutes} voice minutes!`;
+      statusBox.classList.remove('hidden');
+    }
+
+    await loadTenantsRegistry();
+    if (weborient) {
+      weborient.handleToolCall('move_and_highlight', {
+        selector: '#generated-snippet-panel',
+        explanation: `Ready! Copy your 1-line script for ${domain}`
+      });
+    }
+  });
+
+  async function handleTopUp(minutesToAdd) {
+    const rpcRes = await callRelayPortalRpc({
+      tenantAction: 'addCredits',
+      siteKey: activeSiteKey,
+      minutes: minutesToAdd
+    });
+    const minsEl = document.getElementById('wallet-minutes-value');
+    if (rpcRes && rpcRes.tenant && minsEl) {
+      minsEl.textContent = Number(rpcRes.tenant.creditsMinutes).toFixed(1);
+      await loadTenantsRegistry();
+      return;
+    }
+    if (minsEl) {
+      const curr = parseFloat(minsEl.textContent || '250');
+      minsEl.textContent = (curr + minutesToAdd).toFixed(1);
+    }
+  }
+
+  document.getElementById('btn-topup-150')?.addEventListener('click', () => handleTopUp(150));
+  document.getElementById('btn-topup-500')?.addEventListener('click', () => handleTopUp(500));
+  document.getElementById('btn-refresh-tenants')?.addEventListener('click', loadTenantsRegistry);
+
+  document.getElementById('btn-copy-script')?.addEventListener('click', (e) => {
+    const code = document.getElementById('generated-script-code')?.textContent || '';
+    navigator.clipboard.writeText(code);
+    e.target.textContent = '✓ Copied to Clipboard!';
+    setTimeout(() => { e.target.textContent = 'Copy Script Tag'; }, 2000);
+  });
+
+  document.getElementById('btn-test-cursor-portal')?.addEventListener('click', async () => {
+    if (weborient) {
+      await weborient.handleToolCall('guide_tour', {
+        steps: [
+          { selector: '#tenant-register-form', explanation: '1. Configure your domain & Shadow DOM theme', dwellMs: 1100 },
+          { selector: '#generated-snippet-panel', explanation: '2. Copy your 1-line script tag', dwellMs: 1100 },
+          { selector: '#wallet-balance-card', explanation: '3. Real-time credit metering wallet', dwellMs: 1100 }
+        ]
+      });
+    }
+  });
+
+  loadTenantsRegistry();
 }

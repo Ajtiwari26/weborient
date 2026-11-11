@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Customer Portal &amp; 1-Line Script Generator — WebOrient by DeployMate</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-white text-[#0A0A0A] min-h-screen antialiased">
+
+  <main class="max-w-7xl mx-auto px-6 py-12 space-y-20">
+
+    <!-- 01. CUSTOMER ONBOARDING & LIVE WALLET HEADER -->
+    <section id="portal-hero-section" class="border-b border-[#0A0A0A] pb-12 dm-grid-bg">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-10 items-end">
+        <div class="lg:col-span-8 space-y-4">
+          <div class="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E]">
+            <span class="w-2 h-2 rounded-full bg-[#E6391E]"></span>
+            <span>SELF-SERVE MULTI-TENANT CLOUD PORTAL · WEBORIENT.DEPLOYMATE.IN</span>
+          </div>
+          <h1 class="font-display font-light text-[clamp(2.4rem,5.2vw,4.6rem)] leading-[0.94] tracking-[-0.03em] text-[#0A0A0A]">
+            Register your domain.<br/>
+            Copy your <span class="text-[#E6391E] font-medium">1-line Ghost Cursor tag.</span>
+          </h1>
+          <p class="text-sm sm:text-base text-[#0A0A0A]/75 max-w-2xl leading-relaxed">
+            Configure your domain origin lock, choose your Shadow DOM brand palette, monitor real-time voice co-browsing minutes, and generate your production <code class="px-1.5 py-0.5 bg-[#0A0A0A] text-white text-xs">&lt;script async&gt;</code> embed.
+          </p>
+        </div>
+
+        <!-- Live Credit Wallet Card -->
+        <div id="wallet-balance-card" class="lg:col-span-4 bg-[#0A0A0A] text-white p-7 border-t-[5px] border-[#E6391E] space-y-4">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-[10px] uppercase tracking-[0.18em] text-[#E6391E]">ACTIVE TENANT WALLET</span>
+            <span id="wallet-key-badge" class="font-mono text-[10px] px-2 py-0.5 bg-white/10 text-white/80">wo_live_deploymate_demo</span>
+          </div>
+          <div class="flex items-baseline gap-3">
+            <div id="wallet-minutes-value" class="font-display font-light text-5xl text-white">250.0</div>
+            <div class="font-mono text-xs uppercase tracking-[0.15em] text-white/60">voice mins left</div>
+          </div>
+          <div class="w-full h-1.5 bg-white/15 overflow-hidden">
+            <div id="wallet-progress-bar" class="h-full bg-[#E6391E] transition-all duration-500" style="width: 85%;"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-2 pt-2">
+            <button id="btn-topup-150" type="button" class="py-2.5 px-3 bg-[#E6391E] hover:bg-white text-white hover:text-[#0A0A0A] font-mono text-[10px] uppercase tracking-[0.14em] font-semibold transition cursor-pointer">
+              +150 Mins ($10 / ₹800)
+            </button>
+            <button id="btn-topup-500" type="button" class="py-2.5 px-3 border border-white/25 hover:border-white text-white font-mono text-[10px] uppercase tracking-[0.14em] transition cursor-pointer">
+              +500 Mins ($29 Pro)
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02. DOMAIN ONBOARDING & LIVE 1-LINE SCRIPT GENERATOR -->
+    <section id="script-generator-section" class="grid grid-cols-1 lg:grid-cols-12 border border-[#0A0A0A] bg-white">
+      <!-- Left Column: Tenant Configuration Form -->
+      <form id="tenant-register-form" class="lg:col-span-6 p-8 sm:p-10 border-b lg:border-b-0 lg:border-r border-[#0A0A0A] space-y-6">
+        <div class="flex items-center justify-between border-b border-[#0A0A0A]/15 pb-4">
+          <span class="font-mono text-xs uppercase tracking-[0.16em] text-[#E6391E] font-semibold">01 / TENANT &amp; ORIGIN CONFIGURATION</span>
+          <span class="font-mono text-[10px] uppercase tracking-[0.15em] text-[#0A0A0A]/60">INSTANT PROVISIONING</span>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-5">
+          <div>
+            <label for="reg-company" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">Company / Store Name *</label>
+            <input id="reg-company" type="text" required value="DeployMate Store" placeholder="e.g. My Shopify Store" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+          </div>
+
+          <div>
+            <label for="reg-domain" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">Authorized Website Domain *</label>
+            <input id="reg-domain" type="text" required value="myshop.com" placeholder="e.g. myshop.com" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+          </div>
+
+          <div>
+            <label for="reg-email" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">Admin Email</label>
+            <input id="reg-email" type="email" value="tiwariajay033@gmail.com" placeholder="tiwariajay033@gmail.com" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+          </div>
+
+          <div>
+            <label for="reg-plan" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">Subscription / Credit Pack</label>
+            <select id="reg-plan" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+              <option value="Starter ($29/mo)" data-credits="300">Starter — $29/mo (300 Voice Mins)</option>
+              <option value="Growth ($49/mo)" data-credits="1000">Growth — $49/mo (1,000 Voice Mins)</option>
+              <option value="Pro Co-Pilot ($79/mo)" data-credits="3500" selected>Pro Co-Pilot — $79/mo (3,500 Voice Mins)</option>
+              <option value="Pay-As-You-Go Pack" data-credits="150">Credit Pack — ₹800 / $10 (150 Voice Mins)</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="reg-theme" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">Shadow DOM Accent Theme</label>
+            <select id="reg-theme" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+              <option value="signal">DeployMate Signal (#E6391E)</option>
+              <option value="indigo">SaaS Indigo (#6366F1)</option>
+              <option value="emerald">FinTech Emerald (#10B981)</option>
+              <option value="ink">Minimalist Ink (#0A0A0A)</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="reg-lang" class="block font-mono text-[11px] uppercase tracking-[0.14em] text-[#0A0A0A] mb-2">Default Voice Language</label>
+            <select id="reg-lang" class="w-full px-4 py-3 bg-white border border-[#0A0A0A] text-sm text-[#0A0A0A] focus:outline-none focus:border-[#E6391E]">
+              <option value="en-IN">English (India / Global)</option>
+              <option value="hinglish">Hinglish (Hindi + English)</option>
+              <option value="hi-IN">Hindi (हिन्दी)</option>
+              <option value="es-ES">Español (Spanish)</option>
+              <option value="fr-FR">Français (French)</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="reg-status-msg" class="hidden p-3.5 bg-[#0A0A0A] text-white font-mono text-xs border-l-4 border-[#E6391E]"></div>
+
+        <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
+          <span class="font-mono text-[10px] uppercase tracking-[0.15em] text-[#0A0A0A]/60">Auto-normalizes www. &amp; subdomains</span>
+          <button id="btn-generate-sitekey" type="submit" class="px-7 py-3.5 bg-[#0A0A0A] hover:bg-[#E6391E] text-white rounded-full font-display text-xs font-semibold uppercase tracking-wider transition cursor-pointer">
+            Generate Production Site Key →
+          </button>
+        </div>
+      </form>
+
+      <!-- Right Column: Generated 1-Line Embed Snippet & Live Verification -->
+      <div id="generated-snippet-panel" class="lg:col-span-6 p-8 sm:p-10 bg-[#0A0A0A] text-white flex flex-col justify-between space-y-6">
+        <div class="space-y-4">
+          <div class="flex items-center justify-between border-b border-white/15 pb-4">
+            <span class="font-mono text-xs uppercase tracking-[0.16em] text-[#E6391E] font-semibold">02 / YOUR 1-LINE SHADOW DOM EMBED</span>
+            <button id="btn-copy-script" type="button" class="px-4 py-1.5 bg-[#E6391E] hover:bg-white text-white hover:text-[#0A0A0A] font-mono text-[10px] uppercase tracking-[0.16em] font-semibold transition cursor-pointer">
+              Copy Script Tag
+            </button>
+          </div>
+
+          <p class="text-xs text-white/70 leading-relaxed">
+            Paste this single line before <code class="text-[#E6391E]">&lt;/body&gt;</code> on your website, Shopify <code>theme.liquid</code>, Next.js <code>layout.tsx</code>, or Webflow custom code:
+          </p>
+
+          <pre id="generated-script-code" class="bg-black border border-white/20 p-5 font-mono text-xs text-white overflow-x-auto leading-relaxed select-all">&lt;!-- WebOrient by DeployMate (Shadow DOM Isolated) --&gt;
+&lt;script
+  async
+  src="https://weborient.deploymate.in/sdk/v1/weborient.js"
+  data-site-key="wo_live_9f83b271a0c4"
+  data-theme="signal"
+  data-lang="en-IN"&gt;
+&lt;/script&gt;</pre>
+
+          <div class="grid grid-cols-3 gap-3 pt-2 font-mono text-[10px]">
+            <div class="p-3 border border-white/15 bg-white/5">
+              <div class="text-white/50 uppercase">ORIGIN LOCK</div>
+              <div id="preview-origin-lock" class="text-white font-semibold mt-1 truncate">*.myshop.com</div>
+            </div>
+            <div class="p-3 border border-white/15 bg-white/5">
+              <div class="text-white/50 uppercase">SHADOW HOST</div>
+              <div class="text-[#E6391E] font-semibold mt-1">#weborient-shadow-host</div>
+            </div>
+            <div class="p-3 border border-white/15 bg-white/5">
+              <div class="text-white/50 uppercase">RELAY GATEWAY</div>
+              <div class="text-emerald-400 font-semibold mt-1">wss://relay.deploymate.in</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-white/15 pt-5 flex flex-wrap items-center justify-between gap-4">
+          <div class="text-[11px] font-mono text-white/65">
+            Want to test how the Ghost Cursor guides visitors on this portal?
+          </div>
+          <button id="btn-test-cursor-portal" type="button" class="px-5 py-2.5 border border-[#E6391E] text-[#E6391E] hover:bg-[#E6391E] hover:text-white font-mono text-[11px] uppercase tracking-[0.14em] transition cursor-pointer">
+            Test Ghost Cursor Here →
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03. REGISTERED MULTI-TENANT DIRECTORY TABLE -->
+    <section id="tenants-table-section" class="space-y-6">
+      <div class="flex flex-wrap items-end justify-between gap-4 border-b border-[#0A0A0A] pb-4">
+        <div>
+          <div class="font-mono text-[11px] uppercase tracking-[0.2em] text-[#E6391E]">03 / MULTI-TENANT REGISTRY (MONGODB ATLAS + RELAY)</div>
+          <h2 class="font-display font-light text-3xl sm:text-4xl text-[#0A0A0A] mt-1">Active Client Domains &amp; Credit Wallets</h2>
+        </div>
+        <button id="btn-refresh-tenants" type="button" class="px-4 py-2 border border-[#0A0A0A] hover:bg-[#0A0A0A] hover:text-white font-mono text-[11px] uppercase tracking-[0.14em] transition cursor-pointer">
+          ↻ Sync Relay Registry
+        </button>
+      </div>
+
+      <div class="overflow-x-auto border border-[#0A0A0A] bg-white">
+        <table id="tenants-registry-table" class="w-full text-left text-xs">
+          <thead class="bg-[#0A0A0A] text-white uppercase font-mono tracking-[0.14em] border-b border-[#0A0A0A]">
+            <tr>
+              <th class="py-4 px-5">Company / Brand</th>
+              <th class="py-4 px-5">Public `data-site-key`</th>
+              <th class="py-4 px-5">Authorized Origins</th>
+              <th class="py-4 px-5">Plan Tier</th>
+              <th class="py-4 px-5">Voice Credits</th>
+              <th class="py-4 px-5">Action</th>
+            </tr>
+          </thead>
+          <tbody id="tenants-table-body" class="divide-y divide-[#0A0A0A]/20 text-[#0A0A0A]">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script type="module">
+    import { initMultiPageDemo, initPortalDashboard } from './demo-shared.js';
+
+    const weborient = initMultiPageDemo({});
+    initPortalDashboard(weborient);
+  </script>
+</body>
+</html>

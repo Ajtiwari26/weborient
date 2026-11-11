@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: weborient-relay
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 src/relay/weborient_relay.py
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_MODEL
+        value: gemini-3.8-live
+      - key: GEMINI_LIVE_API_KEY
+        sync: false
+      - key: MONGODB_URI
+        sync: false
