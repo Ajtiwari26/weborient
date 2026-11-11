@@ -8,7 +8,11 @@
  */
 export class LiveClient {
   constructor(options = {}) {
-    this.endpoint = options.endpoint || 'ws://localhost:8088';
+    this.endpoint =
+      options.endpoint ||
+      (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'ws://localhost:8088'
+        : 'wss://relay.deploymate.in');
     this.onToolCall = options.onToolCall || (() => {});
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onTranscript = options.onTranscript || (() => {});

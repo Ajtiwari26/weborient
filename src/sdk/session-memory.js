@@ -62,9 +62,11 @@ export class SessionMemory {
       sessionId: `wo_sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      isLiveActive: false,
-      liveEndpoint: options.endpoint || 'ws://localhost:8088',
-      userLanguage: options.defaultLanguage || initialLang,
+      liveEndpoint:
+        options.endpoint ||
+        (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+          ? 'ws://localhost:8088'
+          : 'wss://relay.deploymate.in'),
       languageLocked: false,
       userIntent: {
         goal: options.defaultGoal || 'Explore WebOrient capabilities, pricing ROI, and setup',
@@ -333,8 +335,11 @@ export class SessionMemory {
 
   reset() {
     const keepLang = this.state?.userLanguage || 'en-IN';
-    const wasConnected = this.state?.isLiveActive || false;
-    const endpoint = this.state?.liveEndpoint || 'ws://localhost:8088';
+    const endpoint =
+      this.state?.liveEndpoint ||
+      (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'ws://localhost:8088'
+        : 'wss://relay.deploymate.in');
     try {
       localStorage.removeItem(this.storageKey);
       sessionStorage.removeItem(this.storageKey);

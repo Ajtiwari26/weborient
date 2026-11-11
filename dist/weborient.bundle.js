@@ -72,9 +72,11 @@ class SessionMemory {
       sessionId: `wo_sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      isLiveActive: false,
-      liveEndpoint: options.endpoint || 'ws://localhost:8088',
-      userLanguage: options.defaultLanguage || initialLang,
+      liveEndpoint:
+        options.endpoint ||
+        (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+          ? 'ws://localhost:8088'
+          : 'wss://relay.deploymate.in'),
       languageLocked: false,
       userIntent: {
         goal: options.defaultGoal || 'Explore WebOrient capabilities, pricing ROI, and setup',
@@ -343,8 +345,11 @@ class SessionMemory {
 
   reset() {
     const keepLang = this.state?.userLanguage || 'en-IN';
-    const wasConnected = this.state?.isLiveActive || false;
-    const endpoint = this.state?.liveEndpoint || 'ws://localhost:8088';
+    const endpoint =
+      this.state?.liveEndpoint ||
+      (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'ws://localhost:8088'
+        : 'wss://relay.deploymate.in');
     try {
       localStorage.removeItem(this.storageKey);
       sessionStorage.removeItem(this.storageKey);
@@ -2056,7 +2061,11 @@ class GhostCursor {
  */
 class LiveClient {
   constructor(options = {}) {
-    this.endpoint = options.endpoint || 'ws://localhost:8088';
+    this.endpoint =
+      options.endpoint ||
+      (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'ws://localhost:8088'
+        : 'wss://relay.deploymate.in');
     this.onToolCall = options.onToolCall || (() => {});
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onTranscript = options.onTranscript || (() => {});
@@ -2394,12 +2403,22 @@ const THEME_PRESETS = {
   indigo: { primaryColor: '#6366f1', accentColor: '#ec4899' }
 };
 
+function getDefaultRelayEndpoint() {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return 'ws://localhost:8088';
+    }
+  }
+  return 'wss://relay.deploymate.in';
+}
+
 class WebOrient {
   constructor(options = {}) {
     const preset = THEME_PRESETS[options.theme] || THEME_PRESETS.signal;
 
     this.options = Object.assign({
-      endpoint: 'ws://localhost:8088',
+      endpoint: getDefaultRelayEndpoint(),
       siteKey: 'wo_live_deploymate_demo',
       siteId: 'deploymate_weborient',
       themeColor: preset.primaryColor,
@@ -2472,7 +2491,7 @@ class WebOrient {
    * Connects microphone audio to the DeployMate Multi-Tenant Relay & Gemini Live Model
    */
   async start() {
-    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || 'ws://localhost:8088';
+    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || getDefaultRelayEndpoint();
     this.options.endpoint = endpoint;
 
     const sep = endpoint.includes('?') ? '&' : '?';
@@ -3151,7 +3170,7 @@ if (typeof window !== 'undefined') {
       const preset = THEME_PRESETS[themeAttr] || THEME_PRESETS.signal;
 
       window.weborientInstance = new WebOrient({
-        endpoint: scriptEl.dataset.endpoint || 'ws://localhost:8088',
+        endpoint: scriptEl.dataset.endpoint || getDefaultRelayEndpoint(),
         siteKey,
         siteId: scriptEl.dataset.siteId || siteKey,
         theme: themeAttr,

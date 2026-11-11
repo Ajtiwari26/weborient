@@ -4,34 +4,79 @@
     {
       "source": "/sdk/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
-        { "key": "Cache-Control", "value": "public, max-age=3600, s-maxage=86400" },
-        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, OPTIONS"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, s-maxage=86400"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        }
       ]
     },
     {
       "source": "/dist/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
-        { "key": "Cache-Control", "value": "public, max-age=3600, s-maxage=86400" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, OPTIONS"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, s-maxage=86400"
+        }
       ]
     },
     {
       "source": "/config/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        }
       ]
     }
   ],
   "rewrites": [
-    { "source": "/sdk/v1/weborient.js", "destination": "/dist/weborient.bundle.js" },
-    { "source": "/", "destination": "/testscript/test-demo.html" },
-    { "source": "/dashboard", "destination": "/testscript/dashboard.html" },
-    { "source": "/features", "destination": "/testscript/features.html" },
-    { "source": "/pricing", "destination": "/testscript/pricing.html" },
-    { "source": "/docs", "destination": "/testscript/docs.html" },
-    { "source": "/contact", "destination": "/testscript/contact.html" }
+    {
+      "source": "/sdk/v1/weborient.js",
+      "destination": "/dist/weborient.bundle.js"
+    },
+    {
+      "source": "/",
+      "destination": "/testscript/test-demo.html"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/testscript/dashboard.html"
+    },
+    {
+      "source": "/features",
+      "destination": "/testscript/features.html"
+    },
+    {
+      "source": "/pricing",
+      "destination": "/testscript/pricing.html"
+    },
+    {
+      "source": "/docs",
+      "destination": "/testscript/docs.html"
+    },
+    {
+      "source": "/contact",
+      "destination": "/testscript/contact.html"
+    }
   ]
 }

@@ -232,21 +232,30 @@ def add_tenant_credits(site_key: str, minutes_to_add: float = 150.0) -> dict | N
         return None
 
     real_key = tenant.get("siteKey", site_key)
-    current = float(tenant.get("creditsMinutes", 0.0))
-    updated = round(current + float(minutes_to_add), 2)
-    tenant["creditsMinutes"] = updated
-    TENANT_STORE[real_key] = tenant
-    save_json_file(TENANTS_FILE, TENANT_STORE)
+    inc_amount = round(float(minutes_to_add), 2)
 
     if mongo_db is not None:
         try:
-            mongo_db["weborient_tenants"].update_one(
+            from pymongo import ReturnDocument
+            doc = mongo_db["weborient_tenants"].find_one_and_update(
                 {"siteKey": real_key},
-                {"$set": {"creditsMinutes": updated}}
+                {"$inc": {"creditsMinutes": inc_amount}},
+                return_document=ReturnDocument.AFTER,
+                projection={"_id": 0}
             )
+            if doc:
+                TENANT_STORE[real_key] = doc
+                save_json_file(TENANTS_FILE, TENANT_STORE)
+                print(f"[RELAY] 💳 Added +{minutes_to_add}m credits to {real_key} -> New balance: {doc.get('creditsMinutes')}m")
+                return doc
         except Exception as e:
             print(f"[WARN] MongoDB credit top-up update failed: {e}")
 
+    current = float(tenant.get("creditsMinutes", 0.0))
+    updated = round(current + inc_amount, 2)
+    tenant["creditsMinutes"] = updated
+    TENANT_STORE[real_key] = tenant
+    save_json_file(TENANTS_FILE, TENANT_STORE)
     print(f"[RELAY] 💳 Added +{minutes_to_add}m credits to {real_key} -> New balance: {updated}m")
     return tenant
 
@@ -675,7 +684,7 @@ async def handle_browser_client(websocket):
                     await websocket.send(json.dumps({"ok": True, "action": "register", "tenant": doc}))
                 elif action == "addCredits":
                     doc = add_tenant_credits(req.get("siteKey", "wo_live_deploymate_demo"), float(req.get("minutes", 150.0)))
-                    await websocket.send(json.dumps({"ok": Boolean(doc), "action": "addCredits", "tenant": doc}))
+                    await websocket.send(json.dumps({"ok": bool(doc), "action": "addCredits", "tenant": doc}))
                 elif action == "list":
                     await websocket.send(json.dumps({"ok": True, "action": "list", "tenants": list_all_tenants()}))
         except Exception:

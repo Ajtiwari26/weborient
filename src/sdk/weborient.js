@@ -17,12 +17,22 @@ const THEME_PRESETS = {
   indigo: { primaryColor: '#6366f1', accentColor: '#ec4899' }
 };
 
+export function getDefaultRelayEndpoint() {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return 'ws://localhost:8088';
+    }
+  }
+  return 'wss://relay.deploymate.in';
+}
+
 export class WebOrient {
   constructor(options = {}) {
     const preset = THEME_PRESETS[options.theme] || THEME_PRESETS.signal;
 
     this.options = Object.assign({
-      endpoint: 'ws://localhost:8088',
+      endpoint: getDefaultRelayEndpoint(),
       siteKey: 'wo_live_deploymate_demo',
       siteId: 'deploymate_weborient',
       themeColor: preset.primaryColor,
@@ -95,7 +105,7 @@ export class WebOrient {
    * Connects microphone audio to the DeployMate Multi-Tenant Relay & Gemini Live Model
    */
   async start() {
-    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || 'ws://localhost:8088';
+    const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || getDefaultRelayEndpoint();
     this.options.endpoint = endpoint;
 
     const sep = endpoint.includes('?') ? '&' : '?';
@@ -776,7 +786,7 @@ if (typeof window !== 'undefined') {
       const preset = THEME_PRESETS[themeAttr] || THEME_PRESETS.signal;
 
       window.weborientInstance = new WebOrient({
-        endpoint: scriptEl.dataset.endpoint || 'ws://localhost:8088',
+        endpoint: scriptEl.dataset.endpoint || getDefaultRelayEndpoint(),
         siteKey,
         siteId: scriptEl.dataset.siteId || siteKey,
         theme: themeAttr,

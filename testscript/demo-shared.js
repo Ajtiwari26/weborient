@@ -312,7 +312,8 @@ function wireAssistToggleActions(weborient, activePage) {
 
     if (!weborient.client) {
       syncAssistUI(true, 'connecting');
-      weborient.options.endpoint = 'ws://localhost:8088';
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      weborient.options.endpoint = isLocal ? 'ws://localhost:8088' : 'wss://relay.deploymate.in';
       try {
         await weborient.start();
         syncAssistUI(true, 'listening');
@@ -479,9 +480,8 @@ export function initPortalDashboard(weborient) {
     return new Promise((resolve) => {
       try {
         const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-          ? 'localhost:8088'
-          : window.location.host;
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const wsHost = isLocal ? 'localhost:8088' : 'relay.deploymate.in';
         const ws = new WebSocket(`${wsProto}//${wsHost}?mode=portal`);
         const timer = setTimeout(() => { ws.close(); resolve(null); }, 1600);
         ws.onopen = () => ws.send(JSON.stringify(payload));
