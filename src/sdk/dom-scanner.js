@@ -130,7 +130,9 @@ export class DOMScanner {
       '[class*="modal" i]',
       '[class*="popup" i]',
       '[class*="drawer" i]',
-      '.col-span-full.bg-ink'
+      '.col-span-full.bg-ink',
+      'div.fixed.inset-0:not(#weborient-overlay)',
+      'div.absolute.inset-x-0.z-20'
     ].join(', ');
 
     const rawNodes = Array.from(document.querySelectorAll(popupSelectors))
@@ -398,9 +400,16 @@ export class DOMScanner {
       }
     }
 
-    const sectionNodes = Array.from(
+    let sectionNodes = Array.from(
       document.querySelectorAll('section, article, main, [data-section], #roi-savings-calculator, #scheduler-booking-modal, #personalize-drawer, .pricing-card, details')
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
+
+    // Fallback for sectionless SPA takeover pages (like /contact, /playground, /call) that use div.fixed.inset-0 or #root > div
+    if (sectionNodes.length === 0) {
+      sectionNodes = Array.from(
+        document.querySelectorAll('div.fixed.inset-0:not(#weborient-overlay), div.absolute.inset-x-0.z-20, #root > div')
+      ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
+    }
 
     const sections = sectionNodes.map(sec => {
       const woId = this._ensureWoId(sec);
@@ -542,7 +551,11 @@ export class DOMScanner {
   _isVisible(el, includeOffscreen = false) {
     if (!el || !(el instanceof Element)) return false;
     const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return false;
+    }
+    const isInteractive = /^(BUTTON|A|INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    if (!isInteractive && parseFloat(style.opacity) === 0) {
       return false;
     }
     const rect = el.getBoundingClientRect();

@@ -29,7 +29,12 @@
     {
       "topic": "products",
       "question": "What shipped products has DeployMate built?",
-      "answer": "DeployMate's shipped product suite includes WebOrient (Shadow DOM Voice Co-Pilot & Ghost Cursor), Knot (AI Music Skipping Engine), Etta (Autonomous Voice Receptionist), Legal Ears, Plate Vision, Prep SaaS, and Salon Mate."
+      "answer": "DeployMate's shipped product suite includes WebOrient (Shadow DOM Voice Co-Pilot & Ghost Cursor), AgentLine (AI Voice Agents on Phone Lines), Sanyy, Inito, BackInsta, Nukky, NukkadMart, Padh.ai, Knot, and Forexyy."
+    },
+    {
+      "topic": "contact-mate",
+      "question": "What is on the /contact ('Start a project') page?",
+      "answer": "The /contact page launches an interactive conversational intake with M.A.T.E. (My Autonomous Technical Expert). It opens with an 'Incoming transmission: M.A.T.E. is better with the sound on' prompt featuring 'Sound on' and 'Keep it silent' buttons, plus top-bar 'Sound on/off' and 'Close X' buttons, followed by step-by-step project brief questions."
     }
   ],
   "pages": [
@@ -37,14 +42,14 @@
       "route": "/",
       "file": "index.html",
       "title": "DeployMate | Autonomous AI Telephony & Workflow Automation",
-      "summary": "Main DeployMate platform showcase featuring live Voice AI, WhatsApp CRM, and Analytics sandbox demos, 9 custom engineering solutions, shipped products, and an interactive INR ROI savings calculator.",
+      "summary": "Main DeployMate platform showcase featuring live Voice AI, WhatsApp CRM, and Analytics sandbox demos, 9 custom engineering solutions, 10 shipped products, and an interactive INR ROI savings calculator.",
       "keywords": ["home", "overview", "deploymate", "voice", "whatsapp", "roi", "products", "solutions"],
       "sections": [
         {
           "id": "hero",
           "selector": "#hero",
           "title": "Hero & Live M.A.T.E. Quick-Launch",
-          "description": "Hero introduction with 'Schedule a live demo' (#cta-schedule-demo-hero) and interactive M.A.T.E. quick-launch chips."
+          "description": "Hero introduction with 'Schedule a live demo' (#cta-schedule-demo-hero), 'Playground', 'Start a project', and interactive M.A.T.E. quick-launch chips."
         },
         {
           "id": "sandbox-playground",
@@ -67,14 +72,59 @@
         {
           "id": "products",
           "selector": "#products",
-          "title": "Shipped Products Portfolio (WebOrient, Knot, Etta & More)",
-          "description": "Interactive showcase of 7 shipped products engineered by DeployMate, led by 01 WebOrient."
+          "title": "Shipped Products Portfolio (WebOrient, AgentLine, Knot & More)",
+          "description": "Interactive showcase of 10 shipped products engineered by DeployMate, led by 01 WebOrient."
         },
         {
           "id": "why-choose-us",
           "selector": "#why-choose-us",
           "title": "Operational Metrics & Interactive ROI Savings Calculator",
           "description": "70% cost reduction metrics and the Interactive Savings Calculator (#roi-savings-calculator) with Monthly Leads and Monthly Operating Cost range sliders."
+        }
+      ]
+    },
+    {
+      "route": "/contact",
+      "file": "/contact",
+      "title": "Start a Project with M.A.T.E. | DeployMate Conversational Intake",
+      "summary": "Interactive 3D M.A.T.E. conversational project intake page. Features an initial audio gate ('M.A.T.E. is better with the sound on' with 'Sound on' and 'Keep it silent' buttons), top bar ('Sound on/off' and 'Close' button), and voice/text project brief steps.",
+      "keywords": ["contact", "start a project", "mate", "sound on", "keep it silent", "incoming transmission", "brief"],
+      "sections": [
+        {
+          "id": "contact-stage",
+          "selector": "#root",
+          "title": "M.A.T.E. Conversational Project Intake & Sound Gate",
+          "description": "Interactive stage with 'Sound on', 'Keep it silent', 'Auto mic on/off', 'Sound on/off', and 'Close' buttons."
+        }
+      ]
+    },
+    {
+      "route": "/playground",
+      "file": "/playground",
+      "title": "Live M.A.T.E. Voice Playground | DeployMate",
+      "summary": "Real-time spoken conversation stage with the 3D M.A.T.E. robot.",
+      "keywords": ["playground", "talk to mate", "robot", "voice"],
+      "sections": [
+        {
+          "id": "playground-stage",
+          "selector": "#root",
+          "title": "Live 3D M.A.T.E. Voice Playground",
+          "description": "Interactive voice conversation stage with M.A.T.E."
+        }
+      ]
+    },
+    {
+      "route": "/call",
+      "file": "/call",
+      "title": "Inbound AI Receptionist Call Simulator | DeployMate",
+      "summary": "Live browser-to-AI phone call experience with DeployMate's autonomous voice receptionist.",
+      "keywords": ["call", "voice agent", "receptionist", "phone"],
+      "sections": [
+        {
+          "id": "call-stage",
+          "selector": "#root",
+          "title": "Live AI Voice Call Stage",
+          "description": "Interactive phone call interface with DeployMate AI receptionist."
         }
       ]
     }

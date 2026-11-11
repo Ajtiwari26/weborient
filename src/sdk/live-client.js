@@ -1,10 +1,9 @@
 /**
- * WebOrient Live Client (v0.4.0)
+ * WebOrient Live Client (v0.6.0 — Zero-Lag Audio-Visual Sync & Auto-Resume Playback)
  * - Captures 16kHz mono PCM microphone audio (AudioWorklet with ScriptProcessor fallback)
  * - Decodes and plays 24kHz Int16 PCM model audio streams gaplessly via Web Audio API
- * - Instant barge-in cancellation (<50ms) stopping all active AudioBufferSourceNodes
- * - Forwards both User (`inputTranscription`) and Model (`outputTranscription`) speech transcripts
- *   so WebOrient can auto-highlight described DOM elements in real time and lock user language!
+ * - Automatic AudioContext state recovery (`resume()`) across SPA route changes & clicks
+ * - Batched `functionCalls` -> `functionResponses` delivery so multi-tool callbacks never stall audio
  */
 export class LiveClient {
   constructor(options = {}) {
@@ -86,6 +85,9 @@ export class LiveClient {
     if (!this.captureContext || !this.mediaStream) return;
     if (this.captureContext.state === 'suspended') {
       await this.captureContext.resume();
+    }
+    if (this.playbackContext && this.playbackContext.state === 'suspended') {
+      await this.playbackContext.resume();
     }
 
     const source = this.captureContext.createMediaStreamSource(this.mediaStream);
@@ -185,18 +187,16 @@ export class LiveClient {
       this.onTranscript(msg.serverContent.outputTranscription.text, 'model');
     }
 
-    // 4. Handle model tool calls
-    if (msg.toolCall?.functionCalls) {
-      for (const call of msg.toolCall.functionCalls) {
-        this.onToolCall(call.name, call.args || {}, call.id);
-      }
+    // 4. Handle model tool calls (pass full array so multi-call batches are answered together in <40ms)
+    if (msg.toolCall?.functionCalls && msg.toolCall.functionCalls.length > 0) {
+      this.onToolCall(msg.toolCall.functionCalls);
     }
   }
 
   async _scheduleAudioChunk(base64Audio, sampleRate = 24000) {
     if (!this.playbackContext || !base64Audio) return;
     if (this.playbackContext.state === 'suspended') {
-      await this.playbackContext.resume();
+      try { await this.playbackContext.resume(); } catch (_) {}
     }
 
     const int16 = this._base64ToInt16Array(base64Audio);
@@ -251,20 +251,21 @@ export class LiveClient {
     }
   }
 
-  sendToolResponse(callId, toolName, output) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        toolResponse: {
-          functionResponses: [
-            {
-              id: callId,
-              name: toolName || 'tool_result',
-              response: { output }
-            }
-          ]
-        }
-      }));
-    }
+  sendToolResponse(callIdOrResponses, toolName, output) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const functionResponses = Array.isArray(callIdOrResponses)
+      ? callIdOrResponses
+      : [
+          {
+            id: callIdOrResponses,
+            name: toolName || 'tool_result',
+            response: { output }
+          }
+        ];
+
+    this.ws.send(JSON.stringify({
+      toolResponse: { functionResponses }
+    }));
   }
 
   sendText(text) {

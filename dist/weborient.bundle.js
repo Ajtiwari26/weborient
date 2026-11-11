@@ -625,7 +625,9 @@ class DOMScanner {
       '[class*="modal" i]',
       '[class*="popup" i]',
       '[class*="drawer" i]',
-      '.col-span-full.bg-ink'
+      '.col-span-full.bg-ink',
+      'div.fixed.inset-0:not(#weborient-overlay)',
+      'div.absolute.inset-x-0.z-20'
     ].join(', ');
 
     const rawNodes = Array.from(document.querySelectorAll(popupSelectors))
@@ -893,9 +895,16 @@ class DOMScanner {
       }
     }
 
-    const sectionNodes = Array.from(
+    let sectionNodes = Array.from(
       document.querySelectorAll('section, article, main, [data-section], #roi-savings-calculator, #scheduler-booking-modal, #personalize-drawer, .pricing-card, details')
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
+
+    // Fallback for sectionless SPA takeover pages (like /contact, /playground, /call) that use div.fixed.inset-0 or #root > div
+    if (sectionNodes.length === 0) {
+      sectionNodes = Array.from(
+        document.querySelectorAll('div.fixed.inset-0:not(#weborient-overlay), div.absolute.inset-x-0.z-20, #root > div')
+      ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
+    }
 
     const sections = sectionNodes.map(sec => {
       const woId = this._ensureWoId(sec);
@@ -1037,7 +1046,11 @@ class DOMScanner {
   _isVisible(el, includeOffscreen = false) {
     if (!el || !(el instanceof Element)) return false;
     const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return false;
+    }
+    const isInteractive = /^(BUTTON|A|INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    if (!isInteractive && parseFloat(style.opacity) === 0) {
       return false;
     }
     const rect = el.getBoundingClientRect();
@@ -2420,12 +2433,11 @@ class GhostCursor {
 
 // --- MODULE: live-client.js ---
 /**
- * WebOrient Live Client (v0.4.0)
+ * WebOrient Live Client (v0.6.0 — Zero-Lag Audio-Visual Sync & Auto-Resume Playback)
  * - Captures 16kHz mono PCM microphone audio (AudioWorklet with ScriptProcessor fallback)
  * - Decodes and plays 24kHz Int16 PCM model audio streams gaplessly via Web Audio API
- * - Instant barge-in cancellation (<50ms) stopping all active AudioBufferSourceNodes
- * - Forwards both User (`inputTranscription`) and Model (`outputTranscription`) speech transcripts
- *   so WebOrient can auto-highlight described DOM elements in real time and lock user language!
+ * - Automatic AudioContext state recovery (`resume()`) across SPA route changes & clicks
+ * - Batched `functionCalls` -> `functionResponses` delivery so multi-tool callbacks never stall audio
  */
 class LiveClient {
   constructor(options = {}) {
@@ -2507,6 +2519,9 @@ class LiveClient {
     if (!this.captureContext || !this.mediaStream) return;
     if (this.captureContext.state === 'suspended') {
       await this.captureContext.resume();
+    }
+    if (this.playbackContext && this.playbackContext.state === 'suspended') {
+      await this.playbackContext.resume();
     }
 
     const source = this.captureContext.createMediaStreamSource(this.mediaStream);
@@ -2606,18 +2621,16 @@ class LiveClient {
       this.onTranscript(msg.serverContent.outputTranscription.text, 'model');
     }
 
-    // 4. Handle model tool calls
-    if (msg.toolCall?.functionCalls) {
-      for (const call of msg.toolCall.functionCalls) {
-        this.onToolCall(call.name, call.args || {}, call.id);
-      }
+    // 4. Handle model tool calls (pass full array so multi-call batches are answered together in <40ms)
+    if (msg.toolCall?.functionCalls && msg.toolCall.functionCalls.length > 0) {
+      this.onToolCall(msg.toolCall.functionCalls);
     }
   }
 
   async _scheduleAudioChunk(base64Audio, sampleRate = 24000) {
     if (!this.playbackContext || !base64Audio) return;
     if (this.playbackContext.state === 'suspended') {
-      await this.playbackContext.resume();
+      try { await this.playbackContext.resume(); } catch (_) {}
     }
 
     const int16 = this._base64ToInt16Array(base64Audio);
@@ -2672,20 +2685,21 @@ class LiveClient {
     }
   }
 
-  sendToolResponse(callId, toolName, output) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        toolResponse: {
-          functionResponses: [
-            {
-              id: callId,
-              name: toolName || 'tool_result',
-              response: { output }
-            }
-          ]
-        }
-      }));
-    }
+  sendToolResponse(callIdOrResponses, toolName, output) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const functionResponses = Array.isArray(callIdOrResponses)
+      ? callIdOrResponses
+      : [
+          {
+            id: callIdOrResponses,
+            name: toolName || 'tool_result',
+            response: { output }
+          }
+        ];
+
+    this.ws.send(JSON.stringify({
+      toolResponse: { functionResponses }
+    }));
   }
 
   sendText(text) {
@@ -2869,8 +2883,9 @@ class WebOrient {
 
   /**
    * Watches the host website for dynamically opened popups, modals, drawers, banners,
-   * expandable dossiers, and SPA route transitions (`pushState` / `popstate`) so
-   * newly rendered buttons and Close ('X') buttons are indexed automatically!
+   * lazy-loaded React routes (`React.lazy` + Framer Motion), and `history.pushState`/`replaceState`
+   * transitions so newly rendered buttons (like 'Sound on' / 'Keep it silent' on `/contact`)
+   * and Close ('X') buttons are indexed automatically!
    */
   _startLiveDomObserver() {
     if (typeof window === 'undefined' || typeof MutationObserver === 'undefined') return;
@@ -2880,32 +2895,61 @@ class WebOrient {
       this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
       const currentRoute = window.location.pathname + window.location.hash;
       const activePopups = this.scanner.scanActiveOverlaysAndPopups();
-      const popupSig = activePopups.map(p => `${p.selector}:${p.closeButtonSelector || ''}`).join('|');
+      const visibleControls = this.scanner.scan({ includeOffscreen: false }).slice(0, 65);
+
+      const popupSig = activePopups.map(p => `${p.selector}:${p.closeButtonSelector || ''}:${p.controls?.length || 0}`).join('|');
+      const controlSig = visibleControls.slice(0, 20).map(c => `${c.selector}:${c.label}`).join('|');
 
       const routeChanged = this._lastObservedRoute && this._lastObservedRoute !== currentRoute;
       const popupChanged = popupSig !== this._lastPopupSignature;
+      const controlsChangedOnNewRoute = controlSig !== this._lastControlSignature && (routeChanged || activePopups.length > 0 || currentRoute !== '/');
 
       this._lastObservedRoute = currentRoute;
       this._lastPopupSignature = popupSig;
+      this._lastControlSignature = controlSig;
 
-      if (this.client && (popupChanged || routeChanged)) {
+      if (this.client && (popupChanged || routeChanged || controlsChangedOnNewRoute)) {
         const langCfg = this.memory.getLanguageConfig();
-        const visibleControls = this.scanner.scan({ includeOffscreen: false }).slice(0, 60);
+        const pageContent = this.scanner.readPageContent({ manifest: this.manifest });
         const updateMsg = [
-          `[LIVE DOM & POPUP INDEX UPDATE — Route: ${currentRoute} | Active Language Lock: ${langCfg.name}]`,
+          `[LIVE DOM, ROUTE & OVERLAY INDEX UPDATE — Route: ${currentRoute} | Active Language Lock: ${langCfg.name}]`,
           activePopups.length > 0
-            ? `ACTIVE POPUPS / MODALS / DRAWERS ON SCREEN (Including Close 'X' Buttons): ${JSON.stringify(activePopups)}`
+            ? `ACTIVE OVERLAYS / POPUPS / STAGE SCREENS ON SCREEN (Including 'Sound on', 'Keep it silent', and Close 'X' Buttons): ${JSON.stringify(activePopups)}`
             : `No modal/popup currently open.`,
-          `Visible Interactive Controls & Buttons: ${JSON.stringify(visibleControls.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, isCloseButton: e.isCloseButton || false })))}`
+          `Current Page Sections / Stage Text: ${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 200) })))}`,
+          `Visible Interactive Controls & Buttons on Screen: ${JSON.stringify(visibleControls.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, isCloseButton: e.isCloseButton || false })))}`
         ].join('\n');
         this.client.sendText(updateMsg);
       }
     };
 
-    const scheduleCheck = () => {
+    const scheduleCheck = (delayMs = 320) => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(checkDomDelta, 380);
+      debounceTimer = setTimeout(checkDomDelta, delayMs);
     };
+
+    const triggerMultiStageRouteScan = () => {
+      scheduleCheck(120);
+      setTimeout(checkDomDelta, 520);
+      setTimeout(checkDomDelta, 1050);
+    };
+
+    // Hook history.pushState & history.replaceState so React Router / Next.js SPA navigations are always caught
+    if (!window.__weborientHistoryHooked) {
+      window.__weborientHistoryHooked = true;
+      const origPushState = window.history.pushState;
+      const origReplaceState = window.history.replaceState;
+      window.history.pushState = function (...args) {
+        const res = origPushState.apply(this, args);
+        window.dispatchEvent(new CustomEvent('weborient:routechange'));
+        return res;
+      };
+      window.history.replaceState = function (...args) {
+        const res = origReplaceState.apply(this, args);
+        window.dispatchEvent(new CustomEvent('weborient:routechange'));
+        return res;
+      };
+    }
 
     const attachObserver = () => {
       if (!document.body || this._domObserver) return;
@@ -2917,7 +2961,7 @@ class WebOrient {
           }
           return m.addedNodes.length > 0 || m.removedNodes.length > 0 || m.type === 'attributes';
         });
-        if (relevant) scheduleCheck();
+        if (relevant) scheduleCheck(320);
       });
       this._domObserver.observe(document.body, {
         childList: true,
@@ -2933,8 +2977,9 @@ class WebOrient {
       window.addEventListener('DOMContentLoaded', attachObserver, { once: true });
     }
 
-    window.addEventListener('popstate', scheduleCheck);
-    window.addEventListener('hashchange', scheduleCheck);
+    window.addEventListener('weborient:routechange', triggerMultiStageRouteScan);
+    window.addEventListener('popstate', triggerMultiStageRouteScan);
+    window.addEventListener('hashchange', triggerMultiStageRouteScan);
   }
 
   /**
@@ -3016,7 +3061,12 @@ class WebOrient {
 
     this.client = new LiveClient({
       endpoint: wsUrl,
-      onToolCall: (name, args, callId) => this.handleToolCall(name, args, callId),
+      onToolCall: (callsOrName, args, callId) => {
+        if (Array.isArray(callsOrName)) {
+          return this.handleToolCallBatch(callsOrName);
+        }
+        return this.handleToolCall(callsOrName, args, callId);
+      },
       onStatusChange: (status) => {
         console.log(`[WebOrient] Status: ${status}`);
         this._syncShadowWidgetState(status === 'connected', 'idle');
@@ -3159,7 +3209,50 @@ class WebOrient {
     this.memory.setPendingNavigationActions(actions);
   }
 
-  async handleToolCall(name, args = {}, callId = null) {
+  /**
+   * Processes a batch of 1 or more Gemini tool calls and returns a single synchronized
+   * `functionResponses` payload in <40ms for visual moves so Gemini starts speaking audio
+   * AT THE EXACT SAME MOMENT the Ghost Cursor glides on screen (zero silent multi-callback lag!).
+   */
+  async handleToolCallBatch(calls = []) {
+    if (!Array.isArray(calls) || calls.length === 0) return [];
+    const responses = [];
+    for (let i = 0; i < calls.length; i++) {
+      const c = calls[i];
+      const res = await this.handleToolCall(c.name, c.args || {}, null, {
+        fastAckVisualMove: true,
+        skipAnimation: i > 0 && (c.name === 'move_and_highlight' || c.name === 'show_and_describe')
+      });
+      if (c.id) {
+        responses.push({
+          id: c.id,
+          name: c.name || 'move_and_highlight',
+          response: { output: res }
+        });
+      }
+    }
+    if (this.client && responses.length > 0) {
+      this.client.sendToolResponse(responses);
+    }
+    return responses;
+  }
+
+  _enqueueVisualTask(taskFn) {
+    this._visualQueue = (this._visualQueue || Promise.resolve()).then(async () => {
+      this._isExecutingTool = true;
+      try {
+        await taskFn();
+      } finally {
+        this._isExecutingTool = false;
+        this._lastExplicitToolTime = Date.now();
+      }
+    }).catch(err => {
+      console.warn('[WebOrient] Visual queue task error:', err);
+    });
+    return this._visualQueue;
+  }
+
+  async handleToolCall(name, args = {}, callId = null, options = {}) {
     console.log(`[WebOrient] Executing Tool Call: ${name}`, args);
     this._lastExplicitToolTime = Date.now();
     this._isExecutingTool = true;
@@ -3168,19 +3261,48 @@ class WebOrient {
     let result = { success: true, action: name };
     const spokenFallback = this._getCleanSpokenCaption(this._modelSpeechBuffer) || null;
     const explanation = args.explanation || args.spokenText || spokenFallback;
+    const fastAck = Boolean(options.fastAckVisualMove);
+    let deferredVisualTask = false;
 
     try {
       switch (name) {
         case 'show_and_describe':
         case 'move_and_highlight': {
-          result = await this.cursor.moveToElement(args.selector, true, explanation);
-          if (result.success) {
-            this._lastAutoGroundedSelector = args.selector;
-            this.memory.markOriented({
+          const targetEl = this.scanner.resolveElement(args.selector);
+          if (!targetEl) {
+            result = { success: false, elementFound: false, error: `Element not found: ${args.selector}` };
+          } else if (options.skipAnimation) {
+            this.memory.markOriented({ selector: args.selector, title: args.selector, explanation });
+            result = {
+              success: true,
+              elementFound: true,
               selector: args.selector,
-              title: result.label || args.selector,
-              explanation
-            });
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: Stop calling tools and speak aloud to the user right now!'
+            };
+          } else if (fastAck) {
+            this._lastAutoGroundedSelector = args.selector;
+            const label = this.scanner._getAccessibleLabel(targetEl) || args.selector;
+            this.memory.markOriented({ selector: args.selector, title: label, explanation });
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() => this.cursor.moveToElement(targetEl, true, explanation));
+            result = {
+              success: true,
+              elementFound: true,
+              selector: args.selector,
+              label,
+              explanation,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now gliding to and spotlighting this element. Speak aloud to the user right now while they watch the cursor — DO NOT call another tool until your next turn!'
+            };
+          } else {
+            result = await this.cursor.moveToElement(args.selector, true, explanation);
+            if (result.success) {
+              this._lastAutoGroundedSelector = args.selector;
+              this.memory.markOriented({
+                selector: args.selector,
+                title: result.label || args.selector,
+                explanation
+              });
+            }
           }
           break;
         }
@@ -3200,6 +3322,17 @@ class WebOrient {
               selector: args.selector,
               message: 'Moved cursor to submit button. Ask user to confirm before calling click_element with confirmed=true.'
             };
+          } else if (fastAck && el) {
+            this.memory.markOriented({ selector: args.selector, title: explanation || `Clicked ${args.selector}` });
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() => this.cursor.click(el, explanation));
+            result = {
+              success: true,
+              elementFound: true,
+              action: 'click_element',
+              selector: args.selector,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now clicking this element. Confirm the click aloud to the user right now!'
+            };
           } else {
             result = await this.cursor.click(args.selector, explanation);
             this.memory.markOriented({ selector: args.selector, title: explanation || `Clicked ${args.selector}` });
@@ -3218,12 +3351,24 @@ class WebOrient {
           break;
 
         case 'scroll_page':
-          result = await this.cursor.scroll(
-            args.direction || 'down',
-            args.targetSelector || null,
-            args.amount || 'page',
-            explanation
-          );
+          if (fastAck) {
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() => this.cursor.scroll(args.direction || 'down', args.targetSelector || null, args.amount || 'page', explanation));
+            result = {
+              success: true,
+              action: 'scroll_page',
+              direction: args.direction || 'down',
+              targetSelector: args.targetSelector || null,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: Page is scrolling smoothly now. Speak aloud while scrolling!'
+            };
+          } else {
+            result = await this.cursor.scroll(
+              args.direction || 'down',
+              args.targetSelector || null,
+              args.amount || 'page',
+              explanation
+            );
+          }
           if (args.targetSelector) {
             this.memory.markOriented({ selector: args.targetSelector, title: explanation || args.targetSelector });
           }
@@ -3261,11 +3406,22 @@ class WebOrient {
           });
           const secToHighlight = args.selector || result.matchingSections?.[0]?.selector;
           if (secToHighlight) {
-            await this.cursor.moveToElement(
-              secToHighlight,
-              true,
-              explanation || result.matchingSections?.[0]?.heading || args.query
-            );
+            if (fastAck) {
+              deferredVisualTask = true;
+              this._enqueueVisualTask(() =>
+                this.cursor.moveToElement(
+                  secToHighlight,
+                  true,
+                  explanation || result.matchingSections?.[0]?.heading || args.query
+                )
+              );
+            } else {
+              await this.cursor.moveToElement(
+                secToHighlight,
+                true,
+                explanation || result.matchingSections?.[0]?.heading || args.query
+              );
+            }
             this.memory.markOriented({
               selector: secToHighlight,
               title: result.matchingSections?.[0]?.heading || secToHighlight
@@ -3305,11 +3461,15 @@ class WebOrient {
       console.error(`[WebOrient] Tool error in ${name}:`, err);
       result = { success: false, action: name, error: err.message };
     } finally {
-      this._isExecutingTool = false;
+      if (!deferredVisualTask) {
+        this._isExecutingTool = false;
+      }
       this._lastExplicitToolTime = Date.now();
     }
 
-    await this._waitForDOMSettle(160);
+    if (!fastAck) {
+      await this._waitForDOMSettle(120);
+    }
     result.viewportSummary = this.scanner.captureStateSnapshot();
 
     const doneTodos = this.memory.state.todoChecklist.filter(t => t.done).map(t => t.id);
