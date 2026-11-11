@@ -2410,7 +2410,7 @@ function getDefaultRelayEndpoint() {
       return 'ws://localhost:8088';
     }
   }
-  return 'wss://relay.deploymate.in';
+  return 'wss://weborient-relay.onrender.com';
 }
 
 class WebOrient {

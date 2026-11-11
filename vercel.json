@@ -56,27 +56,27 @@
     },
     {
       "source": "/",
-      "destination": "/testscript/test-demo.html"
+      "destination": "/testscript/test-demo"
     },
     {
       "source": "/dashboard",
-      "destination": "/testscript/dashboard.html"
+      "destination": "/testscript/dashboard"
     },
     {
       "source": "/features",
-      "destination": "/testscript/features.html"
+      "destination": "/testscript/features"
     },
     {
       "source": "/pricing",
-      "destination": "/testscript/pricing.html"
+      "destination": "/testscript/pricing"
     },
     {
       "source": "/docs",
-      "destination": "/testscript/docs.html"
+      "destination": "/testscript/docs"
     },
     {
       "source": "/contact",
-      "destination": "/testscript/contact.html"
+      "destination": "/testscript/contact"
     }
   ]
 }

@@ -1,0 +1,10 @@
+# Ignore backend and python files on Vercel frontend deployment
+src/relay/
+src/crawler/
+requirements.txt
+render.yaml
+*.py
+testscript/*.py
+.env
+.env.*
+config/.session_store.json
