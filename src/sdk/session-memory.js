@@ -309,7 +309,7 @@ export class SessionMemory {
       this.state.languageNotes = [];
     }
     if (prevLang !== this.state.userLanguage || this.state.languageNotes.length === 0) {
-      const noteEntry = `[LANG LOCK: ${cfg.code} (${cfg.name})] Locked via ${reason}. Agent MUST speak AND write all Ghost Cursor 'explanation' badges strictly in ${cfg.name}.`;
+      const noteEntry = `Silent language sync (${cfg.code}): reply and write Ghost Cursor badges in ${cfg.name} without announcing language aloud.`;
       this.state.languageNotes.push({
         code: cfg.code,
         name: cfg.name,
@@ -317,7 +317,9 @@ export class SessionMemory {
         timestamp: Date.now()
       });
       this.state.languageNotes = this.state.languageNotes.slice(-6);
-      this.state.userIntent.customNotes = (this.state.userIntent.customNotes || []).filter(n => !n.startsWith('[LANG LOCK:'));
+      this.state.userIntent.customNotes = (this.state.userIntent.customNotes || []).filter(
+        n => !n.startsWith('[LANG LOCK:') && !n.startsWith('Silent language sync')
+      );
       this.state.userIntent.customNotes.push(noteEntry);
 
       if (typeof this.onLanguageChange === 'function' && (prevLang !== this.state.userLanguage || lock)) {
@@ -330,11 +332,11 @@ export class SessionMemory {
   }
 
   /**
-   * Auto-detects language from user's or model's spoken/typed transcript and locks it
-   * so the agent continues in that exact language across all turns and page navigations.
+   * Auto-detects language strictly from the USER's spoken/typed transcript (never model output)
+   * and updates session state silently without announcing the switch aloud.
    */
   detectLanguageFromText(text, role = 'user') {
-    if (!text) return null;
+    if (!text || role !== 'user') return null;
     const clean = String(text).trim();
     const lower = clean.toLowerCase();
 
@@ -358,15 +360,23 @@ export class SessionMemory {
     // 2. Detect Devanagari script -> Hindi or Hinglish (if mixed with Latin words)
     if (/[\u0900-\u097F]/.test(clean)) {
       const hasLatinWords = /[a-zA-Z]{4,}/.test(clean);
-      return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, `${role} Devanagari speech transcript`);
+      return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, 'user Devanagari speech transcript');
     }
 
     // 3. Detect conversational Hinglish / Romanized Hindi markers
     const hinglishMatches = lower.match(
       /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|ye|woh|wo|hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
     );
-    if (hinglishMatches && (hinglishMatches.length >= 2 || (role === 'user' && hinglishMatches.length >= 1))) {
-      return this.setLanguage('hinglish', true, `${role} Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
+    if (hinglishMatches && hinglishMatches.length >= 1) {
+      return this.setLanguage('hinglish', true, `user Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
+    }
+
+    // 4. Detect clear English sentences from user so switching back to English works naturally
+    const englishMatches = lower.match(
+      /\b(what|how|show|tell|can|you|please|where|which|about|this|that|the|for|with|open|close|book|demo|pricing|features|contact|calculate|voice|website)\b/g
+    );
+    if (englishMatches && englishMatches.length >= 2) {
+      return this.setLanguage('en-IN', true, 'user English speech transcript');
     }
 
     return null;
@@ -379,7 +389,9 @@ export class SessionMemory {
   appendTranscript(role, text) {
     if (!text || !String(text).trim()) return;
     const clean = String(text).replace(/\s+/g, ' ').trim();
-    this.detectLanguageFromText(clean, role);
+    if (role === 'user') {
+      this.detectLanguageFromText(clean, 'user');
+    }
 
     const last = this.state.recentTranscripts[this.state.recentTranscripts.length - 1];
     if (last && last.role === role && Date.now() - last.timestamp < 4000) {

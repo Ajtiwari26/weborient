@@ -268,9 +268,10 @@ export class LiveClient {
     }));
   }
 
-  sendText(text) {
+  sendText(text, options = {}) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN && text) {
-      this.ws.send(JSON.stringify({ text: String(text) }));
+      const turnComplete = options.turnComplete !== undefined ? Boolean(options.turnComplete) : true;
+      this.ws.send(JSON.stringify({ text: String(text), turnComplete }));
     }
   }
 

@@ -919,8 +919,15 @@ async def handle_browser_client(websocket):
                                 await gemini_session.send_tool_response(function_responses=fn_responses)
 
                             elif "text" in data:
-                                print(f"[RELAY] Text prompt received: {data['text']}")
-                                await gemini_session.send_realtime_input(text=data["text"])
+                                turn_complete = bool(data.get("turnComplete", True))
+                                print(f"[RELAY] Text frame received (turnComplete={turn_complete}): {data['text'][:120]}")
+                                if turn_complete:
+                                    await gemini_session.send_realtime_input(text=data["text"])
+                                else:
+                                    await gemini_session.send_client_content(
+                                        turns=types.Content(role="user", parts=[types.Part.from_text(text=data["text"])]),
+                                        turn_complete=False
+                                    )
 
                         except websockets.exceptions.ConnectionClosed:
                             break

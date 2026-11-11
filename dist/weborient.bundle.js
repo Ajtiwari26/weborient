@@ -319,7 +319,7 @@ class SessionMemory {
       this.state.languageNotes = [];
     }
     if (prevLang !== this.state.userLanguage || this.state.languageNotes.length === 0) {
-      const noteEntry = `[LANG LOCK: ${cfg.code} (${cfg.name})] Locked via ${reason}. Agent MUST speak AND write all Ghost Cursor 'explanation' badges strictly in ${cfg.name}.`;
+      const noteEntry = `Silent language sync (${cfg.code}): reply and write Ghost Cursor badges in ${cfg.name} without announcing language aloud.`;
       this.state.languageNotes.push({
         code: cfg.code,
         name: cfg.name,
@@ -327,7 +327,9 @@ class SessionMemory {
         timestamp: Date.now()
       });
       this.state.languageNotes = this.state.languageNotes.slice(-6);
-      this.state.userIntent.customNotes = (this.state.userIntent.customNotes || []).filter(n => !n.startsWith('[LANG LOCK:'));
+      this.state.userIntent.customNotes = (this.state.userIntent.customNotes || []).filter(
+        n => !n.startsWith('[LANG LOCK:') && !n.startsWith('Silent language sync')
+      );
       this.state.userIntent.customNotes.push(noteEntry);
 
       if (typeof this.onLanguageChange === 'function' && (prevLang !== this.state.userLanguage || lock)) {
@@ -340,11 +342,11 @@ class SessionMemory {
   }
 
   /**
-   * Auto-detects language from user's or model's spoken/typed transcript and locks it
-   * so the agent continues in that exact language across all turns and page navigations.
+   * Auto-detects language strictly from the USER's spoken/typed transcript (never model output)
+   * and updates session state silently without announcing the switch aloud.
    */
   detectLanguageFromText(text, role = 'user') {
-    if (!text) return null;
+    if (!text || role !== 'user') return null;
     const clean = String(text).trim();
     const lower = clean.toLowerCase();
 
@@ -368,15 +370,23 @@ class SessionMemory {
     // 2. Detect Devanagari script -> Hindi or Hinglish (if mixed with Latin words)
     if (/[\u0900-\u097F]/.test(clean)) {
       const hasLatinWords = /[a-zA-Z]{4,}/.test(clean);
-      return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, `${role} Devanagari speech transcript`);
+      return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, 'user Devanagari speech transcript');
     }
 
     // 3. Detect conversational Hinglish / Romanized Hindi markers
     const hinglishMatches = lower.match(
       /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|ye|woh|wo|hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
     );
-    if (hinglishMatches && (hinglishMatches.length >= 2 || (role === 'user' && hinglishMatches.length >= 1))) {
-      return this.setLanguage('hinglish', true, `${role} Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
+    if (hinglishMatches && hinglishMatches.length >= 1) {
+      return this.setLanguage('hinglish', true, `user Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
+    }
+
+    // 4. Detect clear English sentences from user so switching back to English works naturally
+    const englishMatches = lower.match(
+      /\b(what|how|show|tell|can|you|please|where|which|about|this|that|the|for|with|open|close|book|demo|pricing|features|contact|calculate|voice|website)\b/g
+    );
+    if (englishMatches && englishMatches.length >= 2) {
+      return this.setLanguage('en-IN', true, 'user English speech transcript');
     }
 
     return null;
@@ -389,7 +399,9 @@ class SessionMemory {
   appendTranscript(role, text) {
     if (!text || !String(text).trim()) return;
     const clean = String(text).replace(/\s+/g, ' ').trim();
-    this.detectLanguageFromText(clean, role);
+    if (role === 'user') {
+      this.detectLanguageFromText(clean, 'user');
+    }
 
     const last = this.state.recentTranscripts[this.state.recentTranscripts.length - 1];
     if (last && last.role === role && Date.now() - last.timestamp < 4000) {
@@ -2702,9 +2714,10 @@ class LiveClient {
     }));
   }
 
-  sendText(text) {
+  sendText(text, options = {}) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN && text) {
-      this.ws.send(JSON.stringify({ text: String(text) }));
+      const turnComplete = options.turnComplete !== undefined ? Boolean(options.turnComplete) : true;
+      this.ws.send(JSON.stringify({ text: String(text), turnComplete }));
     }
   }
 
@@ -2909,17 +2922,16 @@ class WebOrient {
       this._lastControlSignature = controlSig;
 
       if (this.client && (popupChanged || routeChanged || controlsChangedOnNewRoute)) {
-        const langCfg = this.memory.getLanguageConfig();
         const pageContent = this.scanner.readPageContent({ manifest: this.manifest });
         const updateMsg = [
-          `[LIVE DOM, ROUTE & OVERLAY INDEX UPDATE — Route: ${currentRoute} | Active Language Lock: ${langCfg.name}]`,
+          `[SILENT BACKGROUND DOM & POPUP INDEX UPDATE — Route: ${currentRoute} (Do NOT reply aloud to this background update)]`,
           activePopups.length > 0
             ? `ACTIVE OVERLAYS / POPUPS / STAGE SCREENS ON SCREEN (Including 'Sound on', 'Keep it silent', and Close 'X' Buttons): ${JSON.stringify(activePopups)}`
             : `No modal/popup currently open.`,
           `Current Page Sections / Stage Text: ${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 200) })))}`,
           `Visible Interactive Controls & Buttons on Screen: ${JSON.stringify(visibleControls.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, isCloseButton: e.isCloseButton || false })))}`
         ].join('\n');
-        this.client.sendText(updateMsg);
+        this.client.sendText(updateMsg, { turnComplete: false });
       }
     };
 
@@ -3043,7 +3055,7 @@ class WebOrient {
   /**
    * Connects microphone audio to the DeployMate Multi-Tenant Relay & Gemini Live Model
    */
-  async start() {
+  async start(options = {}) {
     const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || getDefaultRelayEndpoint();
     this.options.endpoint = endpoint;
 
@@ -3104,8 +3116,9 @@ class WebOrient {
     const pageContent = this.scanner.readPageContent({ manifest: this.manifest });
     const liveMetadata = this._extractLiveSiteMetadata();
     const memorySummary = this.memory.buildModelContextSummary();
+    const isRestore = Boolean(options.isRestore) && this.memory.state.recentTranscripts.length > 0;
 
-    this.client.sendText(
+    const handoffPayload =
       `[SESSION CONTINUITY & FULL DOM INDEX HANDOFF]\n${memorySummary}\n` +
       (liveMetadata ? `[CLIENT WEBSITE METADATA & FAQ]:\n${liveMetadata}\n` : '') +
       `[DISCOVERED SITE PAGES, ANCHORS & SPA NAVIGATION TRIGGERS]:\n${JSON.stringify(discoveredRoutes)}\n` +
@@ -3113,19 +3126,12 @@ class WebOrient {
       `[CURRENT PAGE SECTIONS ("${document.title}" - ${initialSnapshot.url})]:\n` +
       `${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 180) })))}\n` +
       `[ALL INDEXED BUTTONS, INPUTS, BANNERS & CLOSE ('X') CONTROLS ON PAGE (${initialElements.length} items)]:\n` +
-      `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false })))}`
-    );
+      `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false })))}` +
+      (isRestore
+        ? ''
+        : `\n\n[SESSION START — SPEAK FIRST NOW]: A visitor just connected to WebOrient on ${document.title || 'DeployMate'}. Do NOT wait for them to say hello! Speak aloud right now with a warm, friendly 1-2 sentence welcome (introduce yourself as WebOrient on DeployMate, mention you can guide them around the website with the Ghost Cursor, and suggest 1 or 2 things to explore like testing the live voice agent, WhatsApp CRM, or calculating ROI savings). Never mention what language you are speaking—just speak naturally and pause to follow the user's lead!`);
 
-    // Proactive warm welcome kick: first-time visitors don't know how WebOrient works and wait in silence.
-    // Trigger Gemini to speak first with a concise warm intro and suggestions.
-    setTimeout(() => {
-      if (this.client) {
-        const langCfg = this.memory.getLanguageConfig();
-        this.client.sendText(
-          `[SESSION START — PROACTIVE WARM WELCOME]: A visitor just connected to WebOrient on DeployMate. Do NOT wait for them to say hello! Speak first immediately with a warm, friendly 1-2 sentence welcome in ${langCfg.name} (introduce yourself as WebOrient on DeployMate, note that you can guide them with the Ghost Cursor, and suggest 1 or 2 quick things to explore like trying the live voice agent, WhatsApp CRM, or calculating ROI savings). Then pause and follow the user's lead!`
-        );
-      }
-    }, 150);
+    this.client.sendText(handoffPayload, { turnComplete: !isRestore });
   }
 
   _getCleanSpokenCaption(buffer) {
@@ -3666,7 +3672,7 @@ class WebOrient {
       if (memState.isLiveActive && memState.liveEndpoint && !this.client) {
         this.options.endpoint = memState.liveEndpoint;
         try {
-          await this.start();
+          await this.start({ isRestore: true });
           this._emit('sessionRestored', {
             sessionId: memState.sessionId,
             language: memState.userLanguage

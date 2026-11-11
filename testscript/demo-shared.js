@@ -335,10 +335,7 @@ function wireAssistToggleActions(weborient, activePage) {
   if (langSelect) {
     langSelect.value = weborient.memory.state.userLanguage || 'en-IN';
     langSelect.addEventListener('change', (e) => {
-      weborient.memory.setLanguage(e.target.value, true);
-      if (weborient.client) {
-        weborient.client.sendText(`[LANGUAGE CHANGE]: User set native language to ${e.target.value}. Respond in this language.`);
-      }
+      weborient.memory.setLanguage(e.target.value, true, 'manual dropdown selection');
       langPopover.classList.add('hidden');
     });
   }
