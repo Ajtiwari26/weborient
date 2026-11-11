@@ -291,21 +291,35 @@ def deduct_tenant_credits(site_key: str, minutes_used: float = 0.5) -> float:
         return 0.0
 
     real_key = tenant.get("siteKey", site_key)
+
+    if mongo_db is not None:
+        try:
+            from pymongo import ReturnDocument
+            # Atomic deduction in MongoDB Atlas preventing concurrent tab race conditions
+            dec_amount = round(float(minutes_used), 2)
+            res = mongo_db["weborient_tenants"].find_one_and_update(
+                {"siteKey": real_key},
+                {"$inc": {"creditsMinutes": -dec_amount}},
+                return_document=ReturnDocument.AFTER,
+                projection={"creditsMinutes": 1, "_id": 0}
+            )
+            if res and "creditsMinutes" in res:
+                raw_bal = float(res["creditsMinutes"])
+                updated = max(0.0, round(raw_bal, 2))
+                if raw_bal < 0:
+                    mongo_db["weborient_tenants"].update_one({"siteKey": real_key}, {"$set": {"creditsMinutes": 0.0}})
+                tenant["creditsMinutes"] = updated
+                TENANT_STORE[real_key] = tenant
+                save_json_file(TENANTS_FILE, TENANT_STORE)
+                return updated
+        except Exception as e:
+            print(f"[WARN] Atomic credit deduction failed in MongoDB, using fallback: {e}")
+
     current = float(tenant.get("creditsMinutes", 0.0))
     updated = max(0.0, round(current - minutes_used, 2))
     tenant["creditsMinutes"] = updated
     TENANT_STORE[real_key] = tenant
     save_json_file(TENANTS_FILE, TENANT_STORE)
-
-    if mongo_db is not None:
-        try:
-            mongo_db["weborient_tenants"].update_one(
-                {"siteKey": real_key},
-                {"$set": {"creditsMinutes": updated}}
-            )
-        except Exception:
-            pass
-
     return updated
 
 
