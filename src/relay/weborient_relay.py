@@ -408,15 +408,16 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
         )
 
     memory_block = (
-        f"\n\n### DEPLOYMATE MULTI-TENANT SESSION & NON-LINEAR TO-DO MEMORY "
+        f"\n\n### DEPLOYMATE MULTI-TENANT SESSION & LIVE CO-PILOT GUIDANCE "
         f"(Tenant: {tenant.get('companyName', 'DeployMate')} | Session ID: {session_mem['sessionId']} | Credits: {tenant.get('creditsMinutes', 250)} mins):\n"
+        f"- PROACTIVE WARM WELCOME ON START (CRITICAL): First-time visitors do NOT know how WebOrient works and will wait in silence. The moment you connect, DO NOT wait for the user to say hello! Speak first immediately with a warm, friendly 1-2 sentence welcome (introduce yourself as WebOrient on DeployMate, note that you can guide them with the Ghost Cursor, and suggest 1-2 things to explore like trying the live voice agent, WhatsApp CRM, or calculating ROI savings). Then pause and follow the user's lead!\n"
         f"- DETECTED & LOCKED LANGUAGE: {session_mem['userLanguage']} (Maintain this language strictly across all turns, popups, and page redirects)\n"
-        f"- SHOWING vs. SAYING SYNCHRONIZATION RULE (CRITICAL): Whenever you detect the user's language (English, Hindi, Hinglish, Spanish, French), call `update_session_memory(language=..., note=...)` to record a note. Every single `explanation` badge you pass to `move_and_highlight`, `click_element`, `fill_form_field`, `scroll_page`, or `swipe_or_swap` MUST be written in the exact same language that you are speaking aloud! Never show an English tooltip badge while speaking Hindi/Hinglish!\n"
+        f"- SILENT SEAMLESS LANGUAGE HANDLING (CRITICAL): When speaking or when language changes, NEVER say aloud 'I will speak in English/Hindi' or announce what language you are using! Simply speak directly in that language without commenting on it or breaking the conversation flow.\n"
+        f"- SHOWING vs. SAYING SYNCHRONIZATION RULE: Every single `explanation` badge you pass to `move_and_highlight`, `click_element`, `fill_form_field`, `scroll_page`, or `swipe_or_swap` MUST be written in the exact same language that you are speaking aloud! Never show an English tooltip badge while speaking Hindi/Hinglish!\n"
+        f"- ZERO TO-DO OBSESSION — NO RUSHING (CRITICAL): The site sections and features are purely background reference for you so you can answer accurately. There is NO requirement to complete, visit, or check off every section! NEVER rush the user, NEVER mention remaining to-dos or checklists, and NEVER push unrequested sections onto the user. Patiently listen to the user, answer their questions, and follow their curiosity.\n"
         f"- ONE TOOL PER SPOKEN TURN RULE (CRITICAL FOR ZERO-LAG AUDIO SYNC): Call at most ONE visual tool (`move_and_highlight` or `click_element` or `swipe_or_swap`) per turn and IMMEDIATELY speak aloud to the user while the Ghost Cursor moves to that element! NEVER chain 2 or 3 `move_and_highlight` calls in silence before speaking!\n"
         f"- FULL PAGE, POPUP, '/contact' SOUND GATE & CLOSE-BUTTON ('X') CONTROL: Every button, popup, modal, drawer, banner, input, 'Sound on' / 'Keep it silent' gate button, and Close ('X') button on the user's screen is indexed. If the user asks to click 'Sound on', 'Keep it silent', or close any popup/modal/drawer, immediately call `click_element` on its selector.\n"
         f"- USER GOAL / WANT: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
-        f"- COMPLETED TO-DO ITEMS (Any order): {json.dumps(session_mem.get('completedTodoIds', []))}\n"
-        f"- REMAINING TO-DO ITEMS: {json.dumps(session_mem.get('remainingTodos', [])[:6])}\n"
         f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, popup, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its actual interactive component selector (NEVER highlight h1/h2 titles or headers)."
     )
 
@@ -749,8 +750,15 @@ async def handle_browser_client(websocket):
     full_prompt = load_system_prompt_and_manifest(site_id, session_mem, tenant)
     tools = get_gemini_tools()
 
+    speech_config = types.SpeechConfig(
+        voice_config=types.VoiceConfig(
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kavya")
+        )
+    )
+
     config = types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
+        speech_config=speech_config,
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=types.Content(parts=[types.Part.from_text(text=full_prompt)]),

@@ -463,10 +463,10 @@ class SessionMemory {
       `   - AGENT SESSION NOTES: ${notesList}`,
       `2. USER GOAL / WANT: "${this.state.userIntent.goal}" (Interested Tier: ${this.state.userIntent.interestedTier})`,
       `3. CURRENT ACTIVE PAGE: ${currentFile} (Pages visited so far: ${this.state.visitedPages.join(' -> ') || currentFile})`,
-      `4. NON-LINEAR ORIENTATION TO-DO CHECKLIST (Follow the user in ANY order; do NOT force a rigid sequence!):`,
-      `   - COMPLETED [x] (${doneItems.length}/${this.state.todoChecklist.length}): ${doneItems.map(i => `${i.title} (${i.selector})`).join(', ') || 'None yet'}`,
-      `   - REMAINING ON CURRENT PAGE [ ] (${currentFile}): ${pendingOnThisPage.map(i => `${i.title} -> selector "${i.selector}"`).join(' | ') || 'All sections on this page are done!'}`,
-      `   - REMAINING ON OTHER PAGES [ ]: ${pendingOtherPages.map(i => `${i.title} (${i.page})`).join(', ') || 'All pages complete!'}`,
+      `4. SITE SECTIONS & FEATURE REFERENCE (For background reference only — do NOT treat as a task list; follow the user naturally at their pace):`,
+      `   - SECTIONS ON THIS PAGE (${currentFile}): ${pendingOnThisPage.map(i => `${i.title} -> selector "${i.selector}"`).join(' | ') || 'Interactive sections available on screen'}`,
+      `   - OTHER AVAILABLE PAGES: ${pendingOtherPages.map(i => `${i.title} (${i.page})`).join(', ') || 'Available on other pages'}`,
+      `   - ZERO TO-DO OBSESSION RULE: There is NO requirement to visit or complete every section. Follow the user's lead, answer their questions patiently, and never rush or push them through a checklist!`,
       `5. FULL PAGE, POPUP & CLOSE-BUTTON CONTROL RULE: Every button, popup, modal, drawer, banner, form input, and Close ('X') button on the screen is indexed with a selector or \`[data-wo-id="wo-..."]\`. Whenever the user asks to open, fill, interact with, or close any popup/modal/drawer/banner/button, immediately call \`click_element\`, \`fill_form_field\`, \`move_and_highlight\`, or \`swipe_or_swap\` on its selector!`,
       `6. RECENT CONVERSATION CONTINUITY (Across Page Redirects / Refreshes):\n${recentTurns}`
     ].join('\n');
@@ -3004,12 +3004,8 @@ class WebOrient {
       lightSelect.value = langCfg.code;
     }
 
-    if (this.client && prevLang !== langCfg.code) {
-      this.client.sendText(
-        `[CRITICAL LANGUAGE LOCK & SHOWING-SAYING SYNC]: Detected & locked user language to ${langCfg.name} (${langCfg.code}). ` +
-        `Note recorded in session memory. You MUST continue speaking strictly in ${langCfg.name} AND write every single \`explanation\` badge in \`move_and_highlight\`, \`click_element\`, \`fill_form_field\`, and \`swipe_or_swap\` in ${langCfg.name} so what is SHOWN on screen and what is SAID aloud are 100% in sync!`
-      );
-    }
+    // Silent language handling: language change is tracked in session memory and tool responses;
+    // do not send text prompts here so the model does not announce language switches aloud.
 
     this._emit('languageChange', langCfg);
   }
@@ -3119,6 +3115,17 @@ class WebOrient {
       `[ALL INDEXED BUTTONS, INPUTS, BANNERS & CLOSE ('X') CONTROLS ON PAGE (${initialElements.length} items)]:\n` +
       `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false })))}`
     );
+
+    // Proactive warm welcome kick: first-time visitors don't know how WebOrient works and wait in silence.
+    // Trigger Gemini to speak first with a concise warm intro and suggestions.
+    setTimeout(() => {
+      if (this.client) {
+        const langCfg = this.memory.getLanguageConfig();
+        this.client.sendText(
+          `[SESSION START — PROACTIVE WARM WELCOME]: A visitor just connected to WebOrient on DeployMate. Do NOT wait for them to say hello! Speak first immediately with a warm, friendly 1-2 sentence welcome in ${langCfg.name} (introduce yourself as WebOrient on DeployMate, note that you can guide them with the Ghost Cursor, and suggest 1 or 2 quick things to explore like trying the live voice agent, WhatsApp CRM, or calculating ROI savings). Then pause and follow the user's lead!`
+        );
+      }
+    }, 150);
   }
 
   _getCleanSpokenCaption(buffer) {

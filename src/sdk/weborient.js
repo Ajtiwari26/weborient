@@ -236,12 +236,8 @@ export class WebOrient {
       lightSelect.value = langCfg.code;
     }
 
-    if (this.client && prevLang !== langCfg.code) {
-      this.client.sendText(
-        `[CRITICAL LANGUAGE LOCK & SHOWING-SAYING SYNC]: Detected & locked user language to ${langCfg.name} (${langCfg.code}). ` +
-        `Note recorded in session memory. You MUST continue speaking strictly in ${langCfg.name} AND write every single \`explanation\` badge in \`move_and_highlight\`, \`click_element\`, \`fill_form_field\`, and \`swipe_or_swap\` in ${langCfg.name} so what is SHOWN on screen and what is SAID aloud are 100% in sync!`
-      );
-    }
+    // Silent language handling: language change is tracked in session memory and tool responses;
+    // do not send text prompts here so the model does not announce language switches aloud.
 
     this._emit('languageChange', langCfg);
   }
@@ -351,6 +347,17 @@ export class WebOrient {
       `[ALL INDEXED BUTTONS, INPUTS, BANNERS & CLOSE ('X') CONTROLS ON PAGE (${initialElements.length} items)]:\n` +
       `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false })))}`
     );
+
+    // Proactive warm welcome kick: first-time visitors don't know how WebOrient works and wait in silence.
+    // Trigger Gemini to speak first with a concise warm intro and suggestions.
+    setTimeout(() => {
+      if (this.client) {
+        const langCfg = this.memory.getLanguageConfig();
+        this.client.sendText(
+          `[SESSION START — PROACTIVE WARM WELCOME]: A visitor just connected to WebOrient on DeployMate. Do NOT wait for them to say hello! Speak first immediately with a warm, friendly 1-2 sentence welcome in ${langCfg.name} (introduce yourself as WebOrient on DeployMate, note that you can guide them with the Ghost Cursor, and suggest 1 or 2 quick things to explore like trying the live voice agent, WhatsApp CRM, or calculating ROI savings). Then pause and follow the user's lead!`
+        );
+      }
+    }, 150);
   }
 
   _getCleanSpokenCaption(buffer) {

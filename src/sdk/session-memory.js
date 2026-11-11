@@ -453,10 +453,10 @@ export class SessionMemory {
       `   - AGENT SESSION NOTES: ${notesList}`,
       `2. USER GOAL / WANT: "${this.state.userIntent.goal}" (Interested Tier: ${this.state.userIntent.interestedTier})`,
       `3. CURRENT ACTIVE PAGE: ${currentFile} (Pages visited so far: ${this.state.visitedPages.join(' -> ') || currentFile})`,
-      `4. NON-LINEAR ORIENTATION TO-DO CHECKLIST (Follow the user in ANY order; do NOT force a rigid sequence!):`,
-      `   - COMPLETED [x] (${doneItems.length}/${this.state.todoChecklist.length}): ${doneItems.map(i => `${i.title} (${i.selector})`).join(', ') || 'None yet'}`,
-      `   - REMAINING ON CURRENT PAGE [ ] (${currentFile}): ${pendingOnThisPage.map(i => `${i.title} -> selector "${i.selector}"`).join(' | ') || 'All sections on this page are done!'}`,
-      `   - REMAINING ON OTHER PAGES [ ]: ${pendingOtherPages.map(i => `${i.title} (${i.page})`).join(', ') || 'All pages complete!'}`,
+      `4. SITE SECTIONS & FEATURE REFERENCE (For background reference only — do NOT treat as a task list; follow the user naturally at their pace):`,
+      `   - SECTIONS ON THIS PAGE (${currentFile}): ${pendingOnThisPage.map(i => `${i.title} -> selector "${i.selector}"`).join(' | ') || 'Interactive sections available on screen'}`,
+      `   - OTHER AVAILABLE PAGES: ${pendingOtherPages.map(i => `${i.title} (${i.page})`).join(', ') || 'Available on other pages'}`,
+      `   - ZERO TO-DO OBSESSION RULE: There is NO requirement to visit or complete every section. Follow the user's lead, answer their questions patiently, and never rush or push them through a checklist!`,
       `5. FULL PAGE, POPUP & CLOSE-BUTTON CONTROL RULE: Every button, popup, modal, drawer, banner, form input, and Close ('X') button on the screen is indexed with a selector or \`[data-wo-id="wo-..."]\`. Whenever the user asks to open, fill, interact with, or close any popup/modal/drawer/banner/button, immediately call \`click_element\`, \`fill_form_field\`, \`move_and_highlight\`, or \`swipe_or_swap\` on its selector!`,
       `6. RECENT CONVERSATION CONTINUITY (Across Page Redirects / Refreshes):\n${recentTurns}`
     ].join('\n');
