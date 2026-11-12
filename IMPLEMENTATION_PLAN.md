@@ -132,3 +132,84 @@ We have aligned the entire WebOrient 5-page showcase (`test-demo.html`, `feature
 ### Phase 3: DeployMate `design.md` Multi-Page Experience & Live Embed Onboarding (Implemented Today)
 - [x] Redesign all 5 pages (`test-demo.html`, `features.html`, `pricing.html`, `docs.html`, `contact.html`) and `demo-shared.js` into the DeployMate `design.md` aesthetic (`#FFFFFF` Paper, `#0A0A0A` Ink, `#E6391E` Signal, `1px` architectural borders, `Space Grotesk` + `Fira Code`, and official `deploymate-stacked-logo.svg`).
 - [x] Add an interactive **"Generate Your 1-Line Embed Script"** configurator on `docs.html` and `test-demo.html` so customers can test domain profiling and copy their `<script async src="https://weborient.deploymate.in/sdk/v1/weborient.js" data-site-key="...">` tag immediately.
+
+---
+
+## 6. Deep Research: Gemini 3.8 Live Token Billing & The "VIP + Local Secretary" Architecture
+
+### 6.1 How Gemini 3.8 Live Bills Audio Tokens & Manages Sessions
+1. **Continuous Stream Billing (Silent Audio Frames ARE Billed)**:
+   - Gemini 3.8 Live tokenizes incoming and outgoing audio at **25 to 32 audio tokens per second** (~1,500–1,920 tokens/minute at `$3.00 / 1M` input tokens and `$12.00 / 1M` output tokens).
+   - Because Gemini's server-side Voice Activity Detection (VAD) continuously processes every incoming `realtimeInput` PCM frame, **streaming silent microphone frames over an open WebSocket burns audio tokens at the exact same rate as active speech**.
+2. **Cumulative Context Window Re-Billing**:
+   - On every turn, Gemini Live re-reads the accumulated session context window. Without sliding-window compression, un-compressed audio sessions hit a hard **15-minute limit** and each turn grows progressively more expensive.
+   - Enabling `ContextWindowCompressionConfig(trigger_tokens=12000, sliding_window=SlidingWindow(target_tokens=8000))` + `SessionResumptionConfig(transparent=True)` in `LiveConnectConfig` lifts the 15-minute cap, caps per-turn context re-reading, and enables seamless reconnection.
+3. **Why Hard-Disconnecting at 10s Clips Speech vs. Why a 2-Tier "Local Secretary" Is Ideal**:
+   - If we close the upstream Gemini WebSocket after 10 seconds of silence, re-establishing the TLS + Gemini Live handshake when the user speaks again takes **600ms–1,100ms**, clipping the first words of their sentence.
+   - Instead, we use a **3-Stage "VIP (Gemini Live) + Local Secretary (Browser AudioWorklet VAD + 600ms Ring Buffer)"** state machine that achieves **0 tokens burned after 10s of silence** AND **<15ms zero-clip wake-up when the user speaks again**.
+
+### 6.2 The 3-Stage "VIP + Local Secretary" State Machine (`src/sdk/live-client.js` & `src/relay/weborient_relay.py`)
+- **Stage 1 — `ACTIVE` (0s – 10s after last user/model speech or DOM action)**:
+  - Mic PCM streams normally to Gemini; credit ticker meters active time.
+- **Stage 2 — `SECRETARY_HOLD` (10s – 75s of silence — Zero-Token VAD Gate)**:
+  - After **10 seconds** of silence (after both user and Kavya finish speaking), the **Local Secretary** inside `live-client.js` (an `AudioWorklet` RMS energy + zero-crossing speech detector running at 0 cloud cost) gates the stream (`_isVadGated = true`), sends `audio_stream_end=True` to the relay, and **stops sending silent PCM packets**.
+  - **Result**: Gemini Live receives **0 audio tokens/sec**, and the relay **pauses tenant credit deduction** (`isIdleHold = true`) while keeping the socket warm!
+  - Meanwhile, the Local Secretary maintains a rolling **600ms Pre-Roll Ring Buffer** (12 chunks of 50ms PCM audio) in browser memory.
+  - The instant the visitor speaks (RMS > `0.016` for `80ms`) or clicks a topic:
+    - The Local Secretary immediately flushes the **600ms pre-roll buffer** followed by live audio to Gemini Live.
+    - **0ms connection overhead, 0 clipped syllables, and 0 tokens wasted during silence!**
+- **Stage 3 — `DEEP_HIBERNATION` (>75s of continuous silence or >45s tab hidden)**:
+  - After **75 seconds** of continuous silence (or **45 seconds** with `document.visibilityState === 'hidden'`), the relay closes the upstream Gemini connection cleanly to free concurrency slots and stops all metering.
+  - The Local Secretary remains active on the browser mic (`"Standby — Speak or Click to Resume"`). If the user speaks aloud later, the Secretary buffers `1.2s` of speech, auto-reconnects using `SessionResumptionConfig` + `sessionMemory`, and streams the buffered question seamlessly.
+
+---
+
+## 7. Deep Research: Website Variety, Inner Scroll Containers, Touch Events & Hard DOM Edge Cases
+
+1. **Inner Scroll Containers (`overflow-y: auto | scroll`)**:
+   - *Problem*: SaaS dashboards, split-pane layouts, and modals set `body { overflow: hidden }` and scroll inside a child `<main>`, `.overflow-y-auto`, or modal body. `window.scrollTo()` fails to move the page.
+   - *Fix in `ghost-cursor.js`*: Add `_getScrollableContainer(el)` which walks up `el.parentElement` checking `/(auto|scroll|overlay)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + 12`. Smooth-scroll `container.scrollTop` when an inner scroll parent exists, and scroll BOTH if nested.
+2. **Touch-Only Sliders & Carousels (Swiper.js, Embla, Slick, Keen-Slider, Flickity)**:
+   - *Problem*: Mobile-first carousels often listen to `TouchEvent` (`touchstart`, `touchmove`, `touchend`) or `PointerEvent` with `pointerType: 'touch', isPrimary: true` and ignore mouse drag events.
+   - *Fix in `ghost-cursor.js`*: Upgrade `_animateSwipeGesture()` to dispatch `PointerEvent(..., { pointerId: 1, pointerType: 'touch', isPrimary: true, buttons: 1 })` + synthesized `TouchEvent` (`new Touch(...)` where supported by the browser) + broaden Next/Prev button discovery to `.swiper-button-next`, `.embla__button--next`, `.slick-next`, and `[aria-label*="next" i]`.
+3. **Custom Headless Dropdowns & Portals (Radix UI, Shadcn, MUI, HeadlessUI, React-Select)**:
+   - *Problem*: Custom `<button role="combobox">` dropdowns mount their `[role="listbox"]` options at the end of `document.body` only *after* a click.
+   - *Fix in `ghost-cursor.js`*: In `typeIntoField()`, detect `role="combobox"` or `aria-haspopup="listbox"`, click the trigger first, wait `140ms` for the portal `[role="listbox"]` to mount, then fuzzy-match and click `[role="option"]`.
+4. **Lazy-Loaded Below-the-Fold Sections & Virtualized Lists**:
+   - *Problem*: Components inside `IntersectionObserver` or `React.lazy` only mount when scrolled near the viewport.
+   - *Fix in `weborient.js`*: If `scanner.resolveElement(selector)` returns `null`, perform a progressive viewport scroll-and-rescan before returning `elementFound: false`.
+5. **Cross-Origin Iframes (Calendly, Stripe Checkout, Typeform, HubSpot, YouTube)**:
+   - *Problem*: Browser Same-Origin Policy blocks scripts from accessing DOM nodes inside cross-origin `<iframe>` tags.
+   - *Fix in `dom-scanner.js`*: Index visible `<iframe>` containers with semantic titles inferred from `src`/`title` (e.g., `calendly.com` -> `"Calendly Booking Widget"`), spotlight the iframe frame, and have Kavya guide the visitor verbally without falsely claiming to click inside the iframe.
+
+---
+
+## 8. Strict Form Confirmation, PII/Payment Security & Anti-Abuse Hardening
+
+1. **Mandatory Two-Lock Form Submit Confirmation (`requireSubmitConfirmation: true`)**:
+   - Default `requireSubmitConfirmation: true` in `src/sdk/weborient.js`.
+   - When `click_element` targets any submit control (`type="submit"`, `[data-confirm-required]`, or button text matching `/\b(submit|pay|checkout|place order|confirm|book|send)\b/i`) without `confirmed: true`:
+     - Glide the Ghost Cursor to the button and render an interactive **Shadow DOM Confirmation Pill** (`[ ✓ Confirm Submit ]` / `[ ✕ Cancel ]`) above the button while Kavya asks for verbal confirmation.
+2. **Expanded PII / Payment / OTP Blacklist & Transcript Redaction**:
+   - Expand `DOMScanner.ignoredSelectors` and attribute checks in `src/sdk/dom-scanner.js` to block credit cards, CVV/CVC, bank account/IFSC/UPI PINs, OTP inputs (`autocomplete="one-time-code"`, `name*="otp"`), and government IDs (`aadhaar`, `pan`, `ssn`, `passport`, `gstin`).
+   - Scrub 10–16 digit numeric sequences from transcripts in `src/relay/weborient_relay.py` before persisting to MongoDB.
+3. **Securing Admin & Credit Endpoints + Per-IP Rate Limiting**:
+   - Require `X-Admin-Token` or verified Razorpay/Stripe HMAC signatures on credit top-up and key management routes, plus per-IP WebSocket connection rate limits (`max 3 concurrent / 40 per hour per IP`).
+
+---
+
+## 9. Multi-Key Gemini Live API Load Balancer & Full Client + Super-Admin Telemetry
+
+### 9.1 Multi-Key Load Balancer (`weborient_api_keys` in MongoDB + `DeployMate/src/pages/AdminPage.tsx`)
+- Store multiple paid Gemini API keys in MongoDB collection `weborient_api_keys` (`keyId`, `label`, `apiKey`, `maskedKey`, `status: 'active' | 'paused' | 'cooldown'`, `priority`, `activeSessions`, `totalSessions`, `totalMinutes`, `errorCount`, `lastError`, `cooldownUntil`).
+- Manage keys directly from the **`WebOrient SaaS` tab in `DeployMate/src/pages/AdminPage.tsx`**:
+  - **Add Key**, **Edit Label/Priority**, **Pause/Resume Key**, and **Delete Key**.
+- `GeminiKeyPool` in `src/relay/weborient_relay.py` routes new sessions to the least-loaded active key and automatically fails over to the next key in `<150ms` if any key returns `429 Quota Exceeded`, `403`, or `503` (placing the failed key on a 60s cooldown).
+
+### 9.2 Granular Session Telemetry, DOM Action Audit, Drop-Off Funnel & Lead Rescue
+- **Per-Session Telemetry (`weborient_sessions` in MongoDB)**:
+  - Tracks `creditsBurned`, `secretarySavedSeconds` (time held in 0-token `SECRETARY_HOLD`), `apiKeyUsed`, `userLanguage`, `transcripts[]`, `domEvents[]` (every `move_and_highlight`, `click_element`, `scroll_page`, `swipe_or_swap`, `fill_form_field` with `selector`, `label`, `success: boolean`, and `error`), `sectionsVisited[]`, `dropOffSection`, and `partialLead` (`name`, `email`, `phone`, `submitted`).
+- **Super-Admin & Client Dashboard Views**:
+  - **DeployMate Admin (`AdminPage.tsx`)**: Manage API keys in the load balancer, manage client plans/credits, inspect every client session's transcript + **DOM Action & Bug Timeline** (`✓ OK` vs `✕ FAILED selector`), and see unconverted/partial leads.
+  - **Client Portal (`testscript/dashboard.html`)**: View credit burn rate, Secretary VAD savings, **Section Drop-Off Funnel** (which product/pricing section visitors back off from), session transcripts, and abandoned/partial lead contacts.
+

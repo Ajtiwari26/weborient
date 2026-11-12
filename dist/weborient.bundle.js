@@ -2675,6 +2675,7 @@ class LiveClient {
     this.onInterrupted = options.onInterrupted || (() => {});
     this.onVadStateChange = options.onVadStateChange || (() => {});
     this.onCreditUpdate = options.onCreditUpdate || (() => {});
+    this.onReconnectNeeded = options.onReconnectNeeded || null;
 
     this.ws = null;
     this.captureContext = null;
@@ -2699,10 +2700,23 @@ class LiveClient {
     this.maxPreRollChunks = 6; // ~750ms rolling audio pre-roll at 128ms/frame
     this.secretarySavedSeconds = 0;
     this._vadTimer = null;
+    this._keepaliveTimer = null;
+    this._reconnectTimer = null;
+    this._reconnectAttempts = 0;
+    this._maxReconnectAttempts = 3;
+    this._userStopped = false;
+    this._terminalError = false;
     this._intentionalHibernate = false;
   }
 
   async connect(options = {}) {
+    this._userStopped = false;
+    this._terminalError = false;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!this.captureContext || this.captureContext.state === 'closed') {
       this.captureContext = new AudioCtx({ sampleRate: 16000 });
@@ -2745,6 +2759,7 @@ class LiveClient {
           await this._startAudioStreaming();
         }
         this._startSecretaryMonitor();
+        this._startKeepaliveLoop();
 
         const combinedChunks = [
           ...(Array.isArray(options.flushAudioChunks) ? options.flushAudioChunks : []),
@@ -2771,12 +2786,34 @@ class LiveClient {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (closeEvent) => {
         if (this.ws !== null && this.ws !== ws) return;
+        if (this._keepaliveTimer) {
+          clearInterval(this._keepaliveTimer);
+          this._keepaliveTimer = null;
+        }
         if (this._intentionalHibernate) {
           this.onStatusChange('hibernating');
           return;
         }
+
+        const code = closeEvent?.code || 1006;
+        const isTerminalClose = this._terminalError || code === 4002 || code === 4003;
+
+        if (!this._userStopped && !isTerminalClose && this._reconnectAttempts < this._maxReconnectAttempts && typeof this.onReconnectNeeded === 'function') {
+          this._reconnectAttempts += 1;
+          const delayMs = this._reconnectAttempts * 900;
+          console.warn(`[WebOrient] Connection interrupted (code=${code}); auto-reconnecting (${this._reconnectAttempts}/${this._maxReconnectAttempts}) in ${delayMs}ms...`);
+          this.ws = null;
+          this.onStatusChange('reconnecting');
+          this._reconnectTimer = setTimeout(() => {
+            if (!this._userStopped) {
+              this.onReconnectNeeded(this._reconnectAttempts);
+            }
+          }, delayMs);
+          return;
+        }
+
         this.onStatusChange('disconnected');
         this.stop();
       };
@@ -2792,6 +2829,17 @@ class LiveClient {
         }
       };
     });
+  }
+
+  _startKeepaliveLoop() {
+    if (this._keepaliveTimer) clearInterval(this._keepaliveTimer);
+    this._keepaliveTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(JSON.stringify({ ping: Date.now() }));
+        } catch (_) {}
+      }
+    }, 15000);
   }
 
   markActivity(reason = 'interaction') {
@@ -3018,7 +3066,25 @@ class LiveClient {
   }
 
   _handleServerMessage(msg) {
+    if (msg.pong) {
+      return;
+    }
+
+    if (msg.setupComplete) {
+      this._reconnectAttempts = 0;
+      return;
+    }
+
+    if (msg.error) {
+      console.error('[WebOrient] Relay error:', msg.error, msg.code || '');
+      if (msg.code === 'UNAUTHORIZED_OR_NO_CREDITS' || msg.code === 'RATE_LIMIT_EXCEEDED' || msg.code === 'UPSTREAM_POOL_EXHAUSTED') {
+        this._terminalError = true;
+      }
+      return;
+    }
+
     if (msg.creditUpdate) {
+      this._reconnectAttempts = 0;
       this.onCreditUpdate(msg.creditUpdate);
     }
 
@@ -3030,11 +3096,13 @@ class LiveClient {
     }
 
     if (msg.serverContent?.inputTranscription?.text) {
+      this._reconnectAttempts = 0;
       this.lastSpeechOrActionAt = Date.now();
       this.onTranscript(msg.serverContent.inputTranscription.text, 'user');
     }
 
     if (msg.serverContent?.modelTurn?.parts) {
+      this._reconnectAttempts = 0;
       this.lastSpeechOrActionAt = Date.now();
       for (const part of msg.serverContent.modelTurn.parts) {
         if (part.inlineData && part.inlineData.mimeType?.startsWith('audio/pcm')) {
@@ -3047,11 +3115,13 @@ class LiveClient {
     }
 
     if (msg.serverContent?.outputTranscription?.text) {
+      this._reconnectAttempts = 0;
       this.lastSpeechOrActionAt = Date.now();
       this.onTranscript(msg.serverContent.outputTranscription.text, 'model');
     }
 
     if (msg.toolCall?.functionCalls && msg.toolCall.functionCalls.length > 0) {
+      this._reconnectAttempts = 0;
       this.lastSpeechOrActionAt = Date.now();
       this.onToolCall(msg.toolCall.functionCalls);
     }
@@ -3183,7 +3253,16 @@ class LiveClient {
   }
 
   stop() {
+    this._userStopped = true;
     this._intentionalHibernate = false;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    if (this._keepaliveTimer) {
+      clearInterval(this._keepaliveTimer);
+      this._keepaliveTimer = null;
+    }
     if (this._vadTimer) {
       clearInterval(this._vadTimer);
       this._vadTimer = null;
@@ -3501,10 +3580,27 @@ class WebOrient {
           console.log(`[WebOrient] Status: ${status}`);
           if (status === 'hibernating') {
             this._syncShadowWidgetState(true, 'hibernating');
+          } else if (status === 'reconnecting') {
+            this._syncShadowWidgetState(true, 'connecting');
+          } else if (status === 'disconnected') {
+            this.memory.setLiveSessionStatus(false);
+            this.client = null;
+            this._syncShadowWidgetState(false, 'idle');
           } else {
             this._syncShadowWidgetState(status === 'connected', 'idle');
           }
           this._emit('status', { status });
+        },
+        onReconnectNeeded: async () => {
+          if (this._isWaking) return;
+          this._isWaking = true;
+          try {
+            await this.start({ isRestore: true, isAutoReconnect: true });
+          } catch (err) {
+            console.warn('[WebOrient] Auto-reconnect attempt failed:', err);
+          } finally {
+            this._isWaking = false;
+          }
         },
         onVadStateChange: async (vadState, meta = {}) => {
           this.secretarySavedSeconds = meta.savedSeconds || this.secretarySavedSeconds;
@@ -4467,18 +4563,21 @@ class WebOrient {
 
       btn.addEventListener('click', async () => {
         langPopover?.classList.remove('wo-open');
+        const hasOpenSocket = Boolean(this.client && this.client.ws && this.client.ws.readyState === WebSocket.OPEN);
         if (!this.client) {
           this._syncShadowWidgetState(true, 'connecting');
           try {
             await this.start();
           } catch (_) {
+            this.client = null;
             this._syncShadowWidgetState(false, 'offline');
           }
-        } else if (this.client.vadState === 'hibernating') {
+        } else if (this.client.vadState === 'hibernating' || !hasOpenSocket) {
           this._syncShadowWidgetState(true, 'connecting');
           try {
-            await this.start({ isRestore: true });
+            await this.start({ isRestore: this.client.vadState === 'hibernating' });
           } catch (_) {
+            this.client = null;
             this._syncShadowWidgetState(false, 'offline');
           }
         } else {

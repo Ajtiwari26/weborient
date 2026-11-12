@@ -282,10 +282,27 @@ export class WebOrient {
           console.log(`[WebOrient] Status: ${status}`);
           if (status === 'hibernating') {
             this._syncShadowWidgetState(true, 'hibernating');
+          } else if (status === 'reconnecting') {
+            this._syncShadowWidgetState(true, 'connecting');
+          } else if (status === 'disconnected') {
+            this.memory.setLiveSessionStatus(false);
+            this.client = null;
+            this._syncShadowWidgetState(false, 'idle');
           } else {
             this._syncShadowWidgetState(status === 'connected', 'idle');
           }
           this._emit('status', { status });
+        },
+        onReconnectNeeded: async () => {
+          if (this._isWaking) return;
+          this._isWaking = true;
+          try {
+            await this.start({ isRestore: true, isAutoReconnect: true });
+          } catch (err) {
+            console.warn('[WebOrient] Auto-reconnect attempt failed:', err);
+          } finally {
+            this._isWaking = false;
+          }
         },
         onVadStateChange: async (vadState, meta = {}) => {
           this.secretarySavedSeconds = meta.savedSeconds || this.secretarySavedSeconds;
@@ -1248,18 +1265,21 @@ export class WebOrient {
 
       btn.addEventListener('click', async () => {
         langPopover?.classList.remove('wo-open');
+        const hasOpenSocket = Boolean(this.client && this.client.ws && this.client.ws.readyState === WebSocket.OPEN);
         if (!this.client) {
           this._syncShadowWidgetState(true, 'connecting');
           try {
             await this.start();
           } catch (_) {
+            this.client = null;
             this._syncShadowWidgetState(false, 'offline');
           }
-        } else if (this.client.vadState === 'hibernating') {
+        } else if (this.client.vadState === 'hibernating' || !hasOpenSocket) {
           this._syncShadowWidgetState(true, 'connecting');
           try {
-            await this.start({ isRestore: true });
+            await this.start({ isRestore: this.client.vadState === 'hibernating' });
           } catch (_) {
+            this.client = null;
             this._syncShadowWidgetState(false, 'offline');
           }
         } else {

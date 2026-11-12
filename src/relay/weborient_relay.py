@@ -45,9 +45,23 @@ for candidate_env in [PROJECT_ROOT / ".env", PROJECT_ROOT.parent / "DeployMate" 
         except Exception:
             pass
 
+# Ensure google-genai uses Gemini Developer API (api_key) mode rather than Vertex AI
+for _gcp_var in (
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GCP_SERVICE_ACCOUNT_JSON",
+    "GCP_PROJECT",
+    "GCP_LOCATION",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+):
+    os.environ.pop(_gcp_var, None)
+
 PRIMARY_API_KEY = os.getenv("GEMINI_LIVE_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
 EXTRA_API_KEYS_RAW = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_BACKUP_API_KEYS") or ""
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.8-live")
+_RAW_VOICE = (os.getenv("GEMINI_LIVE_VOICE") or "Aoede").strip()
+# In AgentLine, the receptionist persona is "Kavya" whose Gemini Live prebuilt voice ID is "Aoede"
+VOICE_NAME = "Aoede" if _RAW_VOICE.lower() in ("", "kavya", "default") else _RAW_VOICE
 PORT = int(os.getenv("PORT", "8088"))
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 ADMIN_SECRET = (
@@ -198,11 +212,12 @@ class GeminiKeyPool:
         self._reset_active_sessions_on_boot()
 
     def _reset_active_sessions_on_boot(self):
-        """Resets stale in-flight session counters after process restart."""
+        """Resets stale in-flight session counters and transient cooldowns after process restart."""
         changed = False
         for kid, doc in self.keys.items():
-            if int(doc.get("activeSessions", 0)) != 0:
+            if int(doc.get("activeSessions", 0)) != 0 or float(doc.get("cooldownUntil", 0.0) or 0.0) > 0:
                 doc["activeSessions"] = 0
+                doc["cooldownUntil"] = 0.0
                 API_KEY_STORE[kid] = doc
                 changed = True
         if changed:
@@ -210,8 +225,8 @@ class GeminiKeyPool:
         if mongo_db is not None:
             try:
                 mongo_db["weborient_api_keys"].update_many(
-                    {"activeSessions": {"$ne": 0}},
-                    {"$set": {"activeSessions": 0}}
+                    {},
+                    {"$set": {"activeSessions": 0, "cooldownUntil": 0.0}}
                 )
             except Exception as e:
                 print(f"[WARN] Could not reset stale activeSessions in Mongo: {e}")
@@ -1187,11 +1202,12 @@ async def process_http_request(*args):
 def build_live_connect_config(
     full_prompt: str,
     tools: list,
-    resumption_handle: str | None = None
+    resumption_handle: str | None = None,
+    minimal: bool = False
 ) -> types.LiveConnectConfig:
     speech_config = types.SpeechConfig(
         voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kavya")
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=VOICE_NAME)
         )
     )
     cfg_kwargs = {
@@ -1202,23 +1218,24 @@ def build_live_connect_config(
         "system_instruction": types.Content(parts=[types.Part.from_text(text=full_prompt)]),
         "tools": tools
     }
-    # Enable ContextWindowCompressionConfig and SessionResumptionConfig if supported by SDK
-    if hasattr(types, "ContextWindowCompressionConfig") and hasattr(types, "SlidingWindow"):
-        try:
-            cfg_kwargs["context_window_compression"] = types.ContextWindowCompressionConfig(
-                trigger_tokens=12000,
-                sliding_window=types.SlidingWindow(target_tokens=8000)
-            )
-        except Exception:
-            pass
-    if hasattr(types, "SessionResumptionConfig"):
-        try:
-            resumption_kwargs: dict = {"transparent": True}
-            if resumption_handle:
-                resumption_kwargs["handle"] = resumption_handle
-            cfg_kwargs["session_resumption"] = types.SessionResumptionConfig(**resumption_kwargs)
-        except Exception:
-            pass
+    if not minimal:
+        # Enable ContextWindowCompressionConfig and SessionResumptionConfig (without Vertex-only transparent flag)
+        if hasattr(types, "ContextWindowCompressionConfig") and hasattr(types, "SlidingWindow"):
+            try:
+                cfg_kwargs["context_window_compression"] = types.ContextWindowCompressionConfig(
+                    trigger_tokens=12000,
+                    sliding_window=types.SlidingWindow(target_tokens=8000)
+                )
+            except Exception:
+                pass
+        if hasattr(types, "SessionResumptionConfig"):
+            try:
+                resumption_kwargs: dict = {}
+                if resumption_handle:
+                    resumption_kwargs["handle"] = resumption_handle
+                cfg_kwargs["session_resumption"] = types.SessionResumptionConfig(**resumption_kwargs)
+            except Exception:
+                pass
     return types.LiveConnectConfig(**cfg_kwargs)
 
 
@@ -1341,7 +1358,6 @@ async def handle_browser_client(websocket):
     full_prompt = load_system_prompt_and_manifest(site_id, session_mem, tenant)
     tools = get_gemini_tools()
     resumption_handle = session_mem.get("resumptionHandle") or None
-    config = build_live_connect_config(full_prompt, tools, resumption_handle=resumption_handle)
 
     # Multi-Key Load Balancer & Zero-Downtime Failover Loop
     candidates = KEY_POOL.get_ordered_candidate_keys()
@@ -1357,16 +1373,27 @@ async def handle_browser_client(websocket):
 
             try:
                 client = genai.Client(api_key=selected_api_key, http_options={"api_version": "v1alpha"})
-                attempt_handles = [resumption_handle, None] if resumption_handle else [None]
-                for attempt_idx, attempt_handle in enumerate(attempt_handles):
+                # Try: (1) with resumption handle if present, (2) fresh full config, (3) minimal guaranteed config
+                attempt_plan = (
+                    [(resumption_handle, False), (None, False), (None, True)]
+                    if resumption_handle
+                    else [(None, False), (None, True)]
+                )
+                for attempt_idx, (attempt_handle, is_minimal) in enumerate(attempt_plan):
                     if attempt_idx > 0:
                         if connected_once:
                             break
-                        session_mem["resumptionHandle"] = None
-                        resumption_handle = None
-                        persist_session_memory(session_id)
-                        config = build_live_connect_config(full_prompt, tools, resumption_handle=None)
-                        print(f"[RELAY] 🔄 Stale session resumption handle rejected; retrying fresh Live session cleanly.")
+                        if attempt_handle is None and session_mem.get("resumptionHandle"):
+                            session_mem["resumptionHandle"] = None
+                            resumption_handle = None
+                            persist_session_memory(session_id)
+                        print(f"[RELAY] 🔄 Retrying Live connect (minimal={is_minimal}, handle={bool(attempt_handle)})...")
+                    config = build_live_connect_config(
+                        full_prompt,
+                        tools,
+                        resumption_handle=attempt_handle,
+                        minimal=is_minimal
+                    )
                     try:
                         async with client.aio.live.connect(model=MODEL_NAME, config=config) as gemini_session:
                             connected_once = True
@@ -1377,12 +1404,23 @@ async def handle_browser_client(websocket):
 
                             print(
                                 f"[RELAY] ✅ Active session | tenant={tenant.get('companyName')} ({site_key}) | "
-                                f"key={selected_label} | credits={tenant.get('creditsMinutes')}m | sessionId={session_id}"
+                                f"key={selected_label} | voice={VOICE_NAME} (Kavya) | credits={tenant.get('creditsMinutes')}m | sessionId={session_id}"
                             )
+                            try:
+                                await websocket.send(json.dumps({
+                                    "setupComplete": {
+                                        "status": "ready",
+                                        "sessionId": session_id,
+                                        "voice": VOICE_NAME
+                                    }
+                                }))
+                            except Exception:
+                                pass
 
                             is_secretary_hold = False
                             session_minutes_burned = 0.0
                             last_saved_sec_reported = int(session_mem.get("secretarySavedSeconds", 0))
+                            pending_dom_context: str | None = None
 
                             async def credit_metering_loop():
                                 """Meters active voice co-browsing credits every 30s; pauses when Local Secretary holds stream."""
@@ -1422,12 +1460,7 @@ async def handle_browser_client(websocket):
                                                 "secretarySavedSeconds": current_saved
                                             }
                                         }))
-                                        if remaining == 0.5:
-                                            await gemini_session.send_client_content(
-                                                turns=types.Content(role="user", parts=[types.Part.from_text(text="[SYSTEM NOTICE: Only 30 seconds of voice credits remain. Wrap up your current action concisely.]")]),
-                                                turn_complete=False
-                                            )
-                                        elif remaining <= 0:
+                                        if remaining <= 0:
                                             session_mem["terminationReason"] = "credits_exhausted"
                                             persist_session_memory(session_id)
                                             await gemini_session.send_realtime_input(
@@ -1481,7 +1514,7 @@ async def handle_browser_client(websocket):
                                                 if getattr(sc, "output_transcription", None) and getattr(sc.output_transcription, "text", None):
                                                     raw_mtext = sc.output_transcription.text
                                                     clean_mtext = redact_sensitive_text(raw_mtext)
-                                                    print(f"[RELAY] 🤖 Kavya: {clean_mtext}")
+                                                    print(f"[RELAY] 🤖 Kavya ({VOICE_NAME}): {clean_mtext}")
                                                     session_mem.setdefault("transcripts", []).append({
                                                         "role": "model",
                                                         "text": clean_mtext,
@@ -1517,6 +1550,9 @@ async def handle_browser_client(websocket):
                                                     }))
 
                                                 if getattr(sc, "turn_complete", False):
+                                                    await websocket.send(json.dumps({
+                                                        "serverContent": {"turnComplete": True}
+                                                    }))
                                                     break
 
                                             if response.tool_call:
@@ -1531,6 +1567,7 @@ async def handle_browser_client(websocket):
                                                 await websocket.send(json.dumps({
                                                     "toolCall": {"functionCalls": calls}
                                                 }))
+                                        await asyncio.sleep(0.02)
                                 except websockets.exceptions.ConnectionClosed:
                                     pass
                                 except Exception as exc:
@@ -1542,12 +1579,16 @@ async def handle_browser_client(websocket):
                                         pass
 
                             async def forward_browser_to_gemini():
-                                nonlocal is_secretary_hold
+                                nonlocal is_secretary_hold, pending_dom_context
                                 audio_count = 0
                                 try:
                                     async for raw_msg in websocket:
                                         try:
                                             data = json.loads(raw_msg)
+
+                                            if "ping" in data:
+                                                await websocket.send(json.dumps({"pong": data["ping"]}))
+                                                continue
 
                                             if "vadControl" in data:
                                                 vc = data["vadControl"] or {}
@@ -1643,6 +1684,9 @@ async def handle_browser_client(websocket):
                                                                 if k not in ("domEventLogs", "partialLead")
                                                             }
                                                             sanitized_out["sessionMemoryDigest"] = sanitized_digest
+                                                        if pending_dom_context:
+                                                            sanitized_out["latestDomContext"] = pending_dom_context
+                                                            pending_dom_context = None
                                                         sanitized_response["output"] = sanitized_out
 
                                                     fn_responses.append(
@@ -1658,12 +1702,15 @@ async def handle_browser_client(websocket):
                                                 turn_complete = bool(data.get("turnComplete", True))
                                                 if turn_complete:
                                                     is_secretary_hold = False
-                                                    await gemini_session.send_realtime_input(text=data["text"])
+                                                    text_payload = str(data["text"])
+                                                    if pending_dom_context:
+                                                        text_payload = f"{pending_dom_context}\n\n{text_payload}"
+                                                        pending_dom_context = None
+                                                    await gemini_session.send_realtime_input(text=text_payload)
                                                 else:
-                                                    await gemini_session.send_client_content(
-                                                        turns=types.Content(role="user", parts=[types.Part.from_text(text=data["text"])]),
-                                                        turn_complete=False
-                                                    )
+                                                    # Never call send_client_content(turn_complete=False), which blocks realtime audio turns!
+                                                    # Store silent DOM/route context to attach on next tool response or prompt.
+                                                    pending_dom_context = str(data["text"])
 
                                         except websockets.exceptions.ConnectionClosed:
                                             break
@@ -1685,8 +1732,9 @@ async def handle_browser_client(websocket):
                                 persist_session_memory(session_id)
                             session_completed = True
                             break
-                    except Exception:
-                        if not connected_once and attempt_handle is not None and attempt_idx == 0:
+                    except Exception as inner_err:
+                        if not connected_once and attempt_idx < len(attempt_plan) - 1:
+                            print(f"[RELAY] ⚠️ Connect attempt {attempt_idx + 1} failed ({inner_err}); trying fallback config...")
                             continue
                         raise
 
@@ -1713,7 +1761,7 @@ async def handle_browser_client(websocket):
 async def main():
     print("=================================================================")
     print(" WebOrient by DeployMate — Multi-Tenant Relay Gateway (v1.0.0)")
-    print(f" Target Model : {MODEL_NAME} (Voice: Kavya)")
+    print(f" Target Model : {MODEL_NAME} (Voice: {VOICE_NAME} / Kavya Persona)")
     print(f" API Key Pool : {len(KEY_POOL.list_public_keys())} key(s) loaded in load balancer")
     print(f" Storage Mode : {'MongoDB Atlas (deploymate)' if mongo_db is not None else 'Local JSON (config/tenants.json)'}")
     print(f" WebSocket URI: ws://localhost:{PORT}?siteKey=wo_live_deploymate_demo")
@@ -1724,8 +1772,8 @@ async def main():
         "0.0.0.0",
         PORT,
         process_request=process_http_request,
-        ping_interval=None,
-        ping_timeout=None,
+        ping_interval=20,
+        ping_timeout=20,
         max_size=10 * 1024 * 1024
     ):
         await asyncio.Future()

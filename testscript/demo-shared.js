@@ -35,7 +35,14 @@ export function initMultiPageDemo(pageConfig = {}) {
     mountWidget: false,
     onEvent: (type, detail) => {
       if (type === 'status') {
-        syncAssistUI(detail.status === 'connected' || detail.status === 'hibernating', detail.status === 'hibernating' ? 'hibernating' : 'idle');
+        if (detail.status === 'reconnecting') {
+          syncAssistUI(true, 'connecting');
+        } else {
+          syncAssistUI(
+            detail.status === 'connected' || detail.status === 'hibernating',
+            detail.status === 'hibernating' ? 'hibernating' : 'idle'
+          );
+        }
       } else if (type === 'vadState') {
         if (detail.vadState === 'secretary_hold') syncAssistUI(true, 'secretary_hold');
         else if (detail.vadState === 'hibernating') syncAssistUI(true, 'hibernating');
@@ -76,6 +83,13 @@ export function addPersistentLog(action, details) {
 }
 
 function injectDeployMateBaseStyles() {
+  if (!document.querySelector('link[rel="icon"]')) {
+    const fav = document.createElement('link');
+    fav.rel = 'icon';
+    fav.type = 'image/svg+xml';
+    fav.href = 'deploymate-stacked-logo.svg';
+    document.head.appendChild(fav);
+  }
   if (document.getElementById('deploymate-design-system-styles')) return;
   const style = document.createElement('style');
   style.id = 'deploymate-design-system-styles';
@@ -292,15 +306,17 @@ function wireAssistToggleActions(weborient, activePage) {
   btnToggle.addEventListener('click', async (e) => {
     if (e.target.closest('#quick-lang-select')) return;
 
-    if (!weborient.client || weborient.client.vadState === 'hibernating') {
+    const hasOpenSocket = Boolean(weborient.client && weborient.client.ws && weborient.client.ws.readyState === WebSocket.OPEN);
+    if (!weborient.client || weborient.client.vadState === 'hibernating' || !hasOpenSocket) {
       syncAssistUI(true, 'connecting');
       const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       weborient.options.endpoint = isLocal ? 'ws://localhost:8088' : 'wss://relay.deploymate.in';
       try {
-        await weborient.start({ isRestore: Boolean(weborient.client) });
+        await weborient.start({ isRestore: Boolean(weborient.client && weborient.client.vadState === 'hibernating') });
         syncAssistUI(true, 'listening');
       } catch (err) {
         console.warn('[WebOrient] Connection error:', err);
+        weborient.client = null;
         syncAssistUI(false, 'offline');
       }
     } else {
