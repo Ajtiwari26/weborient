@@ -417,17 +417,32 @@ class SessionMemory {
       return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, 'user Devanagari speech transcript');
     }
 
-    const hinglishMatches = lower.match(
-      /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|ye|woh|wo|hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
+    const strongHinglish = lower.match(
+      /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|woh|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
     );
-    if (hinglishMatches && hinglishMatches.length >= 1) {
-      return this.setLanguage('hinglish', true, `user Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
+    const softHinglish = lower.match(
+      /\b(hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|ye|wo)\b/g
+    );
+    const totalHinglish = (strongHinglish ? strongHinglish.length : 0) + (softHinglish ? softHinglish.length : 0);
+    if ((strongHinglish && strongHinglish.length >= 1) || totalHinglish >= 2) {
+      const sample = [...(strongHinglish || []), ...(softHinglish || [])].slice(0, 3).join(', ');
+      return this.setLanguage('hinglish', true, `user Hinglish speech markers (${sample})`);
     }
 
-    const englishMatches = lower.match(
-      /\b(what|how|show|tell|can|you|please|where|which|about|this|that|the|for|with|open|close|book|demo|pricing|features|contact|calculate|voice|website)\b/g
+    const englishCoreMatches = lower.match(
+      /\b(what|how|show|tell|can|you|please|where|which|about|this|that|the|for|with|open|close|book|calculate|me|is|are|do|does|want|need|help|explain)\b/g
     );
-    if (englishMatches && englishMatches.length >= 2) {
+    const englishDomainMatches = lower.match(
+      /\b(demo|pricing|features|contact|voice|website|plan|form|section)\b/g
+    );
+    const coreCount = englishCoreMatches ? englishCoreMatches.length : 0;
+    const totalEnglish = coreCount + (englishDomainMatches ? englishDomainMatches.length : 0);
+    const isAlreadyIndicLocked = this.state.languageLocked && (this.state.userLanguage === 'hinglish' || this.state.userLanguage === 'hi-IN');
+    if (isAlreadyIndicLocked) {
+      if (coreCount >= 2 && totalEnglish >= 3 && totalHinglish === 0) {
+        return this.setLanguage('en-IN', true, 'user full English sentence transcript');
+      }
+    } else if (totalEnglish >= 2 && totalHinglish === 0) {
       return this.setLanguage('en-IN', true, 'user English speech transcript');
     }
 
@@ -575,6 +590,7 @@ class DOMScanner {
     ];
     this.sensitiveFieldRegex = /\b(password|passwd|cc-number|cc-csc|cc-exp|card.?num|credit.?card|debit.?card|cvv|cvc|iban|routing.?num|ifsc|account.?num|upi.?pin|one-time-code|otp|2fa|totp|aadhaar|aadhar|pan.?card|pan.?num|ssn|social.?security|passport.?num|gstin)\b/i;
     this._idCounter = 1;
+    this._woIdMetaMap = new Map();
   }
 
   matchElementFromSpeech(spokenText, todoChecklist = []) {
@@ -757,9 +773,42 @@ class DOMScanner {
     const raw = String(target).trim();
     if (!raw) return null;
 
-    if (/^wo-\d+$/i.test(raw)) {
-      const byWo = document.querySelector(`[data-wo-id="${raw.toLowerCase()}"]`);
+    const woAttrMatch = raw.match(/^\[?data-wo-id=["']?(wo-\d+)["']?\]?$/i) || raw.match(/^(wo-\d+)$/i);
+    if (woAttrMatch) {
+      const woId = woAttrMatch[1].toLowerCase();
+      const byWo = document.querySelector(`[data-wo-id="${woId}"]`);
       if (byWo && !this._isIgnored(byWo)) return byWo;
+
+      // Fallback when React/SPA re-render stripped or shifted data-wo-id: recover via cached element metadata
+      const cachedMeta = this._woIdMetaMap.get(woId);
+      if (cachedMeta) {
+        const candidates = this._collectAllCandidateElements();
+        let bestMetaEl = null;
+        let bestMetaScore = 0;
+        for (const el of candidates) {
+          if (this._isIgnored(el) || !this._isVisible(el, true)) continue;
+          const existingWo = el.getAttribute('data-wo-id');
+          if (existingWo && existingWo !== woId) continue;
+          let s = 0;
+          const lbl = this._getAccessibleLabel(el).toLowerCase();
+          const tag = el.tagName.toLowerCase();
+          const secNode = el.closest('section[id], [id*="modal"], [id*="drawer"], header, footer');
+          const secId = secNode ? (secNode.id || secNode.tagName.toLowerCase()) : null;
+          if (cachedMeta.label && lbl === cachedMeta.label.toLowerCase()) s += 90;
+          else if (cachedMeta.label && lbl && (lbl.includes(cachedMeta.label.toLowerCase()) || cachedMeta.label.toLowerCase().includes(lbl))) s += 55;
+          if (cachedMeta.tag && tag === cachedMeta.tag) s += 20;
+          if (cachedMeta.section && secId === cachedMeta.section) s += 25;
+          if (cachedMeta.name && (el.getAttribute('name') || '') === cachedMeta.name) s += 65;
+          if (s > bestMetaScore && s >= 65) {
+            bestMetaScore = s;
+            bestMetaEl = el;
+          }
+        }
+        if (bestMetaEl) {
+          bestMetaEl.setAttribute('data-wo-id', woId);
+          return bestMetaEl;
+        }
+      }
     }
 
     try {
@@ -800,9 +849,9 @@ class DOMScanner {
       let score = 0;
       if (label === needle || nameAttr === needle || idAttr === needle) {
         score = 100;
-      } else if (label.includes(needle) || (needle.includes(label) && label.length > 2)) {
+      } else if (label && (label.includes(needle) || (needle.includes(label) && label.length > 2))) {
         score = 75;
-      } else if (idAttr.includes(needle) || nameAttr.includes(needle)) {
+      } else if ((idAttr && idAttr.includes(needle)) || (nameAttr && nameAttr.includes(needle))) {
         score = 60;
       }
 
@@ -1078,7 +1127,21 @@ class DOMScanner {
     if (!el.getAttribute('data-wo-id')) {
       el.setAttribute('data-wo-id', `wo-${this._idCounter++}`);
     }
-    return el.getAttribute('data-wo-id');
+    const woId = el.getAttribute('data-wo-id');
+    try {
+      const lbl = this._getAccessibleLabel(el);
+      const secNode = el.closest('section[id], [id*="modal"], [id*="drawer"], header, footer');
+      const secId = secNode ? (secNode.id || secNode.tagName.toLowerCase()) : null;
+      if (lbl || el.getAttribute('name')) {
+        this._woIdMetaMap.set(woId, {
+          label: lbl,
+          tag: el.tagName.toLowerCase(),
+          section: secId,
+          name: el.getAttribute('name') || null
+        });
+      }
+    } catch (_) {}
+    return woId;
   }
 
   _isVisible(el, includeOffscreen = false) {
@@ -2654,10 +2717,11 @@ class GhostCursor {
  * WebOrient Live Client (v1.0.0 — "VIP + Local Secretary" Zero-Token VAD Gate, 600ms Pre-Roll Ring Buffer & Auto-Resume)
  * - Captures 16kHz mono PCM microphone audio (AudioWorklet with ScriptProcessor fallback)
  * - 3-Stage "VIP + Local Secretary" Architecture:
- *   1. ACTIVE (0s - 10s silence): Streams live 16kHz PCM to Gemini Live.
- *   2. SECRETARY_HOLD (10s - 75s silence): Browser AudioWorklet VAD gates silent PCM packets (0 tokens burned,
- *      0 credits deducted) while keeping a rolling 600ms Pre-Roll Ring Buffer in RAM. The instant the user speaks
- *      (RMS > threshold for 2+ frames), flushes the 600ms pre-roll + live speech in <15ms with zero clipped syllables!
+ *   1. ACTIVE (0s - 12s silence): Streams live 16kHz PCM to Gemini Live (gated until `setupComplete` so initial room noise
+ *      never interrupts Kavya's opening welcome, and protected against speaker echo bleed during model playback).
+ *   2. SECRETARY_HOLD (12s - 75s silence): Browser AudioWorklet VAD gates silent PCM packets (0 tokens burned,
+ *      0 credits deducted) while keeping a rolling ~750ms Pre-Roll Ring Buffer in RAM. The instant the user speaks
+ *      (RMS > threshold), flushes the pre-roll + live speech in <15ms with zero clipped syllables!
  *   3. HIBERNATING (>75s silence or >45s tab hidden): Disconnects upstream WebSocket to free cloud slots while
  *      the Local Secretary keeps monitoring the mic locally to auto-reconnect and flush speech when the user talks again.
  */
@@ -2669,6 +2733,7 @@ class LiveClient {
         ? 'ws://localhost:8088'
         : 'wss://relay.deploymate.in');
     this.onToolCall = options.onToolCall || (() => {});
+    this.onToolCallCancellation = options.onToolCallCancellation || (() => {});
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onTranscript = options.onTranscript || (() => {});
     this.onPlaybackChange = options.onPlaybackChange || (() => {});
@@ -2687,17 +2752,25 @@ class LiveClient {
     this.activeSourceNodes = new Set();
     this.nextPlayTime = 0;
     this.isPlaying = false;
+    this._playbackEndTimer = null;
+    this._bargeInUnlocked = false;
 
     // "VIP + Local Secretary" VAD & Pre-Roll Ring Buffer state
     this.vadState = 'active'; // 'active' | 'secretary_hold' | 'hibernating' | 'waking'
+    this.isSetupComplete = false;
+    this.resumedWithHandle = false;
+    this._setupCompleteHandler = null;
     this.lastSpeechOrActionAt = Date.now();
-    this.secretaryHoldAfterMs = options.secretaryHoldAfterMs || 10000; // 10s silence -> Secretary Hold (0 token burn)
+    this.secretaryHoldAfterMs = options.secretaryHoldAfterMs || 12000; // 12s silence -> Secretary Hold (0 token burn)
+    this.hiddenTabHoldAfterMs = options.hiddenTabHoldAfterMs || 12000; // 12s hidden tab -> Secretary Hold
     this.hibernateAfterMs = options.hibernateAfterMs || 75000;         // 75s silence -> Deep Hibernation
     this.hiddenTabHibernateMs = options.hiddenTabHibernateMs || 45000; // 45s hidden tab -> Deep Hibernation
-    this.vadThresholdRms = options.vadThresholdRms || 0.008;
+    this.vadThresholdRms = options.vadThresholdRms || 0.0055;
+    this.bargeInThresholdRms = options.bargeInThresholdRms || 0.015;
     this.consecutiveVoiceFrames = 0;
+    this.consecutiveBargeInFrames = 0;
     this.preRollBuffer = [];
-    this.maxPreRollChunks = 6; // ~750ms rolling audio pre-roll at 128ms/frame
+    this.maxPreRollChunks = 10; // ~640ms rolling audio pre-roll at 64ms/frame (1024 samples @ 16kHz)
     this.secretarySavedSeconds = 0;
     this._vadTimer = null;
     this._keepaliveTimer = null;
@@ -2705,14 +2778,26 @@ class LiveClient {
     this._reconnectAttempts = 0;
     this._maxReconnectAttempts = 3;
     this.isReconnecting = false;
+    this.isConnecting = false;
     this._userStopped = false;
     this._terminalError = false;
     this._intentionalHibernate = false;
+    this._connectReject = null;
+    this._lastErrorDetail = null;
+  }
+
+  _buildAbortError() {
+    const err = new Error('Connection cancelled by user');
+    err.name = 'AbortError';
+    return err;
   }
 
   async connect(options = {}) {
     this._userStopped = false;
     this._terminalError = false;
+    this._hadConnectionError = false;
+    this._lastErrorDetail = null;
+    this.isConnecting = true;
     if (!options.isAutoReconnect) {
       this.isReconnecting = false;
     }
@@ -2721,35 +2806,74 @@ class LiveClient {
       this._reconnectTimer = null;
     }
 
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!this.captureContext || this.captureContext.state === 'closed') {
-      this.captureContext = new AudioCtx({ sampleRate: 16000 });
-    }
-    if (!this.playbackContext || this.playbackContext.state === 'closed') {
-      this.playbackContext = new AudioCtx({ sampleRate: 24000 });
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!this.captureContext || this.captureContext.state === 'closed') {
+        this.captureContext = new AudioCtx({ sampleRate: 16000 });
+      }
+      if (!this.playbackContext || this.playbackContext.state === 'closed') {
+        this.playbackContext = new AudioCtx({ sampleRate: 24000 });
+      }
+
+      if (!this.mediaStream) {
+        this.mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+      }
+    } catch (err) {
+      this.isConnecting = false;
+      if (this._userStopped) {
+        this.stop({ silent: true });
+        throw this._buildAbortError();
+      }
+      throw err;
     }
 
-    if (!this.mediaStream) {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
+    if (this._userStopped) {
+      this.stop({ silent: true });
+      throw this._buildAbortError();
     }
 
     const wasWaking = this.vadState === 'waking' || this._intentionalHibernate;
     this._intentionalHibernate = false;
+    this.isSetupComplete = false;
+    this.resumedWithHandle = false;
     this.vadState = 'waking';
     this.lastSpeechOrActionAt = Date.now();
 
     return new Promise((resolve, reject) => {
       let settled = false;
       let openedThisSocket = false;
-      const ws = new WebSocket(this.endpoint);
+      let setupFallbackTimer = null;
+      const settleResolve = () => {
+        if (settled) return;
+        settled = true;
+        this.isConnecting = false;
+        this._connectReject = null;
+        resolve();
+      };
+      const settleReject = (err) => {
+        if (settled) return;
+        settled = true;
+        this.isConnecting = false;
+        this._connectReject = null;
+        reject(err);
+      };
+      this._connectReject = settleReject;
+
+      let ws;
+      try {
+        ws = new WebSocket(this.endpoint);
+      } catch (wsErr) {
+        settleReject(wsErr);
+        return;
+      }
       this.ws = ws;
 
       const canScheduleRetry = (isTerminal = this._terminalError) =>
@@ -2759,35 +2883,59 @@ class LiveClient {
         this._reconnectAttempts < this._maxReconnectAttempts &&
         typeof this.onReconnectNeeded === 'function';
 
-      ws.onopen = async () => {
-        if (this.ws !== ws) return;
-        settled = true;
-        openedThisSocket = true;
+      const finalizeSetupReady = (setupMeta = {}) => {
+        if (this.ws !== ws || this.isSetupComplete) return;
+        if (setupFallbackTimer) {
+          clearTimeout(setupFallbackTimer);
+          setupFallbackTimer = null;
+        }
+        this.isSetupComplete = true;
+        this.resumedWithHandle = Boolean(setupMeta && setupMeta.resumedWithHandle);
+        this._setupCompleteHandler = null;
         this.isReconnecting = false;
         this.vadState = 'active';
         this.consecutiveVoiceFrames = 0;
+        this.consecutiveBargeInFrames = 0;
         this.lastSpeechOrActionAt = Date.now();
         this.onStatusChange('connected');
         this.onVadStateChange('active', { savedSeconds: this.secretarySavedSeconds });
+
+        const explicitFlush = Array.isArray(options.flushAudioChunks) ? options.flushAudioChunks : [];
+        if (explicitFlush.length > 0) {
+          const combinedChunks = [...explicitFlush, ...this.preRollBuffer].slice(-this.maxPreRollChunks);
+          this.preRollBuffer = [];
+          if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
+            this._flushPreRollChunks(combinedChunks);
+          }
+        } else {
+          // Clear pre-connect room noise on fresh session start so it never interrupts Kavya's opening welcome
+          this.preRollBuffer = [];
+        }
+
+        settleResolve();
+      };
+
+      this._setupCompleteHandler = finalizeSetupReady;
+
+      ws.onopen = async () => {
+        if (this.ws !== ws) return;
+        openedThisSocket = true;
+        this.lastSpeechOrActionAt = Date.now();
+        if (options.initialContext && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({ clientInit: options.initialContext }));
+          } catch (_) {}
+        }
         if (!this.workletNode && !this.scriptProcessor) {
           await this._startAudioStreaming();
         }
         this._startSecretaryMonitor();
         this._startKeepaliveLoop();
 
-        const combinedChunks = [
-          ...(Array.isArray(options.flushAudioChunks) ? options.flushAudioChunks : []),
-          ...this.preRollBuffer
-        ].slice(-this.maxPreRollChunks);
-        this.preRollBuffer = [];
-        if (combinedChunks.length > 0) {
-          setTimeout(() => {
-            if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
-              this._flushPreRollChunks(combinedChunks);
-            }
-          }, 160);
-        }
-        resolve();
+        // Wait for relay's setupComplete message (with a 3500ms safety fallback for mock/custom endpoints)
+        setupFallbackTimer = setTimeout(() => {
+          finalizeSetupReady({});
+        }, 3500);
       };
 
       ws.onmessage = async (event) => {
@@ -2802,6 +2950,12 @@ class LiveClient {
 
       ws.onclose = (closeEvent) => {
         if (this.ws !== ws) return;
+        if (setupFallbackTimer) {
+          clearTimeout(setupFallbackTimer);
+          setupFallbackTimer = null;
+        }
+        this._setupCompleteHandler = null;
+        this.isSetupComplete = false;
         if (this._keepaliveTimer) {
           clearInterval(this._keepaliveTimer);
           this._keepaliveTimer = null;
@@ -2810,6 +2964,7 @@ class LiveClient {
           this.ws = null;
           this.isReconnecting = false;
           this.onStatusChange('hibernating');
+          settleResolve();
           return;
         }
 
@@ -2823,6 +2978,7 @@ class LiveClient {
           console.warn(`[WebOrient] Connection interrupted (code=${code}); auto-reconnecting (${this._reconnectAttempts}/${this._maxReconnectAttempts}) in ${delayMs}ms...`);
           this.ws = null;
           this.onStatusChange('reconnecting');
+          settleResolve();
           this._reconnectTimer = setTimeout(() => {
             this._reconnectTimer = null;
             if (!this._userStopped) {
@@ -2832,9 +2988,20 @@ class LiveClient {
           return;
         }
 
+        const errorDetail = this._lastErrorDetail;
+        const hadConnectionError = this._hadConnectionError;
+        const hasExplicitError = hadConnectionError || isTerminalClose;
         this.isReconnecting = false;
-        this.stop({ silent: true });
-        this.onStatusChange('disconnected');
+        this.stop({ silent: true, preserveConnectReject: true });
+        if (!hadConnectionError && isTerminalClose) {
+          this.onStatusChange('error', errorDetail || {
+            code: `CLOSE_${code}`,
+            message: closeEvent?.reason || 'Relay rejected connection'
+          });
+        } else if (!hasExplicitError) {
+          this.onStatusChange('disconnected');
+        }
+        settleReject(new Error(errorDetail?.message ? `${errorDetail.message} (code=${code})` : `WebSocket closed (code=${code})`));
       };
 
       ws.onerror = (err) => {
@@ -2842,12 +3009,15 @@ class LiveClient {
         console.error('[WebOrient] WebSocket error:', err);
         const willAutoReconnect = this.isReconnecting || canScheduleRetry();
         if (!willAutoReconnect) {
-          this.onStatusChange('error');
+          this._hadConnectionError = true;
+          this.onStatusChange('error', this._lastErrorDetail || {
+            code: 'WS_CONNECTION_ERROR',
+            message: `WebSocket connection failed to ${this.endpoint}`
+          });
         }
         if (!settled) {
-          settled = true;
           this.vadState = wasWaking ? 'hibernating' : 'active';
-          reject(new Error(`WebSocket connection failed to ${this.endpoint}`));
+          settleReject(new Error(`WebSocket connection failed to ${this.endpoint}`));
         }
       };
     });
@@ -2884,14 +3054,15 @@ class LiveClient {
       const isTabHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
       if (this.vadState === 'active') {
-        if (idleMs >= this.secretaryHoldAfterMs || (isTabHidden && idleMs >= 5000)) {
+        if (!this.isSetupComplete) return;
+        if (idleMs >= this.secretaryHoldAfterMs || (isTabHidden && idleMs >= this.hiddenTabHoldAfterMs)) {
           this.vadState = 'secretary_hold';
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
               vadControl: {
                 state: 'secretary_hold',
                 idleMs,
-                reason: isTabHidden ? 'tab_hidden' : 'silence_10s',
+                reason: isTabHidden ? 'tab_hidden' : 'silence_12s',
                 savedSeconds: this.secretarySavedSeconds
               }
             }));
@@ -2992,7 +3163,7 @@ class LiveClient {
           class WebOrientPCMProcessor extends AudioWorkletProcessor {
             constructor() {
               super();
-              this.buffer = new Float32Array(2048);
+              this.buffer = new Float32Array(1024);
               this.offset = 0;
             }
             process(inputs) {
@@ -3028,7 +3199,7 @@ class LiveClient {
       }
     }
 
-    this.scriptProcessor = this.captureContext.createScriptProcessor(4096, 1, 1);
+    this.scriptProcessor = this.captureContext.createScriptProcessor(2048, 1, 1);
     this.scriptProcessor.onaudioprocess = (e) => {
       const inputData = e.inputBuffer.getChannelData(0);
       this._sendFloat32AudioFrame(inputData);
@@ -3049,17 +3220,42 @@ class LiveClient {
 
   _sendFloat32AudioFrame(float32Array) {
     const rms = this._computeRmsEnergy(float32Array);
-    const pcm16 = this._floatTo16BitPCM(float32Array);
+
+    // During model playback, attenuate quiet speaker echo (-16dB / 0.15x) instead of hard-dropping the stream
+    // or polluting preRollBuffer with raw speaker bleed; pass 1.0x audio within 64ms when user barges in!
+    let frameToEncode = float32Array;
+    if (this.isPlaying) {
+      if (rms >= this.bargeInThresholdRms) {
+        this.consecutiveBargeInFrames += 1;
+        if (this.consecutiveBargeInFrames >= 2 || rms >= this.bargeInThresholdRms * 1.5) {
+          this._bargeInUnlocked = true;
+        }
+      } else if (!this._bargeInUnlocked) {
+        this.consecutiveBargeInFrames = 0;
+      }
+      if (!this._bargeInUnlocked) {
+        const attenuated = new Float32Array(float32Array.length);
+        for (let i = 0; i < float32Array.length; i++) {
+          attenuated[i] = float32Array[i] * 0.15;
+        }
+        frameToEncode = attenuated;
+      }
+    }
+
+    const pcm16 = this._floatTo16BitPCM(frameToEncode);
     const base64 = this._arrayBufferToBase64(pcm16.buffer);
 
-    this.preRollBuffer.push(base64);
-    if (this.preRollBuffer.length > this.maxPreRollChunks) {
-      this.preRollBuffer.shift();
+    if (!this.isPlaying || this._bargeInUnlocked) {
+      this.preRollBuffer.push(base64);
+      if (this.preRollBuffer.length > this.maxPreRollChunks) {
+        this.preRollBuffer.shift();
+      }
     }
 
     if (!this.isPlaying && rms >= this.vadThresholdRms) {
       this.consecutiveVoiceFrames += 1;
-      if (this.consecutiveVoiceFrames >= 2) {
+      const isStrongVoice = this.consecutiveVoiceFrames >= 2 && rms >= this.vadThresholdRms * 2.2;
+      if (this.consecutiveVoiceFrames >= 3 || isStrongVoice) {
         this.lastSpeechOrActionAt = Date.now();
         if (this.vadState === 'secretary_hold') {
           this._wakeFromSecretaryHold('voice_detected');
@@ -3077,7 +3273,7 @@ class LiveClient {
       this.consecutiveVoiceFrames = 0;
     }
 
-    if (this.vadState !== 'active') return;
+    if (!this.isSetupComplete || this.vadState !== 'active') return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     this.ws.send(JSON.stringify({
@@ -3094,11 +3290,20 @@ class LiveClient {
 
     if (msg.setupComplete) {
       this._reconnectAttempts = 0;
+      if (typeof this._setupCompleteHandler === 'function') {
+        this._setupCompleteHandler(msg.setupComplete);
+      }
+      return;
+    }
+
+    if (msg.toolCallCancellation?.ids) {
+      this.onToolCallCancellation(msg.toolCallCancellation.ids);
       return;
     }
 
     if (msg.error) {
       console.error('[WebOrient] Relay error:', msg.error, msg.code || '');
+      this._lastErrorDetail = { code: msg.code || null, message: String(msg.error) };
       if (msg.code === 'UNAUTHORIZED_OR_NO_CREDITS' || msg.code === 'RATE_LIMIT_EXCEEDED' || msg.code === 'UPSTREAM_POOL_EXHAUSTED') {
         this._terminalError = true;
       }
@@ -3175,8 +3380,14 @@ class LiveClient {
     sourceNode.start(startAt);
     this.nextPlayTime = startAt + audioBuffer.duration;
 
+    if (this._playbackEndTimer) {
+      clearTimeout(this._playbackEndTimer);
+      this._playbackEndTimer = null;
+    }
     if (!this.isPlaying) {
       this.isPlaying = true;
+      this._bargeInUnlocked = false;
+      this.consecutiveBargeInFrames = 0;
       this.onPlaybackChange(true);
     }
 
@@ -3184,14 +3395,26 @@ class LiveClient {
     sourceNode.onended = () => {
       this.activeSourceNodes.delete(sourceNode);
       if (this.activeSourceNodes.size === 0) {
-        this.isPlaying = false;
-        this.lastSpeechOrActionAt = Date.now();
-        this.onPlaybackChange(false);
+        if (this._playbackEndTimer) clearTimeout(this._playbackEndTimer);
+        this._playbackEndTimer = setTimeout(() => {
+          this._playbackEndTimer = null;
+          if (this.activeSourceNodes.size === 0) {
+            this.isPlaying = false;
+            this._bargeInUnlocked = false;
+            this.consecutiveBargeInFrames = 0;
+            this.lastSpeechOrActionAt = Date.now();
+            this.onPlaybackChange(false);
+          }
+        }, 160);
       }
     };
   }
 
   _clearAudioQueue() {
+    if (this._playbackEndTimer) {
+      clearTimeout(this._playbackEndTimer);
+      this._playbackEndTimer = null;
+    }
     for (const node of this.activeSourceNodes) {
       try {
         node.stop(0);
@@ -3202,6 +3425,8 @@ class LiveClient {
     if (this.playbackContext) {
       this.nextPlayTime = this.playbackContext.currentTime;
     }
+    this._bargeInUnlocked = false;
+    this.consecutiveBargeInFrames = 0;
     if (this.isPlaying) {
       this.isPlaying = false;
       this.onPlaybackChange(false);
@@ -3232,7 +3457,10 @@ class LiveClient {
       if (turnComplete) {
         this.markActivity('text_prompt');
       }
-      this.ws.send(JSON.stringify({ text: String(text), turnComplete }));
+      const payload = { text: String(text), turnComplete };
+      if (options.flushRealtime) payload.flushRealtime = true;
+      if (options.userLanguage) payload.userLanguage = options.userLanguage;
+      this.ws.send(JSON.stringify(payload));
     }
   }
 
@@ -3277,8 +3505,15 @@ class LiveClient {
   stop(options = {}) {
     this._userStopped = true;
     this._intentionalHibernate = false;
+    this.isSetupComplete = false;
+    this._setupCompleteHandler = null;
+    this.isConnecting = false;
     this.isReconnecting = false;
     this._reconnectAttempts = 0;
+    const pendingConnectReject = options.preserveConnectReject ? null : this._connectReject;
+    if (!options.preserveConnectReject) {
+      this._connectReject = null;
+    }
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
@@ -3315,10 +3550,19 @@ class LiveClient {
     if (this.ws) {
       const closingWs = this.ws;
       this.ws = null;
-      try { closingWs.close(); } catch (_) {}
+      try {
+        if (options.forNavigation && closingWs.readyState === WebSocket.OPEN) {
+          closingWs.send(JSON.stringify({ vadControl: { state: 'navigating', savedSeconds: this.secretarySavedSeconds } }));
+        }
+        closingWs.close(1000, options.forNavigation ? 'Page navigation' : 'Client stopped');
+      } catch (_) {}
     }
     if (!options.silent) {
+      this._lastErrorDetail = null;
       this.onStatusChange('disconnected');
+    }
+    if (typeof pendingConnectReject === 'function') {
+      pendingConnectReject(this._buildAbortError());
     }
   }
 }
@@ -3406,6 +3650,7 @@ class WebOrient {
     this._domObserver = null;
     this._lastPopupSignature = '';
     this._lastObservedRoute = '';
+    this._lastConnectionError = null;
 
     if (typeof window !== 'undefined') {
       const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
@@ -3550,6 +3795,16 @@ class WebOrient {
       lightSelect.value = langCfg.code;
     }
 
+    if (this.client && this.client.isSetupComplete && prevLang && prevLang !== langCfg.code) {
+      this.client.sendText(
+        `[LANGUAGE UPDATED BY USER]: Locked language is now ${langCfg.name} (${langCfg.code}). Speak aloud and write every Ghost Cursor tool 'explanation' badge strictly in ${langCfg.name} without announcing the language change.`,
+        { turnComplete: false, userLanguage: langCfg.code }
+      );
+      if (typeof this.client.sendTelemetry === 'function') {
+        this.client.sendTelemetry({ userLanguage: langCfg.code });
+      }
+    }
+
     this._emit('languageChange', langCfg);
   }
 
@@ -3584,6 +3839,8 @@ class WebOrient {
   }
 
   async start(options = {}) {
+    if (this.client?.isConnecting) return;
+    this._lastConnectionError = null;
     const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || getDefaultRelayEndpoint();
     this.options.endpoint = endpoint;
 
@@ -3604,22 +3861,33 @@ class WebOrient {
           }
           return this.handleToolCall(callsOrName, args, callId);
         },
-        onStatusChange: (status) => {
-          console.log(`[WebOrient] Status: ${status}`);
+        onToolCallCancellation: (ids) => {
+          this.cursor.cancelActiveActions();
+          this._emit('toolCallCancellation', { ids });
+        },
+        onStatusChange: (status, detail = null) => {
+          console.log(`[WebOrient] Status: ${status}${detail?.code ? ` (${detail.code})` : ''}`);
           if (status === 'hibernating') {
             this._syncShadowWidgetState(true, 'hibernating');
           } else if (status === 'reconnecting') {
             this._syncShadowWidgetState(true, 'connecting');
           } else if (status === 'disconnected') {
+            this._lastConnectionError = null;
             this.memory.setLiveSessionStatus(false);
             this.client = null;
             this._syncShadowWidgetState(false, 'idle');
           } else if (status === 'error' && this.client?.isReconnecting) {
             this._syncShadowWidgetState(true, 'connecting');
+          } else if (status === 'error') {
+            this._lastConnectionError = detail || null;
+            this.memory.setLiveSessionStatus(false);
+            this.client = null;
+            this._syncShadowWidgetState(false, 'offline');
           } else {
+            if (status === 'connected') this._lastConnectionError = null;
             this._syncShadowWidgetState(status === 'connected', 'idle');
           }
-          this._emit('status', { status });
+          this._emit('status', detail ? { status, detail } : { status });
         },
         onReconnectNeeded: async () => {
           if (this._isWaking) return;
@@ -3646,8 +3914,10 @@ class WebOrient {
               await this.start({ isRestore: true, flushAudioChunks: meta.bufferedChunks || [] });
             } catch (err) {
               console.warn('[WebOrient] Auto-wake from hibernation failed:', err);
-              if (this.client) this.client.vadState = 'hibernating';
-              this._syncShadowWidgetState(true, 'hibernating');
+              if (this.client && !this.client.isReconnecting) {
+                this.client.vadState = 'hibernating';
+                this._syncShadowWidgetState(true, 'hibernating');
+              }
             } finally {
               this._isWaking = false;
             }
@@ -3688,13 +3958,7 @@ class WebOrient {
       this.client.endpoint = wsUrl;
     }
 
-    await this.client.connect({
-      flushAudioChunks: options.flushAudioChunks || [],
-      isAutoReconnect: Boolean(options.isAutoReconnect)
-    });
-    this.memory.setLiveSessionStatus(true, endpoint);
-    this._syncShadowWidgetState(true, 'listening');
-
+    // Scan live page DOM BEFORE connecting so pre-connect clientInit carries the current page's snapshot
     this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
     const initialSnapshot = this.scanner.captureStateSnapshot();
     const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 110);
@@ -3704,6 +3968,19 @@ class WebOrient {
     const liveMetadata = this._extractLiveSiteMetadata();
     const memorySummary = this.memory.buildModelContextSummary();
     const isRestore = Boolean(options.isRestore) && this.memory.state.recentTranscripts.length > 0;
+    const isDeployMateSite =
+      isWebOrientDemoSite() ||
+      this.options.siteKey === 'wo_live_deploymate_main' ||
+      /deploymate/i.test(document.title || '');
+    const topSectionTitles = (pageContent.matchingSections || [])
+      .map(s => s.heading)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(', ');
+
+    const welcomeDirective = isDeployMateSite
+      ? `\n\n[SESSION START — SPEAK FIRST NOW]: A visitor just connected to WebOrient on ${document.title || 'DeployMate'}. Do NOT wait for them to say hello! Speak aloud right now with a warm, friendly 1-2 sentence welcome (introduce yourself as WebOrient on DeployMate, mention you can guide them around the website with the Ghost Cursor, and suggest 1 or 2 things to explore like testing the live voice agent, WhatsApp CRM, or calculating ROI savings). Never mention what language you are speaking—just speak naturally and pause to follow the user's lead!`
+      : `\n\n[SESSION START — SPEAK FIRST NOW]: A visitor just connected to WebOrient on ${document.title || 'this website'}. Do NOT wait for them to say hello! Speak aloud right now with a warm, friendly 1-2 sentence welcome (introduce yourself as the WebOrient co-pilot for ${document.title || 'this website'}, mention you can guide them around the page with the Ghost Cursor, and offer to explore ${topSectionTitles || 'the key sections and tools on screen'}). Never mention what language you are speaking—just speak naturally and pause to follow the user's lead!`;
 
     const handoffPayload =
       `[SESSION CONTINUITY & FULL DOM INDEX HANDOFF]\n${memorySummary}\n` +
@@ -3714,11 +3991,27 @@ class WebOrient {
       `${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 180) })))}\n` +
       `[ALL INDEXED BUTTONS, INPUTS, IFRAMES, BANNERS & CLOSE ('X') CONTROLS ON PAGE (${initialElements.length} items)]:\n` +
       `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false, isIframeEmbed: e.isIframeEmbed || false })))}` +
-      (isRestore
-        ? ''
-        : `\n\n[SESSION START — SPEAK FIRST NOW]: A visitor just connected to WebOrient on ${document.title || 'DeployMate'}. Do NOT wait for them to say hello! Speak aloud right now with a warm, friendly 1-2 sentence welcome (introduce yourself as WebOrient on DeployMate, mention you can guide them around the website with the Ghost Cursor, and suggest 1 or 2 things to explore like testing the live voice agent, WhatsApp CRM, or calculating ROI savings). Never mention what language you are speaking—just speak naturally and pause to follow the user's lead!`);
+      (isRestore ? '' : welcomeDirective);
 
-    this.client.sendText(handoffPayload, { turnComplete: !isRestore });
+    await this.client.connect({
+      flushAudioChunks: options.flushAudioChunks || [],
+      isAutoReconnect: Boolean(options.isAutoReconnect),
+      initialContext: {
+        userLanguage: this.memory.state.userLanguage || 'en-IN',
+        latestDomSnapshot: handoffPayload.slice(-3500),
+        isRestore
+      }
+    });
+    if (!this.client || this.client._userStopped || this.client.isReconnecting) {
+      return;
+    }
+    this.memory.setLiveSessionStatus(true, endpoint);
+    this._syncShadowWidgetState(true, 'listening');
+
+    // Queue restored page DOM silently when resuming so it attaches to the next user/tool turn without triggering an unsolicited reply.
+    this.client.sendText(handoffPayload, {
+      turnComplete: !isRestore
+    });
   }
 
   _getCleanSpokenCaption(buffer) {
@@ -3824,12 +4117,17 @@ class WebOrient {
   async handleToolCallBatch(calls = []) {
     if (!Array.isArray(calls) || calls.length === 0) return [];
     const responses = [];
+    let pendingNavigationHref = null;
     for (let i = 0; i < calls.length; i++) {
       const c = calls[i];
       const res = await this.handleToolCall(c.name, c.args || {}, null, {
         fastAckVisualMove: true,
         skipAnimation: i > 0 && (c.name === 'move_and_highlight' || c.name === 'show_and_describe')
       });
+      if (res && res._deferredHref) {
+        pendingNavigationHref = res._deferredHref;
+        delete res._deferredHref;
+      }
       if (c.id) {
         responses.push({
           id: c.id,
@@ -3840,6 +4138,15 @@ class WebOrient {
     }
     if (this.client && responses.length > 0) {
       this.client.sendToolResponse(responses);
+    }
+    if (pendingNavigationHref && typeof window !== 'undefined') {
+      if (this.client) {
+        this.client.stop({ silent: true, forNavigation: true });
+        this.client = null;
+      }
+      setTimeout(() => {
+        window.location.href = pendingNavigationHref;
+      }, 60);
     }
     return responses;
   }
@@ -3942,22 +4249,36 @@ class WebOrient {
           const isSubmit = el && this._isSubmitButton(el);
 
           if (isSubmit && this.options.requireSubmitConfirmation && !args.confirmed) {
-            await this.cursor.moveToElement(el, true, explanation || 'Confirm submit');
-            this.cursor.showSubmitConfirmationPrompt(
-              el,
-              () => {
-                this.memory.capturePartialFormFact('submitted', 'true', true);
-                if (this.client) {
-                  this.client.sendText('[USER CONFIRMED & SUBMITTED ON SCREEN]: The visitor clicked the on-screen Confirm & Submit button.', { turnComplete: false });
+            const mountConfirmPrompt = async () => {
+              await this.cursor.moveToElement(el, true, explanation || 'Confirm submit');
+              this.cursor.showSubmitConfirmationPrompt(
+                el,
+                async () => {
+                  this.memory.capturePartialFormFact('submitted', 'true', true);
+                  await this.handleToolCall('click_element', { ...args, confirmed: true });
+                  if (this.client) {
+                    this.client.sendText(
+                      '[USER CONFIRMED & SUBMITTED ON SCREEN]: The visitor clicked Confirm & Submit on screen. Briefly confirm aloud in their locked language that the form has been submitted!',
+                      { turnComplete: true }
+                    );
+                  }
+                },
+                () => {
+                  if (this.client) {
+                    this.client.sendText(
+                      '[USER CANCELLED SUBMIT]: The visitor clicked Cancel on the submit confirmation prompt. Briefly acknowledge aloud that submission was cancelled.',
+                      { turnComplete: true }
+                    );
+                  }
                 }
-                this.handleToolCall('click_element', { ...args, confirmed: true });
-              },
-              () => {
-                if (this.client) {
-                  this.client.sendText('[USER CANCELLED SUBMIT]: The user clicked Cancel on the submit confirmation prompt.', { turnComplete: false });
-                }
-              }
-            );
+              );
+            };
+            if (fastAck) {
+              deferredVisualTask = true;
+              this._enqueueVisualTask(mountConfirmPrompt);
+            } else {
+              await mountConfirmPrompt();
+            }
             result = {
               success: true,
               requiresConfirmation: true,
@@ -3988,19 +4309,78 @@ class WebOrient {
           break;
         }
 
-        case 'fill_form_field':
-          result = await this.cursor.typeIntoField(args.selector, args.value ?? '', 22, explanation);
-          this.memory.capturePartialFormFact(result.fieldName || args.selector, args.value ?? '');
-          this.memory.markOriented({ selector: args.selector, title: explanation || `Filled ${args.selector}` });
-          break;
-
-        case 'fill_form_batch':
-          result = await this.cursor.fillFormBatch(args.fields || [], explanation);
-          for (const f of args.fields || []) {
-            if (f && f.selector) this.memory.capturePartialFormFact(f.selector, f.value ?? '');
+        case 'fill_form_field': {
+          const fieldEl = this.scanner.resolveElement(args.selector);
+          if (!fieldEl) {
+            result = { success: false, elementFound: false, error: `Form field not found: ${args.selector}` };
+          } else if (fastAck) {
+            const normVal = this.cursor._normalizeVoiceInput(fieldEl, args.value ?? '');
+            this.memory.capturePartialFormFact(fieldEl.name || fieldEl.id || args.selector, normVal);
+            this.memory.markOriented({ selector: args.selector, title: explanation || `Filled ${args.selector}` });
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() => this.cursor.typeIntoField(fieldEl, args.value ?? '', 22, explanation));
+            result = {
+              success: true,
+              elementFound: true,
+              action: 'fill_form_field',
+              selector: args.selector,
+              fieldName: fieldEl.name || fieldEl.id || '',
+              currentValue: normVal,
+              valid: true,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now typing into this form field. Confirm the value aloud to the user right now!'
+            };
+          } else {
+            result = await this.cursor.typeIntoField(args.selector, args.value ?? '', 22, explanation);
+            this.memory.capturePartialFormFact(result.fieldName || args.selector, args.value ?? '');
+            this.memory.markOriented({ selector: args.selector, title: explanation || `Filled ${args.selector}` });
           }
-          this.memory.markOriented({ selector: args.fields?.[0]?.selector || 'form', title: explanation || `Batch filled ${result.filledCount} fields` });
           break;
+        }
+
+        case 'fill_form_batch': {
+          const batchFields = Array.isArray(args.fields) ? args.fields : [];
+          const resolvedBatch = [];
+          const missingFields = [];
+          for (const f of batchFields) {
+            if (!f || !f.selector) continue;
+            const fEl = this.scanner.resolveElement(f.selector);
+            if (fEl) {
+              const normV = this.cursor._normalizeVoiceInput(fEl, f.value ?? '');
+              this.memory.capturePartialFormFact(fEl.name || fEl.id || f.selector, normV);
+              resolvedBatch.push({ ...f, element: fEl, normalizedValue: normV });
+            } else {
+              missingFields.push({ selector: f.selector, valid: false, error: `Field not found: ${f.selector}` });
+            }
+          }
+          this.memory.markOriented({ selector: resolvedBatch[0]?.selector || batchFields[0]?.selector || 'form', title: explanation || `Batch filled ${resolvedBatch.length} fields` });
+          const filteredBatch = resolvedBatch.map(r => ({ selector: r.element, value: r.value, explanation: r.explanation }));
+          if (fastAck && batchFields.length > 0) {
+            if (filteredBatch.length > 0) {
+              deferredVisualTask = true;
+              this._enqueueVisualTask(() => this.cursor.fillFormBatch(filteredBatch, explanation));
+            }
+            result = {
+              success: missingFields.length === 0 && filteredBatch.length > 0,
+              filledCount: filteredBatch.length,
+              allValid: missingFields.length === 0,
+              invalidFields: missingFields,
+              audioSyncDirective: filteredBatch.length > 0
+                ? 'SPEAK_ALOUD_NOW: The Ghost Cursor is now filling these form fields sequentially on screen. Confirm the entries aloud while the user watches!'
+                : 'None of the requested form fields were found on screen.'
+            };
+          } else if (filteredBatch.length > 0) {
+            result = await this.cursor.fillFormBatch(filteredBatch, explanation);
+          } else {
+            result = {
+              success: false,
+              filledCount: 0,
+              allValid: false,
+              invalidFields: missingFields,
+              audioSyncDirective: 'None of the requested form fields were found on screen.'
+            };
+          }
+          break;
+        }
 
         case 'scroll_page':
           if (fastAck) {
@@ -4027,18 +4407,39 @@ class WebOrient {
           }
           break;
 
-        case 'swipe_or_swap':
-          result = await this.cursor.swipeOrSwap(
-            args.selector,
-            args.action || 'next',
-            args.targetValue ?? null,
-            explanation
-          );
-          this.memory.markOriented({ selector: args.selector, title: explanation || args.selector });
+        case 'swipe_or_swap': {
+          const swipeEl = this.scanner.resolveElement(args.selector);
+          if (!swipeEl) {
+            result = { success: false, elementFound: false, error: `Target widget not found: ${args.selector}` };
+          } else if (fastAck) {
+            this.memory.markOriented({ selector: args.selector, title: explanation || args.selector });
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() =>
+              this.cursor.swipeOrSwap(swipeEl, args.action || 'next', args.targetValue ?? null, explanation)
+            );
+            result = {
+              success: true,
+              elementFound: true,
+              action: 'swipe_or_swap',
+              selector: args.selector,
+              direction: args.action || 'next',
+              targetValue: args.targetValue ?? null,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now swiping/toggling this widget. Describe the change aloud right now!'
+            };
+          } else {
+            result = await this.cursor.swipeOrSwap(
+              args.selector,
+              args.action || 'next',
+              args.targetValue ?? null,
+              explanation
+            );
+            this.memory.markOriented({ selector: args.selector, title: explanation || args.selector });
+          }
           break;
+        }
 
         case 'navigate_route':
-          result = await this._handleNavigation(args.path, args.targetSelector, explanation);
+          result = await this._handleNavigation(args.path, args.targetSelector, explanation, { deferLocationAssign: Boolean(callId || fastAck) });
           break;
 
         case 'scan_visible_elements':
@@ -4082,14 +4483,26 @@ class WebOrient {
           }
           break;
 
-        case 'guide_tour':
-          result = await this.cursor.guideTour(args.steps || []);
-          for (const st of args.steps || []) {
-            if (st.selector) {
+        case 'guide_tour': {
+          const tourSteps = Array.isArray(args.steps) ? args.steps : [];
+          for (const st of tourSteps) {
+            if (st && st.selector) {
               this.memory.markOriented({ selector: st.selector, title: st.explanation || st.selector });
             }
           }
+          if (fastAck && tourSteps.length > 0) {
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() => this.cursor.guideTour(tourSteps));
+            result = {
+              success: true,
+              completedCount: tourSteps.length,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now guiding the visitor across the tour stops. Narrate the tour aloud!'
+            };
+          } else {
+            result = await this.cursor.guideTour(tourSteps);
+          }
           break;
+        }
 
         case 'update_session_memory':
           this.memory.updateUserIntent({
@@ -4166,14 +4579,23 @@ class WebOrient {
     };
 
     if (this.client && callId) {
+      const navHref = result._deferredHref;
+      if (navHref) delete result._deferredHref;
       this.client.sendToolResponse(callId, name, result);
+      if (navHref && typeof window !== 'undefined') {
+        this.client.stop({ silent: true, forNavigation: true });
+        this.client = null;
+        setTimeout(() => {
+          window.location.href = navHref;
+        }, 60);
+      }
     }
 
     this._emit('toolResult', { name, args, callId, result });
     return result;
   }
 
-  async _handleNavigation(rawPath, targetSelector = null, explanation = null) {
+  async _handleNavigation(rawPath, targetSelector = null, explanation = null, navOptions = {}) {
     if (!rawPath) {
       return { success: false, error: 'Missing navigation path' };
     }
@@ -4299,6 +4721,20 @@ class WebOrient {
       ? resolvedUrl + hashPart
       : `${baseDir}${resolvedUrl}${hashPart}`;
 
+    if (navOptions.deferLocationAssign) {
+      return {
+        success: true,
+        action: 'navigate_route',
+        navigatedTo: finalHref,
+        pageTitle: matchedPage?.title || targetFile,
+        _deferredHref: finalHref
+      };
+    }
+
+    if (this.client) {
+      this.client.stop({ silent: true, forNavigation: true });
+      this.client = null;
+    }
     window.location.href = finalHref;
     return {
       success: true,
@@ -4596,8 +5032,9 @@ class WebOrient {
 
       btn.addEventListener('click', async () => {
         langPopover?.classList.remove('wo-open');
-        const hasOpenSocket = Boolean(this.client && this.client.ws && this.client.ws.readyState === WebSocket.OPEN);
-        if (this.client?.isReconnecting) {
+        const wsState = this.client?.ws?.readyState;
+        const hasOpenSocket = Boolean(this.client && this.client.ws && wsState === WebSocket.OPEN);
+        if (this.client?.isReconnecting || this.client?.isConnecting || wsState === WebSocket.CONNECTING) {
           this.stop();
           return;
         }
@@ -4606,9 +5043,14 @@ class WebOrient {
           this._syncShadowWidgetState(true, 'connecting');
           try {
             await this.start({ isRestore });
-          } catch (_) {
-            this.client = null;
-            this._syncShadowWidgetState(false, 'offline');
+          } catch (err) {
+            if (err?.name === 'AbortError' || this.client?._userStopped) {
+              this.client = null;
+              this._syncShadowWidgetState(false, 'idle');
+            } else if (!this.client?.isReconnecting) {
+              this.client = null;
+              this._syncShadowWidgetState(false, 'offline');
+            }
           }
         } else {
           this.stop();
@@ -4665,7 +5107,18 @@ class WebOrient {
       mic.style.display = 'flex';
       wave.style.display = 'none';
       if (dot) dot.className = 'wo-dot';
-      sub.textContent = state === 'offline' ? 'Relay offline' : 'Click to co-browse';
+      if (state === 'offline') {
+        const errCode = this._lastConnectionError?.code;
+        if (errCode === 'UNAUTHORIZED_OR_NO_CREDITS' || errCode === 'CLOSE_4002') {
+          sub.textContent = 'Credits / Origin Error';
+        } else if (errCode === 'RATE_LIMIT_EXCEEDED' || errCode === 'CLOSE_4003') {
+          sub.textContent = 'Rate limit reached';
+        } else {
+          sub.textContent = 'Relay offline';
+        }
+      } else {
+        sub.textContent = 'Click to co-browse';
+      }
     }
   }
 
@@ -4676,6 +5129,7 @@ class WebOrient {
   }
 
   stop() {
+    this._lastConnectionError = null;
     this.memory.setLiveSessionStatus(false);
     if (this.client) {
       this.client.stop();

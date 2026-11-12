@@ -407,17 +407,32 @@ export class SessionMemory {
       return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, 'user Devanagari speech transcript');
     }
 
-    const hinglishMatches = lower.match(
-      /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|ye|woh|wo|hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
+    const strongHinglish = lower.match(
+      /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|woh|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
     );
-    if (hinglishMatches && hinglishMatches.length >= 1) {
-      return this.setLanguage('hinglish', true, `user Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
+    const softHinglish = lower.match(
+      /\b(hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|ye|wo)\b/g
+    );
+    const totalHinglish = (strongHinglish ? strongHinglish.length : 0) + (softHinglish ? softHinglish.length : 0);
+    if ((strongHinglish && strongHinglish.length >= 1) || totalHinglish >= 2) {
+      const sample = [...(strongHinglish || []), ...(softHinglish || [])].slice(0, 3).join(', ');
+      return this.setLanguage('hinglish', true, `user Hinglish speech markers (${sample})`);
     }
 
-    const englishMatches = lower.match(
-      /\b(what|how|show|tell|can|you|please|where|which|about|this|that|the|for|with|open|close|book|demo|pricing|features|contact|calculate|voice|website)\b/g
+    const englishCoreMatches = lower.match(
+      /\b(what|how|show|tell|can|you|please|where|which|about|this|that|the|for|with|open|close|book|calculate|me|is|are|do|does|want|need|help|explain)\b/g
     );
-    if (englishMatches && englishMatches.length >= 2) {
+    const englishDomainMatches = lower.match(
+      /\b(demo|pricing|features|contact|voice|website|plan|form|section)\b/g
+    );
+    const coreCount = englishCoreMatches ? englishCoreMatches.length : 0;
+    const totalEnglish = coreCount + (englishDomainMatches ? englishDomainMatches.length : 0);
+    const isAlreadyIndicLocked = this.state.languageLocked && (this.state.userLanguage === 'hinglish' || this.state.userLanguage === 'hi-IN');
+    if (isAlreadyIndicLocked) {
+      if (coreCount >= 2 && totalEnglish >= 3 && totalHinglish === 0) {
+        return this.setLanguage('en-IN', true, 'user full English sentence transcript');
+      }
+    } else if (totalEnglish >= 2 && totalHinglish === 0) {
       return this.setLanguage('en-IN', true, 'user English speech transcript');
     }
 

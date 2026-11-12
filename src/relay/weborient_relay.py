@@ -12,6 +12,7 @@ WebOrient by DeployMate — Production Multi-Tenant Live Relay Gateway (`src/rel
 """
 import asyncio
 import base64
+import copy
 import datetime
 import hashlib
 import hmac
@@ -20,6 +21,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 import time
 from http import HTTPStatus
 from pathlib import Path
@@ -156,6 +158,9 @@ if MONGODB_URI:
         mongo_db = None
 
 
+_FILE_SAVE_LOCK = threading.Lock()
+
+
 def load_json_file(path: Path) -> dict:
     if path.exists():
         try:
@@ -167,8 +172,12 @@ def load_json_file(path: Path) -> dict:
 
 def save_json_file(path: Path, data: dict):
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        with _FILE_SAVE_LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            serialized = json.dumps(data, indent=2)
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            tmp_path.write_text(serialized, encoding="utf-8")
+            tmp_path.replace(path)
     except Exception as e:
         print(f"[WARN] Could not persist {path.name}: {e}")
 
@@ -515,9 +524,18 @@ def sync_seed_tenants_to_mongo():
     try:
         col = mongo_db["weborient_tenants"]
         for key, tenant in TENANT_STORE.items():
+            mutable_keys = ("siteId", "companyName", "domain", "allowedOrigins", "theme", "defaultLanguage", "manifestFile")
+            set_fields = {"siteKey": key}
+            for k in mutable_keys:
+                if k in tenant:
+                    set_fields[k] = tenant[k]
+            insert_only = {k: v for k, v in tenant.items() if k not in set_fields}
+            update_doc = {"$set": set_fields}
+            if insert_only:
+                update_doc["$setOnInsert"] = insert_only
             col.update_one(
                 {"siteKey": key},
-                {"$setOnInsert": {**tenant, "siteKey": key}},
+                update_doc,
                 upsert=True
             )
     except Exception as e:
@@ -819,20 +837,85 @@ def get_or_create_session_memory(session_id: str, site_key: str, site_id: str, l
     return SESSION_MEMORY_STORE[session_id]
 
 
-def persist_session_memory(session_id: str):
+_PENDING_PERSIST_TIMERS: dict[str, asyncio.TimerHandle] = {}
+_PERSIST_LOCK = threading.Lock()
+
+
+def _sync_persist_snapshot(session_id: str, session_snapshot: dict, full_store_snapshot: dict):
+    with _PERSIST_LOCK:
+        save_json_file(SESSION_CACHE_FILE, full_store_snapshot)
+        if mongo_db is not None:
+            try:
+                mongo_db["weborient_sessions"].update_one(
+                    {"sessionId": session_id},
+                    {"$set": session_snapshot},
+                    upsert=True
+                )
+            except Exception:
+                pass
+
+
+def _prune_session_memory_store(active_session_id: str, max_sessions: int = 50):
+    if len(SESSION_MEMORY_STORE) <= max_sessions:
+        return
+    inactive = [
+        (sid, doc.get("updatedAt", ""))
+        for sid, doc in SESSION_MEMORY_STORE.items()
+        if sid != active_session_id and doc.get("status") != "active"
+    ]
+    inactive.sort(key=lambda item: item[1])
+    to_remove = len(SESSION_MEMORY_STORE) - max_sessions
+    for sid, _ in inactive[:to_remove]:
+        SESSION_MEMORY_STORE.pop(sid, None)
+
+
+def _capture_snapshots_on_loop(session_id: str) -> tuple[dict, dict] | None:
+    if session_id not in SESSION_MEMORY_STORE:
+        return None
+    SESSION_MEMORY_STORE[session_id]["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    _prune_session_memory_store(session_id, max_sessions=50)
+    # Deep-copy the bounded store so off-loop json.dumps never races with concurrent active sessions.
+    store_snap = copy.deepcopy(SESSION_MEMORY_STORE)
+    return store_snap[session_id], store_snap
+
+
+async def _flush_session_memory_async(session_id: str):
+    timer = _PENDING_PERSIST_TIMERS.pop(session_id, None)
+    if timer is not None:
+        timer.cancel()
+    snaps = _capture_snapshots_on_loop(session_id)
+    if not snaps:
+        return
+    await asyncio.to_thread(_sync_persist_snapshot, session_id, snaps[0], snaps[1])
+
+
+def persist_session_memory(session_id: str, immediate: bool = False):
     if session_id not in SESSION_MEMORY_STORE:
         return
     SESSION_MEMORY_STORE[session_id]["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    save_json_file(SESSION_CACHE_FILE, SESSION_MEMORY_STORE)
-    if mongo_db is not None:
-        try:
-            mongo_db["weborient_sessions"].update_one(
-                {"sessionId": session_id},
-                {"$set": SESSION_MEMORY_STORE[session_id]},
-                upsert=True
-            )
-        except Exception:
-            pass
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        snaps = _capture_snapshots_on_loop(session_id)
+        if snaps:
+            _sync_persist_snapshot(session_id, snaps[0], snaps[1])
+        return
+
+    existing = _PENDING_PERSIST_TIMERS.pop(session_id, None)
+    if existing is not None:
+        existing.cancel()
+
+    if immediate:
+        snaps = _capture_snapshots_on_loop(session_id)
+        if snaps:
+            loop.create_task(asyncio.to_thread(_sync_persist_snapshot, session_id, snaps[0], snaps[1]))
+    else:
+        def _schedule():
+            _PENDING_PERSIST_TIMERS.pop(session_id, None)
+            snaps = _capture_snapshots_on_loop(session_id)
+            if snaps:
+                loop.create_task(asyncio.to_thread(_sync_persist_snapshot, session_id, snaps[0], snaps[1]))
+        _PENDING_PERSIST_TIMERS[session_id] = loop.call_later(0.6, _schedule)
 
 
 def enqueue_dom_update(queue: list[str], text: str, max_items: int = 6, max_chars: int = 8000) -> list[str]:
@@ -909,10 +992,32 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
             f"- Do NOT reference WebOrient demo HTML filenames (`test-demo.html`, `features.html`, `pricing.html`, `docs.html`). Navigate and highlight the actual live sections and controls present on this website!"
         )
 
+    company_label = tenant.get("companyName") or "DeployMate"
+    is_deploymate_brand = site_key in ("wo_live_deploymate_demo", "wo_live_deploymate_main", "wo_test_sandbox") or "deploymate" in company_label.lower()
+    has_prior_turns = session_mem.get("reconnectCount", 0) > 0 and len(session_mem.get("transcripts") or []) > 0
+
+    if has_prior_turns:
+        welcome_rule = (
+            f"- SESSION CONTINUITY & RESTORE MODE (CRITICAL): This is an active, restored session (reconnect #{session_mem.get('reconnectCount', 1)}). "
+            f"DO NOT repeat your initial welcome greeting or re-introduce yourself! Wait for the user's speech or follow the latest page/navigation context seamlessly.\n"
+        )
+    elif is_deploymate_brand:
+        welcome_rule = (
+            f"- PROACTIVE WARM WELCOME ON START (CRITICAL): First-time visitors do NOT know how WebOrient works and will wait in silence. "
+            f"The moment you connect, DO NOT wait for the user to say hello! Speak first immediately with a warm, friendly 1-2 sentence welcome "
+            f"(introduce yourself as WebOrient on {company_label}, note that you can guide them with the Ghost Cursor, and suggest 1-2 things to explore like trying the live voice agent, WhatsApp CRM, or calculating ROI savings). Then pause and follow the user's lead!\n"
+        )
+    else:
+        welcome_rule = (
+            f"- PROACTIVE WARM WELCOME ON START (CRITICAL): First-time visitors do NOT know how WebOrient works and will wait in silence. "
+            f"The moment you connect, DO NOT wait for the user to say hello! Speak first immediately with a warm, friendly 1-2 sentence welcome "
+            f"(introduce yourself as the WebOrient co-pilot for {company_label}, mention you can guide them around the website with the Ghost Cursor, and offer to walk through the sections on screen). Then pause and follow the user's lead!\n"
+        )
+
     memory_block = (
         f"\n\n### DEPLOYMATE MULTI-TENANT SESSION & LIVE CO-PILOT GUIDANCE "
-        f"(Tenant: {tenant.get('companyName', 'DeployMate')} | Session ID: {session_mem['sessionId']} | Credits: {tenant.get('creditsMinutes', 250)} mins):\n"
-        f"- PROACTIVE WARM WELCOME ON START (CRITICAL): First-time visitors do NOT know how WebOrient works and will wait in silence. The moment you connect, DO NOT wait for the user to say hello! Speak first immediately with a warm, friendly 1-2 sentence welcome (introduce yourself as WebOrient on DeployMate, note that you can guide them with the Ghost Cursor, and suggest 1-2 things to explore like trying the live voice agent, WhatsApp CRM, or calculating ROI savings). Then pause and follow the user's lead!\n"
+        f"(Tenant: {company_label} | Session ID: {session_mem['sessionId']} | Credits: {tenant.get('creditsMinutes', 250)} mins):\n"
+        f"{welcome_rule}"
         f"- DETECTED & LOCKED LANGUAGE: {session_mem['userLanguage']} (Maintain this language strictly across all turns, popups, and page redirects)\n"
         f"- SILENT SEAMLESS LANGUAGE HANDLING (CRITICAL): When speaking or when language changes, NEVER say aloud 'I will speak in English/Hindi' or announce what language you are using! Simply speak directly in that language without commenting on it or breaking the conversation flow.\n"
         f"- SHOWING vs. SAYING SYNCHRONIZATION RULE: Every single `explanation` badge you pass to `move_and_highlight`, `click_element`, `fill_form_field`, `scroll_page`, or `swipe_or_swap` MUST be written in the exact same language that you are speaking aloud! Never show an English tooltip badge while speaking Hindi/Hinglish!\n"
@@ -923,6 +1028,12 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
         f"- USER GOAL / WANT: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
         f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, popup, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its actual interactive component selector (NEVER highlight h1/h2 titles or headers)."
     )
+
+    recent_tx = session_mem.get("transcripts") or []
+    if has_prior_turns and recent_tx:
+        tx_lines = [f"  [{t.get('role', 'user').upper()}]: {t.get('text', '')}" for t in recent_tx[-10:] if t.get("text")]
+        if tx_lines:
+            memory_block += "\n\n### RESTORED CONVERSATION HISTORY (DO NOT REPEAT GREETING):\n" + "\n".join(tx_lines)
 
     latest_dom = str(session_mem.get("latestDomSnapshot") or "").strip()
     if latest_dom and session_mem.get("reconnectCount", 0) > 0:
@@ -1390,7 +1501,42 @@ async def handle_browser_client(websocket):
         await websocket.close(code=4002, reason=auth_msg[:120])
         return
 
-    session_mem = get_or_create_session_memory(session_id, site_key, site_id, lang, tenant.get("companyName", ""))
+    # Optional pre-connect clientInit frame (sent immediately on ws.onopen) so page restore / navigation
+    # updates latestDomSnapshot and userLanguage BEFORE build_live_connect_config constructs system_instruction!
+    # Wait before creating/persisting session memory so aborted <0.22s handshakes don't save empty records.
+    buffered_first_raw_msg = None
+    client_init_lang = None
+    client_init_snapshot = None
+    try:
+        first_raw = await asyncio.wait_for(websocket.recv(), timeout=0.22)
+        first_data = json.loads(first_raw)
+        if isinstance(first_data, dict) and "clientInit" in first_data:
+            ci = first_data["clientInit"] or {}
+            if ci.get("userLanguage"):
+                client_init_lang = str(ci["userLanguage"]).strip()
+            if ci.get("latestDomSnapshot"):
+                client_init_snapshot = str(ci["latestDomSnapshot"]).strip()[-3500:]
+        else:
+            buffered_first_raw_msg = first_raw
+    except asyncio.TimeoutError:
+        pass
+    except websockets.exceptions.ConnectionClosed:
+        release_ip_slot(ip_token_or_err)
+        return
+    except Exception:
+        pass
+
+    session_mem = get_or_create_session_memory(
+        session_id,
+        site_key,
+        site_id,
+        client_init_lang or lang,
+        tenant.get("companyName", "")
+    )
+    if client_init_snapshot is not None:
+        session_mem["latestDomSnapshot"] = client_init_snapshot
+        persist_session_memory(session_id)
+
     full_prompt = load_system_prompt_and_manifest(site_id, session_mem, tenant)
     tools = get_gemini_tools()
     resumption_handle = session_mem.get("resumptionHandle") or None
@@ -1447,7 +1593,8 @@ async def handle_browser_client(websocket):
                                     "setupComplete": {
                                         "status": "ready",
                                         "sessionId": session_id,
-                                        "voice": VOICE_NAME
+                                        "voice": VOICE_NAME,
+                                        "resumedWithHandle": bool(attempt_handle)
                                     }
                                 }))
                             except Exception:
@@ -1471,18 +1618,19 @@ async def handle_browser_client(websocket):
                                         if is_secretary_hold:
                                             # Zero credit deduction while visitor is silently reading in Secretary Hold!
                                             if saved_delta > 0:
-                                                deduct_tenant_credits(site_key, 0.0, saved_delta)
+                                                await asyncio.to_thread(deduct_tenant_credits, site_key, 0.0, saved_delta)
+                                            tenant_doc = await asyncio.to_thread(get_tenant, site_key)
                                             await websocket.send(json.dumps({
                                                 "creditUpdate": {
                                                     "siteKey": site_key,
-                                                    "remainingMinutes": get_tenant(site_key).get("creditsMinutes", 0.0),
+                                                    "remainingMinutes": (tenant_doc or {}).get("creditsMinutes", 0.0),
                                                     "secretaryHold": True,
                                                     "secretarySavedSeconds": current_saved
                                                 }
                                             }))
                                             continue
 
-                                        remaining = deduct_tenant_credits(site_key, 0.5, saved_delta)
+                                        remaining = await asyncio.to_thread(deduct_tenant_credits, site_key, 0.5, saved_delta)
                                         session_minutes_burned = round(session_minutes_burned + 0.5, 2)
                                         session_mem["creditsBurned"] = round(float(session_mem.get("creditsBurned", 0.0)) + 0.5, 2)
                                         persist_session_memory(session_id)
@@ -1498,7 +1646,7 @@ async def handle_browser_client(websocket):
                                         }))
                                         if remaining <= 0:
                                             session_mem["terminationReason"] = "credits_exhausted"
-                                            persist_session_memory(session_id)
+                                            persist_session_memory(session_id, immediate=True)
                                             await gemini_session.send_realtime_input(
                                                 text="[SYSTEM NOTICE: Voice credits for this session have ended. Politely say: 'Your voice assistant minutes for this session have ended. You can continue browsing manually.' and stop.]"
                                             )
@@ -1585,11 +1733,13 @@ async def handle_browser_client(websocket):
                                                         }
                                                     }))
 
-                                                if getattr(sc, "turn_complete", False):
+                                            if getattr(response, "tool_call_cancellation", None):
+                                                cancel_ids = list(getattr(response.tool_call_cancellation, "ids", None) or [])
+                                                if cancel_ids:
+                                                    print(f"[RELAY] ⚠️ Tool call cancellation from Gemini: {cancel_ids}")
                                                     await websocket.send(json.dumps({
-                                                        "serverContent": {"turnComplete": True}
+                                                        "toolCallCancellation": {"ids": cancel_ids}
                                                     }))
-                                                    break
 
                                             if response.tool_call:
                                                 calls = []
@@ -1603,6 +1753,12 @@ async def handle_browser_client(websocket):
                                                 await websocket.send(json.dumps({
                                                     "toolCall": {"functionCalls": calls}
                                                 }))
+
+                                            if sc and getattr(sc, "turn_complete", False):
+                                                await websocket.send(json.dumps({
+                                                    "serverContent": {"turnComplete": True}
+                                                }))
+                                                break
                                         await asyncio.sleep(0.02)
                                 except websockets.exceptions.ConnectionClosed:
                                     pass
@@ -1615,141 +1771,181 @@ async def handle_browser_client(websocket):
                                         pass
 
                             async def forward_browser_to_gemini():
-                                nonlocal is_secretary_hold, pending_dom_updates
+                                nonlocal is_secretary_hold, pending_dom_updates, buffered_first_raw_msg
                                 audio_count = 0
+
+                                async def _process_client_raw_msg(raw_msg: str) -> bool:
+                                    nonlocal is_secretary_hold, pending_dom_updates, audio_count
+                                    data = json.loads(raw_msg)
+
+                                    if "ping" in data:
+                                        await websocket.send(json.dumps({"pong": data["ping"]}))
+                                        return True
+
+                                    if "clientInit" in data:
+                                        ci = data["clientInit"] or {}
+                                        if ci.get("userLanguage"):
+                                            session_mem["userLanguage"] = str(ci["userLanguage"]).strip()
+                                        if ci.get("latestDomSnapshot"):
+                                            session_mem["latestDomSnapshot"] = str(ci["latestDomSnapshot"]).strip()[-3500:]
+                                        persist_session_memory(session_id)
+                                        return True
+
+                                    if "vadControl" in data:
+                                        vc = data["vadControl"] or {}
+                                        vstate = vc.get("state")
+                                        saved_sec = int(vc.get("savedSeconds", session_mem.get("secretarySavedSeconds", 0)))
+                                        session_mem["secretarySavedSeconds"] = saved_sec
+                                        if vstate == "secretary_hold":
+                                            is_secretary_hold = True
+                                            print(f"[RELAY] ⏸️ Secretary Hold engaged for {session_id} (0 tokens/sec, credit meter paused)")
+                                            try:
+                                                await gemini_session.send_realtime_input(audio_stream_end=True)
+                                            except Exception:
+                                                pass
+                                        elif vstate == "active":
+                                            is_secretary_hold = False
+                                            print(f"[RELAY] ▶️ Secretary woke session {session_id} (<15ms pre-roll flush)")
+                                        elif vstate == "hibernating":
+                                            is_secretary_hold = True
+                                            session_mem["status"] = "hibernating"
+                                            session_mem["terminationReason"] = vc.get("reason", "idle_75s")
+                                            persist_session_memory(session_id, immediate=True)
+                                            print(f"[RELAY] 💤 Session {session_id} entered Deep Hibernation ({vc.get('reason')})")
+                                            return False
+                                        elif vstate == "navigating":
+                                            is_secretary_hold = True
+                                            session_mem["status"] = "navigating"
+                                            persist_session_memory(session_id, immediate=True)
+                                            print(f"[RELAY] 🧭 Session {session_id} navigating to new route; releasing upstream session cleanly")
+                                            return False
+                                        return True
+
+                                    if "telemetry" in data:
+                                        tel = data.get("telemetry") or {}
+                                        if isinstance(tel, dict):
+                                            if tel.get("userLanguage"):
+                                                session_mem["userLanguage"] = str(tel["userLanguage"]).strip()
+                                            if isinstance(tel.get("domEventLogs"), list):
+                                                session_mem["domEvents"] = tel["domEventLogs"][-40:]
+                                                session_mem["failedSelectorsCount"] = sum(
+                                                    1 for ev in session_mem["domEvents"] if not ev.get("success", True)
+                                                )
+                                            if isinstance(tel.get("partialLead"), dict):
+                                                existing_lead = dict(session_mem.get("partialLead") or {})
+                                                existing_lead.update(tel["partialLead"])
+                                                session_mem["partialLead"] = existing_lead
+                                                if existing_lead.get("submitted"):
+                                                    session_mem["terminationReason"] = "converted"
+                                            if tel.get("lastSectionViewed"):
+                                                session_mem["lastSectionViewed"] = tel["lastSectionViewed"]
+                                            if "secretarySavedSeconds" in tel:
+                                                session_mem["secretarySavedSeconds"] = int(tel["secretarySavedSeconds"] or 0)
+                                            persist_session_memory(session_id)
+                                        return True
+
+                                    if "realtimeInput" in data:
+                                        is_secretary_hold = False
+                                        media_chunks = data["realtimeInput"].get("mediaChunks", [])
+                                        for chunk in media_chunks:
+                                            pcm_bytes = base64.b64decode(chunk["data"])
+                                            await gemini_session.send_realtime_input(
+                                                audio=types.Blob(
+                                                    mime_type="audio/pcm;rate=16000",
+                                                    data=pcm_bytes
+                                                )
+                                            )
+                                            audio_count += 1
+                                        return True
+
+                                    if "toolResponse" in data:
+                                        responses = data["toolResponse"].get("functionResponses", [])
+                                        fn_responses = []
+                                        for r in responses:
+                                            raw_resp = r.get("response") or {}
+                                            out = raw_resp.get("output") or {}
+                                            digest = out.get("sessionMemoryDigest")
+                                            if digest:
+                                                session_mem["userLanguage"] = digest.get("userLanguage", session_mem["userLanguage"])
+                                                session_mem["userGoal"] = digest.get("userGoal", session_mem["userGoal"])
+                                                session_mem["interestedTier"] = digest.get("interestedTier", session_mem.get("interestedTier"))
+                                                session_mem["completedTodoIds"] = digest.get("completedTodoIds", session_mem.get("completedTodoIds", []))
+                                                session_mem["remainingTodos"] = digest.get("remainingTodos", session_mem.get("remainingTodos", []))
+                                                session_mem["lastSectionViewed"] = digest.get("lastSectionViewed") or session_mem.get("lastSectionViewed")
+                                                session_mem["secretarySavedSeconds"] = int(digest.get("secretarySavedSeconds") or session_mem.get("secretarySavedSeconds", 0))
+                                                if digest.get("domEventLogs"):
+                                                    session_mem["domEvents"] = digest["domEventLogs"]
+                                                    session_mem["failedSelectorsCount"] = sum(
+                                                        1 for ev in session_mem["domEvents"] if not ev.get("success", True)
+                                                    )
+                                                if digest.get("partialLead"):
+                                                    session_mem["partialLead"] = digest["partialLead"]
+                                                    if session_mem["partialLead"].get("submitted"):
+                                                        session_mem["terminationReason"] = "converted"
+                                            if out.get("selector"):
+                                                session_mem["orientedHistory"].append(out.get("selector"))
+                                            persist_session_memory(session_id)
+
+                                            # Strip heavy telemetry fields before sending response back to Gemini context
+                                            sanitized_response = dict(raw_resp)
+                                            if isinstance(out, dict):
+                                                sanitized_out = dict(out)
+                                                if isinstance(digest, dict):
+                                                    sanitized_digest = {
+                                                        k: v for k, v in digest.items()
+                                                        if k not in ("domEventLogs", "partialLead")
+                                                    }
+                                                    sanitized_out["sessionMemoryDigest"] = sanitized_digest
+                                                dom_batch = flush_dom_updates(pending_dom_updates)
+                                                if dom_batch:
+                                                    sanitized_out["latestDomContext"] = dom_batch
+                                                sanitized_response["output"] = sanitized_out
+
+                                            fn_responses.append(
+                                                types.FunctionResponse(
+                                                    id=r["id"],
+                                                    name=r.get("name", "move_and_highlight"),
+                                                    response=sanitized_response
+                                                )
+                                            )
+                                        await gemini_session.send_tool_response(function_responses=fn_responses)
+                                        return True
+
+                                    if "text" in data:
+                                        turn_complete = bool(data.get("turnComplete", True))
+                                        text_str = str(data["text"]).strip()
+                                        if not text_str:
+                                            return True
+                                        if data.get("userLanguage"):
+                                            session_mem["userLanguage"] = str(data["userLanguage"]).strip()
+                                        # Only update latestDomSnapshot when the message carries DOM/section index data
+                                        if any(marker in text_str for marker in ("DOM INDEX", "CURRENT PAGE SECTIONS", "Visible Interactive Controls")):
+                                            session_mem["latestDomSnapshot"] = text_str[-3500:]
+                                        persist_session_memory(session_id)
+                                        if turn_complete:
+                                            is_secretary_hold = False
+                                            dom_batch = flush_dom_updates(pending_dom_updates)
+                                            text_payload = f"{dom_batch}\n\n{text_str}" if dom_batch else text_str
+                                            await gemini_session.send_realtime_input(text=text_payload)
+                                        else:
+                                            enqueue_dom_update(pending_dom_updates, text_str)
+                                        return True
+
+                                    return True
+
                                 try:
+                                    if buffered_first_raw_msg is not None:
+                                        first_to_run = buffered_first_raw_msg
+                                        buffered_first_raw_msg = None
+                                        should_continue = await _process_client_raw_msg(first_to_run)
+                                        if not should_continue:
+                                            return
+
                                     async for raw_msg in websocket:
                                         try:
-                                            data = json.loads(raw_msg)
-
-                                            if "ping" in data:
-                                                await websocket.send(json.dumps({"pong": data["ping"]}))
-                                                continue
-
-                                            if "vadControl" in data:
-                                                vc = data["vadControl"] or {}
-                                                vstate = vc.get("state")
-                                                saved_sec = int(vc.get("savedSeconds", session_mem.get("secretarySavedSeconds", 0)))
-                                                session_mem["secretarySavedSeconds"] = saved_sec
-                                                if vstate == "secretary_hold":
-                                                    is_secretary_hold = True
-                                                    print(f"[RELAY] ⏸️ Secretary Hold engaged for {session_id} (0 tokens/sec, credit meter paused)")
-                                                    try:
-                                                        await gemini_session.send_realtime_input(audio_stream_end=True)
-                                                    except Exception:
-                                                        pass
-                                                elif vstate == "active":
-                                                    is_secretary_hold = False
-                                                    print(f"[RELAY] ▶️ Secretary woke session {session_id} (<15ms pre-roll flush)")
-                                                elif vstate == "hibernating":
-                                                    is_secretary_hold = True
-                                                    session_mem["status"] = "hibernating"
-                                                    session_mem["terminationReason"] = vc.get("reason", "idle_75s")
-                                                    persist_session_memory(session_id)
-                                                    print(f"[RELAY] 💤 Session {session_id} entered Deep Hibernation ({vc.get('reason')})")
-                                                    break
-
-                                            elif "telemetry" in data:
-                                                tel = data.get("telemetry") or {}
-                                                if isinstance(tel, dict):
-                                                    if isinstance(tel.get("domEventLogs"), list):
-                                                        session_mem["domEvents"] = tel["domEventLogs"][-40:]
-                                                        session_mem["failedSelectorsCount"] = sum(
-                                                            1 for ev in session_mem["domEvents"] if not ev.get("success", True)
-                                                        )
-                                                    if isinstance(tel.get("partialLead"), dict):
-                                                        existing_lead = dict(session_mem.get("partialLead") or {})
-                                                        existing_lead.update(tel["partialLead"])
-                                                        session_mem["partialLead"] = existing_lead
-                                                        if existing_lead.get("submitted"):
-                                                            session_mem["terminationReason"] = "converted"
-                                                    if tel.get("lastSectionViewed"):
-                                                        session_mem["lastSectionViewed"] = tel["lastSectionViewed"]
-                                                    if "secretarySavedSeconds" in tel:
-                                                        session_mem["secretarySavedSeconds"] = int(tel["secretarySavedSeconds"] or 0)
-                                                    persist_session_memory(session_id)
-
-                                            elif "realtimeInput" in data:
-                                                is_secretary_hold = False
-                                                media_chunks = data["realtimeInput"].get("mediaChunks", [])
-                                                for chunk in media_chunks:
-                                                    pcm_bytes = base64.b64decode(chunk["data"])
-                                                    await gemini_session.send_realtime_input(
-                                                        audio=types.Blob(
-                                                            mime_type="audio/pcm;rate=16000",
-                                                            data=pcm_bytes
-                                                        )
-                                                    )
-                                                    audio_count += 1
-
-                                            elif "toolResponse" in data:
-                                                responses = data["toolResponse"].get("functionResponses", [])
-                                                fn_responses = []
-                                                for r in responses:
-                                                    raw_resp = r.get("response") or {}
-                                                    out = raw_resp.get("output") or {}
-                                                    digest = out.get("sessionMemoryDigest")
-                                                    if digest:
-                                                        session_mem["userLanguage"] = digest.get("userLanguage", session_mem["userLanguage"])
-                                                        session_mem["userGoal"] = digest.get("userGoal", session_mem["userGoal"])
-                                                        session_mem["interestedTier"] = digest.get("interestedTier", session_mem.get("interestedTier"))
-                                                        session_mem["completedTodoIds"] = digest.get("completedTodoIds", session_mem.get("completedTodoIds", []))
-                                                        session_mem["remainingTodos"] = digest.get("remainingTodos", session_mem.get("remainingTodos", []))
-                                                        session_mem["lastSectionViewed"] = digest.get("lastSectionViewed") or session_mem.get("lastSectionViewed")
-                                                        session_mem["secretarySavedSeconds"] = int(digest.get("secretarySavedSeconds") or session_mem.get("secretarySavedSeconds", 0))
-                                                        if digest.get("domEventLogs"):
-                                                            session_mem["domEvents"] = digest["domEventLogs"]
-                                                            session_mem["failedSelectorsCount"] = sum(
-                                                                1 for ev in session_mem["domEvents"] if not ev.get("success", True)
-                                                            )
-                                                        if digest.get("partialLead"):
-                                                            session_mem["partialLead"] = digest["partialLead"]
-                                                            if session_mem["partialLead"].get("submitted"):
-                                                                session_mem["terminationReason"] = "converted"
-                                                    if out.get("selector"):
-                                                        session_mem["orientedHistory"].append(out.get("selector"))
-                                                    persist_session_memory(session_id)
-
-                                                    # Strip heavy telemetry fields before sending response back to Gemini context
-                                                    sanitized_response = dict(raw_resp)
-                                                    if isinstance(out, dict):
-                                                        sanitized_out = dict(out)
-                                                        if isinstance(digest, dict):
-                                                            sanitized_digest = {
-                                                                k: v for k, v in digest.items()
-                                                                if k not in ("domEventLogs", "partialLead")
-                                                            }
-                                                            sanitized_out["sessionMemoryDigest"] = sanitized_digest
-                                                        dom_batch = flush_dom_updates(pending_dom_updates)
-                                                        if dom_batch:
-                                                            sanitized_out["latestDomContext"] = dom_batch
-                                                        sanitized_response["output"] = sanitized_out
-
-                                                    fn_responses.append(
-                                                        types.FunctionResponse(
-                                                            id=r["id"],
-                                                            name=r.get("name", "move_and_highlight"),
-                                                            response=sanitized_response
-                                                        )
-                                                    )
-                                                await gemini_session.send_tool_response(function_responses=fn_responses)
-
-                                            elif "text" in data:
-                                                turn_complete = bool(data.get("turnComplete", True))
-                                                text_str = str(data["text"]).strip()
-                                                if not text_str:
-                                                    continue
-                                                if turn_complete:
-                                                    is_secretary_hold = False
-                                                    dom_batch = flush_dom_updates(pending_dom_updates)
-                                                    text_payload = f"{dom_batch}\n\n{text_str}" if dom_batch else text_str
-                                                    await gemini_session.send_realtime_input(text=text_payload)
-                                                else:
-                                                    # Never call send_client_content(turn_complete=False), which blocks realtime audio turns!
-                                                    # Buffer silent DOM/route updates in order without overwriting earlier handoffs.
-                                                    enqueue_dom_update(pending_dom_updates, text_str)
-                                                    session_mem["latestDomSnapshot"] = text_str[-3500:]
-
+                                            should_continue = await _process_client_raw_msg(raw_msg)
+                                            if not should_continue:
+                                                break
                                         except websockets.exceptions.ConnectionClosed:
                                             break
                                         except Exception as err:
@@ -1758,16 +1954,26 @@ async def handle_browser_client(websocket):
                                     pass
 
                             meter_task = asyncio.create_task(credit_metering_loop())
+                            g2b_task = asyncio.create_task(forward_gemini_to_browser())
+                            b2g_task = asyncio.create_task(forward_browser_to_gemini())
                             try:
-                                await asyncio.gather(forward_gemini_to_browser(), forward_browser_to_gemini())
+                                done, pending = await asyncio.wait(
+                                    [g2b_task, b2g_task],
+                                    return_when=asyncio.FIRST_COMPLETED
+                                )
+                                for p_task in pending:
+                                    p_task.cancel()
+                                if pending:
+                                    await asyncio.gather(*pending, return_exceptions=True)
                             finally:
                                 meter_task.cancel()
+                                await asyncio.gather(meter_task, return_exceptions=True)
                                 KEY_POOL.mark_session_ended(selected_key_id, session_minutes_burned)
                                 if session_mem.get("status") == "active":
                                     session_mem["status"] = "completed"
                                 if not session_mem.get("terminationReason"):
                                     session_mem["terminationReason"] = "converted" if session_mem.get("partialLead", {}).get("submitted") else "user_closed"
-                                persist_session_memory(session_id)
+                                await _flush_session_memory_async(session_id)
                             session_completed = True
                             break
                     except Exception as inner_err:

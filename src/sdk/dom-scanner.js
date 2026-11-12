@@ -22,6 +22,7 @@ export class DOMScanner {
     ];
     this.sensitiveFieldRegex = /\b(password|passwd|cc-number|cc-csc|cc-exp|card.?num|credit.?card|debit.?card|cvv|cvc|iban|routing.?num|ifsc|account.?num|upi.?pin|one-time-code|otp|2fa|totp|aadhaar|aadhar|pan.?card|pan.?num|ssn|social.?security|passport.?num|gstin)\b/i;
     this._idCounter = 1;
+    this._woIdMetaMap = new Map();
   }
 
   matchElementFromSpeech(spokenText, todoChecklist = []) {
@@ -204,9 +205,42 @@ export class DOMScanner {
     const raw = String(target).trim();
     if (!raw) return null;
 
-    if (/^wo-\d+$/i.test(raw)) {
-      const byWo = document.querySelector(`[data-wo-id="${raw.toLowerCase()}"]`);
+    const woAttrMatch = raw.match(/^\[?data-wo-id=["']?(wo-\d+)["']?\]?$/i) || raw.match(/^(wo-\d+)$/i);
+    if (woAttrMatch) {
+      const woId = woAttrMatch[1].toLowerCase();
+      const byWo = document.querySelector(`[data-wo-id="${woId}"]`);
       if (byWo && !this._isIgnored(byWo)) return byWo;
+
+      // Fallback when React/SPA re-render stripped or shifted data-wo-id: recover via cached element metadata
+      const cachedMeta = this._woIdMetaMap.get(woId);
+      if (cachedMeta) {
+        const candidates = this._collectAllCandidateElements();
+        let bestMetaEl = null;
+        let bestMetaScore = 0;
+        for (const el of candidates) {
+          if (this._isIgnored(el) || !this._isVisible(el, true)) continue;
+          const existingWo = el.getAttribute('data-wo-id');
+          if (existingWo && existingWo !== woId) continue;
+          let s = 0;
+          const lbl = this._getAccessibleLabel(el).toLowerCase();
+          const tag = el.tagName.toLowerCase();
+          const secNode = el.closest('section[id], [id*="modal"], [id*="drawer"], header, footer');
+          const secId = secNode ? (secNode.id || secNode.tagName.toLowerCase()) : null;
+          if (cachedMeta.label && lbl === cachedMeta.label.toLowerCase()) s += 90;
+          else if (cachedMeta.label && lbl && (lbl.includes(cachedMeta.label.toLowerCase()) || cachedMeta.label.toLowerCase().includes(lbl))) s += 55;
+          if (cachedMeta.tag && tag === cachedMeta.tag) s += 20;
+          if (cachedMeta.section && secId === cachedMeta.section) s += 25;
+          if (cachedMeta.name && (el.getAttribute('name') || '') === cachedMeta.name) s += 65;
+          if (s > bestMetaScore && s >= 65) {
+            bestMetaScore = s;
+            bestMetaEl = el;
+          }
+        }
+        if (bestMetaEl) {
+          bestMetaEl.setAttribute('data-wo-id', woId);
+          return bestMetaEl;
+        }
+      }
     }
 
     try {
@@ -247,9 +281,9 @@ export class DOMScanner {
       let score = 0;
       if (label === needle || nameAttr === needle || idAttr === needle) {
         score = 100;
-      } else if (label.includes(needle) || (needle.includes(label) && label.length > 2)) {
+      } else if (label && (label.includes(needle) || (needle.includes(label) && label.length > 2))) {
         score = 75;
-      } else if (idAttr.includes(needle) || nameAttr.includes(needle)) {
+      } else if ((idAttr && idAttr.includes(needle)) || (nameAttr && nameAttr.includes(needle))) {
         score = 60;
       }
 
@@ -525,7 +559,21 @@ export class DOMScanner {
     if (!el.getAttribute('data-wo-id')) {
       el.setAttribute('data-wo-id', `wo-${this._idCounter++}`);
     }
-    return el.getAttribute('data-wo-id');
+    const woId = el.getAttribute('data-wo-id');
+    try {
+      const lbl = this._getAccessibleLabel(el);
+      const secNode = el.closest('section[id], [id*="modal"], [id*="drawer"], header, footer');
+      const secId = secNode ? (secNode.id || secNode.tagName.toLowerCase()) : null;
+      if (lbl || el.getAttribute('name')) {
+        this._woIdMetaMap.set(woId, {
+          label: lbl,
+          tag: el.tagName.toLowerCase(),
+          section: secId,
+          name: el.getAttribute('name') || null
+        });
+      }
+    } catch (_) {}
+    return woId;
   }
 
   _isVisible(el, includeOffscreen = false) {

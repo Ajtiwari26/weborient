@@ -80,6 +80,7 @@ export class WebOrient {
     this._domObserver = null;
     this._lastPopupSignature = '';
     this._lastObservedRoute = '';
+    this._lastConnectionError = null;
 
     if (typeof window !== 'undefined') {
       const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
@@ -224,6 +225,16 @@ export class WebOrient {
       lightSelect.value = langCfg.code;
     }
 
+    if (this.client && this.client.isSetupComplete && prevLang && prevLang !== langCfg.code) {
+      this.client.sendText(
+        `[LANGUAGE UPDATED BY USER]: Locked language is now ${langCfg.name} (${langCfg.code}). Speak aloud and write every Ghost Cursor tool 'explanation' badge strictly in ${langCfg.name} without announcing the language change.`,
+        { turnComplete: false, userLanguage: langCfg.code }
+      );
+      if (typeof this.client.sendTelemetry === 'function') {
+        this.client.sendTelemetry({ userLanguage: langCfg.code });
+      }
+    }
+
     this._emit('languageChange', langCfg);
   }
 
@@ -258,6 +269,8 @@ export class WebOrient {
   }
 
   async start(options = {}) {
+    if (this.client?.isConnecting) return;
+    this._lastConnectionError = null;
     const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || getDefaultRelayEndpoint();
     this.options.endpoint = endpoint;
 
@@ -278,22 +291,33 @@ export class WebOrient {
           }
           return this.handleToolCall(callsOrName, args, callId);
         },
-        onStatusChange: (status) => {
-          console.log(`[WebOrient] Status: ${status}`);
+        onToolCallCancellation: (ids) => {
+          this.cursor.cancelActiveActions();
+          this._emit('toolCallCancellation', { ids });
+        },
+        onStatusChange: (status, detail = null) => {
+          console.log(`[WebOrient] Status: ${status}${detail?.code ? ` (${detail.code})` : ''}`);
           if (status === 'hibernating') {
             this._syncShadowWidgetState(true, 'hibernating');
           } else if (status === 'reconnecting') {
             this._syncShadowWidgetState(true, 'connecting');
           } else if (status === 'disconnected') {
+            this._lastConnectionError = null;
             this.memory.setLiveSessionStatus(false);
             this.client = null;
             this._syncShadowWidgetState(false, 'idle');
           } else if (status === 'error' && this.client?.isReconnecting) {
             this._syncShadowWidgetState(true, 'connecting');
+          } else if (status === 'error') {
+            this._lastConnectionError = detail || null;
+            this.memory.setLiveSessionStatus(false);
+            this.client = null;
+            this._syncShadowWidgetState(false, 'offline');
           } else {
+            if (status === 'connected') this._lastConnectionError = null;
             this._syncShadowWidgetState(status === 'connected', 'idle');
           }
-          this._emit('status', { status });
+          this._emit('status', detail ? { status, detail } : { status });
         },
         onReconnectNeeded: async () => {
           if (this._isWaking) return;
@@ -320,8 +344,10 @@ export class WebOrient {
               await this.start({ isRestore: true, flushAudioChunks: meta.bufferedChunks || [] });
             } catch (err) {
               console.warn('[WebOrient] Auto-wake from hibernation failed:', err);
-              if (this.client) this.client.vadState = 'hibernating';
-              this._syncShadowWidgetState(true, 'hibernating');
+              if (this.client && !this.client.isReconnecting) {
+                this.client.vadState = 'hibernating';
+                this._syncShadowWidgetState(true, 'hibernating');
+              }
             } finally {
               this._isWaking = false;
             }
@@ -362,13 +388,7 @@ export class WebOrient {
       this.client.endpoint = wsUrl;
     }
 
-    await this.client.connect({
-      flushAudioChunks: options.flushAudioChunks || [],
-      isAutoReconnect: Boolean(options.isAutoReconnect)
-    });
-    this.memory.setLiveSessionStatus(true, endpoint);
-    this._syncShadowWidgetState(true, 'listening');
-
+    // Scan live page DOM BEFORE connecting so pre-connect clientInit carries the current page's snapshot
     this.memory.syncDynamicDomChecklist(this.scanner, this.manifest);
     const initialSnapshot = this.scanner.captureStateSnapshot();
     const initialElements = this.scanner.scan({ includeOffscreen: true }).slice(0, 110);
@@ -378,6 +398,19 @@ export class WebOrient {
     const liveMetadata = this._extractLiveSiteMetadata();
     const memorySummary = this.memory.buildModelContextSummary();
     const isRestore = Boolean(options.isRestore) && this.memory.state.recentTranscripts.length > 0;
+    const isDeployMateSite =
+      isWebOrientDemoSite() ||
+      this.options.siteKey === 'wo_live_deploymate_main' ||
+      /deploymate/i.test(document.title || '');
+    const topSectionTitles = (pageContent.matchingSections || [])
+      .map(s => s.heading)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(', ');
+
+    const welcomeDirective = isDeployMateSite
+      ? `\n\n[SESSION START — SPEAK FIRST NOW]: A visitor just connected to WebOrient on ${document.title || 'DeployMate'}. Do NOT wait for them to say hello! Speak aloud right now with a warm, friendly 1-2 sentence welcome (introduce yourself as WebOrient on DeployMate, mention you can guide them around the website with the Ghost Cursor, and suggest 1 or 2 things to explore like testing the live voice agent, WhatsApp CRM, or calculating ROI savings). Never mention what language you are speaking—just speak naturally and pause to follow the user's lead!`
+      : `\n\n[SESSION START — SPEAK FIRST NOW]: A visitor just connected to WebOrient on ${document.title || 'this website'}. Do NOT wait for them to say hello! Speak aloud right now with a warm, friendly 1-2 sentence welcome (introduce yourself as the WebOrient co-pilot for ${document.title || 'this website'}, mention you can guide them around the page with the Ghost Cursor, and offer to explore ${topSectionTitles || 'the key sections and tools on screen'}). Never mention what language you are speaking—just speak naturally and pause to follow the user's lead!`;
 
     const handoffPayload =
       `[SESSION CONTINUITY & FULL DOM INDEX HANDOFF]\n${memorySummary}\n` +
@@ -388,11 +421,27 @@ export class WebOrient {
       `${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 180) })))}\n` +
       `[ALL INDEXED BUTTONS, INPUTS, IFRAMES, BANNERS & CLOSE ('X') CONTROLS ON PAGE (${initialElements.length} items)]:\n` +
       `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false, isIframeEmbed: e.isIframeEmbed || false })))}` +
-      (isRestore
-        ? ''
-        : `\n\n[SESSION START — SPEAK FIRST NOW]: A visitor just connected to WebOrient on ${document.title || 'DeployMate'}. Do NOT wait for them to say hello! Speak aloud right now with a warm, friendly 1-2 sentence welcome (introduce yourself as WebOrient on DeployMate, mention you can guide them around the website with the Ghost Cursor, and suggest 1 or 2 things to explore like testing the live voice agent, WhatsApp CRM, or calculating ROI savings). Never mention what language you are speaking—just speak naturally and pause to follow the user's lead!`);
+      (isRestore ? '' : welcomeDirective);
 
-    this.client.sendText(handoffPayload, { turnComplete: !isRestore });
+    await this.client.connect({
+      flushAudioChunks: options.flushAudioChunks || [],
+      isAutoReconnect: Boolean(options.isAutoReconnect),
+      initialContext: {
+        userLanguage: this.memory.state.userLanguage || 'en-IN',
+        latestDomSnapshot: handoffPayload.slice(-3500),
+        isRestore
+      }
+    });
+    if (!this.client || this.client._userStopped || this.client.isReconnecting) {
+      return;
+    }
+    this.memory.setLiveSessionStatus(true, endpoint);
+    this._syncShadowWidgetState(true, 'listening');
+
+    // Queue restored page DOM silently when resuming so it attaches to the next user/tool turn without triggering an unsolicited reply.
+    this.client.sendText(handoffPayload, {
+      turnComplete: !isRestore
+    });
   }
 
   _getCleanSpokenCaption(buffer) {
@@ -498,12 +547,17 @@ export class WebOrient {
   async handleToolCallBatch(calls = []) {
     if (!Array.isArray(calls) || calls.length === 0) return [];
     const responses = [];
+    let pendingNavigationHref = null;
     for (let i = 0; i < calls.length; i++) {
       const c = calls[i];
       const res = await this.handleToolCall(c.name, c.args || {}, null, {
         fastAckVisualMove: true,
         skipAnimation: i > 0 && (c.name === 'move_and_highlight' || c.name === 'show_and_describe')
       });
+      if (res && res._deferredHref) {
+        pendingNavigationHref = res._deferredHref;
+        delete res._deferredHref;
+      }
       if (c.id) {
         responses.push({
           id: c.id,
@@ -514,6 +568,15 @@ export class WebOrient {
     }
     if (this.client && responses.length > 0) {
       this.client.sendToolResponse(responses);
+    }
+    if (pendingNavigationHref && typeof window !== 'undefined') {
+      if (this.client) {
+        this.client.stop({ silent: true, forNavigation: true });
+        this.client = null;
+      }
+      setTimeout(() => {
+        window.location.href = pendingNavigationHref;
+      }, 60);
     }
     return responses;
   }
@@ -616,22 +679,36 @@ export class WebOrient {
           const isSubmit = el && this._isSubmitButton(el);
 
           if (isSubmit && this.options.requireSubmitConfirmation && !args.confirmed) {
-            await this.cursor.moveToElement(el, true, explanation || 'Confirm submit');
-            this.cursor.showSubmitConfirmationPrompt(
-              el,
-              () => {
-                this.memory.capturePartialFormFact('submitted', 'true', true);
-                if (this.client) {
-                  this.client.sendText('[USER CONFIRMED & SUBMITTED ON SCREEN]: The visitor clicked the on-screen Confirm & Submit button.', { turnComplete: false });
+            const mountConfirmPrompt = async () => {
+              await this.cursor.moveToElement(el, true, explanation || 'Confirm submit');
+              this.cursor.showSubmitConfirmationPrompt(
+                el,
+                async () => {
+                  this.memory.capturePartialFormFact('submitted', 'true', true);
+                  await this.handleToolCall('click_element', { ...args, confirmed: true });
+                  if (this.client) {
+                    this.client.sendText(
+                      '[USER CONFIRMED & SUBMITTED ON SCREEN]: The visitor clicked Confirm & Submit on screen. Briefly confirm aloud in their locked language that the form has been submitted!',
+                      { turnComplete: true }
+                    );
+                  }
+                },
+                () => {
+                  if (this.client) {
+                    this.client.sendText(
+                      '[USER CANCELLED SUBMIT]: The visitor clicked Cancel on the submit confirmation prompt. Briefly acknowledge aloud that submission was cancelled.',
+                      { turnComplete: true }
+                    );
+                  }
                 }
-                this.handleToolCall('click_element', { ...args, confirmed: true });
-              },
-              () => {
-                if (this.client) {
-                  this.client.sendText('[USER CANCELLED SUBMIT]: The user clicked Cancel on the submit confirmation prompt.', { turnComplete: false });
-                }
-              }
-            );
+              );
+            };
+            if (fastAck) {
+              deferredVisualTask = true;
+              this._enqueueVisualTask(mountConfirmPrompt);
+            } else {
+              await mountConfirmPrompt();
+            }
             result = {
               success: true,
               requiresConfirmation: true,
@@ -662,19 +739,78 @@ export class WebOrient {
           break;
         }
 
-        case 'fill_form_field':
-          result = await this.cursor.typeIntoField(args.selector, args.value ?? '', 22, explanation);
-          this.memory.capturePartialFormFact(result.fieldName || args.selector, args.value ?? '');
-          this.memory.markOriented({ selector: args.selector, title: explanation || `Filled ${args.selector}` });
-          break;
-
-        case 'fill_form_batch':
-          result = await this.cursor.fillFormBatch(args.fields || [], explanation);
-          for (const f of args.fields || []) {
-            if (f && f.selector) this.memory.capturePartialFormFact(f.selector, f.value ?? '');
+        case 'fill_form_field': {
+          const fieldEl = this.scanner.resolveElement(args.selector);
+          if (!fieldEl) {
+            result = { success: false, elementFound: false, error: `Form field not found: ${args.selector}` };
+          } else if (fastAck) {
+            const normVal = this.cursor._normalizeVoiceInput(fieldEl, args.value ?? '');
+            this.memory.capturePartialFormFact(fieldEl.name || fieldEl.id || args.selector, normVal);
+            this.memory.markOriented({ selector: args.selector, title: explanation || `Filled ${args.selector}` });
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() => this.cursor.typeIntoField(fieldEl, args.value ?? '', 22, explanation));
+            result = {
+              success: true,
+              elementFound: true,
+              action: 'fill_form_field',
+              selector: args.selector,
+              fieldName: fieldEl.name || fieldEl.id || '',
+              currentValue: normVal,
+              valid: true,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now typing into this form field. Confirm the value aloud to the user right now!'
+            };
+          } else {
+            result = await this.cursor.typeIntoField(args.selector, args.value ?? '', 22, explanation);
+            this.memory.capturePartialFormFact(result.fieldName || args.selector, args.value ?? '');
+            this.memory.markOriented({ selector: args.selector, title: explanation || `Filled ${args.selector}` });
           }
-          this.memory.markOriented({ selector: args.fields?.[0]?.selector || 'form', title: explanation || `Batch filled ${result.filledCount} fields` });
           break;
+        }
+
+        case 'fill_form_batch': {
+          const batchFields = Array.isArray(args.fields) ? args.fields : [];
+          const resolvedBatch = [];
+          const missingFields = [];
+          for (const f of batchFields) {
+            if (!f || !f.selector) continue;
+            const fEl = this.scanner.resolveElement(f.selector);
+            if (fEl) {
+              const normV = this.cursor._normalizeVoiceInput(fEl, f.value ?? '');
+              this.memory.capturePartialFormFact(fEl.name || fEl.id || f.selector, normV);
+              resolvedBatch.push({ ...f, element: fEl, normalizedValue: normV });
+            } else {
+              missingFields.push({ selector: f.selector, valid: false, error: `Field not found: ${f.selector}` });
+            }
+          }
+          this.memory.markOriented({ selector: resolvedBatch[0]?.selector || batchFields[0]?.selector || 'form', title: explanation || `Batch filled ${resolvedBatch.length} fields` });
+          const filteredBatch = resolvedBatch.map(r => ({ selector: r.element, value: r.value, explanation: r.explanation }));
+          if (fastAck && batchFields.length > 0) {
+            if (filteredBatch.length > 0) {
+              deferredVisualTask = true;
+              this._enqueueVisualTask(() => this.cursor.fillFormBatch(filteredBatch, explanation));
+            }
+            result = {
+              success: missingFields.length === 0 && filteredBatch.length > 0,
+              filledCount: filteredBatch.length,
+              allValid: missingFields.length === 0,
+              invalidFields: missingFields,
+              audioSyncDirective: filteredBatch.length > 0
+                ? 'SPEAK_ALOUD_NOW: The Ghost Cursor is now filling these form fields sequentially on screen. Confirm the entries aloud while the user watches!'
+                : 'None of the requested form fields were found on screen.'
+            };
+          } else if (filteredBatch.length > 0) {
+            result = await this.cursor.fillFormBatch(filteredBatch, explanation);
+          } else {
+            result = {
+              success: false,
+              filledCount: 0,
+              allValid: false,
+              invalidFields: missingFields,
+              audioSyncDirective: 'None of the requested form fields were found on screen.'
+            };
+          }
+          break;
+        }
 
         case 'scroll_page':
           if (fastAck) {
@@ -701,18 +837,39 @@ export class WebOrient {
           }
           break;
 
-        case 'swipe_or_swap':
-          result = await this.cursor.swipeOrSwap(
-            args.selector,
-            args.action || 'next',
-            args.targetValue ?? null,
-            explanation
-          );
-          this.memory.markOriented({ selector: args.selector, title: explanation || args.selector });
+        case 'swipe_or_swap': {
+          const swipeEl = this.scanner.resolveElement(args.selector);
+          if (!swipeEl) {
+            result = { success: false, elementFound: false, error: `Target widget not found: ${args.selector}` };
+          } else if (fastAck) {
+            this.memory.markOriented({ selector: args.selector, title: explanation || args.selector });
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() =>
+              this.cursor.swipeOrSwap(swipeEl, args.action || 'next', args.targetValue ?? null, explanation)
+            );
+            result = {
+              success: true,
+              elementFound: true,
+              action: 'swipe_or_swap',
+              selector: args.selector,
+              direction: args.action || 'next',
+              targetValue: args.targetValue ?? null,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now swiping/toggling this widget. Describe the change aloud right now!'
+            };
+          } else {
+            result = await this.cursor.swipeOrSwap(
+              args.selector,
+              args.action || 'next',
+              args.targetValue ?? null,
+              explanation
+            );
+            this.memory.markOriented({ selector: args.selector, title: explanation || args.selector });
+          }
           break;
+        }
 
         case 'navigate_route':
-          result = await this._handleNavigation(args.path, args.targetSelector, explanation);
+          result = await this._handleNavigation(args.path, args.targetSelector, explanation, { deferLocationAssign: Boolean(callId || fastAck) });
           break;
 
         case 'scan_visible_elements':
@@ -756,14 +913,26 @@ export class WebOrient {
           }
           break;
 
-        case 'guide_tour':
-          result = await this.cursor.guideTour(args.steps || []);
-          for (const st of args.steps || []) {
-            if (st.selector) {
+        case 'guide_tour': {
+          const tourSteps = Array.isArray(args.steps) ? args.steps : [];
+          for (const st of tourSteps) {
+            if (st && st.selector) {
               this.memory.markOriented({ selector: st.selector, title: st.explanation || st.selector });
             }
           }
+          if (fastAck && tourSteps.length > 0) {
+            deferredVisualTask = true;
+            this._enqueueVisualTask(() => this.cursor.guideTour(tourSteps));
+            result = {
+              success: true,
+              completedCount: tourSteps.length,
+              audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now guiding the visitor across the tour stops. Narrate the tour aloud!'
+            };
+          } else {
+            result = await this.cursor.guideTour(tourSteps);
+          }
           break;
+        }
 
         case 'update_session_memory':
           this.memory.updateUserIntent({
@@ -840,14 +1009,23 @@ export class WebOrient {
     };
 
     if (this.client && callId) {
+      const navHref = result._deferredHref;
+      if (navHref) delete result._deferredHref;
       this.client.sendToolResponse(callId, name, result);
+      if (navHref && typeof window !== 'undefined') {
+        this.client.stop({ silent: true, forNavigation: true });
+        this.client = null;
+        setTimeout(() => {
+          window.location.href = navHref;
+        }, 60);
+      }
     }
 
     this._emit('toolResult', { name, args, callId, result });
     return result;
   }
 
-  async _handleNavigation(rawPath, targetSelector = null, explanation = null) {
+  async _handleNavigation(rawPath, targetSelector = null, explanation = null, navOptions = {}) {
     if (!rawPath) {
       return { success: false, error: 'Missing navigation path' };
     }
@@ -973,6 +1151,20 @@ export class WebOrient {
       ? resolvedUrl + hashPart
       : `${baseDir}${resolvedUrl}${hashPart}`;
 
+    if (navOptions.deferLocationAssign) {
+      return {
+        success: true,
+        action: 'navigate_route',
+        navigatedTo: finalHref,
+        pageTitle: matchedPage?.title || targetFile,
+        _deferredHref: finalHref
+      };
+    }
+
+    if (this.client) {
+      this.client.stop({ silent: true, forNavigation: true });
+      this.client = null;
+    }
     window.location.href = finalHref;
     return {
       success: true,
@@ -1270,8 +1462,9 @@ export class WebOrient {
 
       btn.addEventListener('click', async () => {
         langPopover?.classList.remove('wo-open');
-        const hasOpenSocket = Boolean(this.client && this.client.ws && this.client.ws.readyState === WebSocket.OPEN);
-        if (this.client?.isReconnecting) {
+        const wsState = this.client?.ws?.readyState;
+        const hasOpenSocket = Boolean(this.client && this.client.ws && wsState === WebSocket.OPEN);
+        if (this.client?.isReconnecting || this.client?.isConnecting || wsState === WebSocket.CONNECTING) {
           this.stop();
           return;
         }
@@ -1280,9 +1473,14 @@ export class WebOrient {
           this._syncShadowWidgetState(true, 'connecting');
           try {
             await this.start({ isRestore });
-          } catch (_) {
-            this.client = null;
-            this._syncShadowWidgetState(false, 'offline');
+          } catch (err) {
+            if (err?.name === 'AbortError' || this.client?._userStopped) {
+              this.client = null;
+              this._syncShadowWidgetState(false, 'idle');
+            } else if (!this.client?.isReconnecting) {
+              this.client = null;
+              this._syncShadowWidgetState(false, 'offline');
+            }
           }
         } else {
           this.stop();
@@ -1339,7 +1537,18 @@ export class WebOrient {
       mic.style.display = 'flex';
       wave.style.display = 'none';
       if (dot) dot.className = 'wo-dot';
-      sub.textContent = state === 'offline' ? 'Relay offline' : 'Click to co-browse';
+      if (state === 'offline') {
+        const errCode = this._lastConnectionError?.code;
+        if (errCode === 'UNAUTHORIZED_OR_NO_CREDITS' || errCode === 'CLOSE_4002') {
+          sub.textContent = 'Credits / Origin Error';
+        } else if (errCode === 'RATE_LIMIT_EXCEEDED' || errCode === 'CLOSE_4003') {
+          sub.textContent = 'Rate limit reached';
+        } else {
+          sub.textContent = 'Relay offline';
+        }
+      } else {
+        sub.textContent = 'Click to co-browse';
+      }
     }
   }
 
@@ -1350,6 +1559,7 @@ export class WebOrient {
   }
 
   stop() {
+    this._lastConnectionError = null;
     this.memory.setLiveSessionStatus(false);
     if (this.client) {
       this.client.stop();

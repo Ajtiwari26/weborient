@@ -32,11 +32,14 @@ export function initMultiPageDemo(pageConfig = {}) {
     accentColor: '#0A0A0A',
     cursorStyle: 'deploymate-signal',
     manifestUrl: '../config/sample-manifest.json',
+    autoMountLauncher: false,
     mountWidget: false,
     onEvent: (type, detail) => {
       if (type === 'status') {
         if (detail.status === 'reconnecting' || (detail.status === 'error' && weborient.client?.isReconnecting)) {
           syncAssistUI(true, 'connecting');
+        } else if (detail.status === 'error') {
+          syncAssistUI(false, 'offline', detail.detail || null);
         } else {
           syncAssistUI(
             detail.status === 'connected' || detail.status === 'hibernating',
@@ -306,8 +309,9 @@ function wireAssistToggleActions(weborient, activePage) {
   btnToggle.addEventListener('click', async (e) => {
     if (e.target.closest('#quick-lang-select')) return;
 
-    const hasOpenSocket = Boolean(weborient.client && weborient.client.ws && weborient.client.ws.readyState === WebSocket.OPEN);
-    if (weborient.client?.isReconnecting) {
+    const wsState = weborient.client?.ws?.readyState;
+    const hasOpenSocket = Boolean(weborient.client && weborient.client.ws && wsState === WebSocket.OPEN);
+    if (weborient.client?.isReconnecting || weborient.client?.isConnecting || wsState === WebSocket.CONNECTING) {
       weborient.stop();
       syncAssistUI(false, 'idle');
     } else if (!weborient.client || weborient.client.vadState === 'hibernating' || !hasOpenSocket) {
@@ -316,11 +320,20 @@ function wireAssistToggleActions(weborient, activePage) {
       weborient.options.endpoint = isLocal ? 'ws://localhost:8088' : 'wss://relay.deploymate.in';
       try {
         await weborient.start({ isRestore: Boolean(weborient.client && weborient.client.vadState === 'hibernating') });
-        syncAssistUI(true, 'listening');
+        if (weborient.client && !weborient.client.isReconnecting && !weborient.client._userStopped) {
+          syncAssistUI(true, 'listening');
+        }
       } catch (err) {
-        console.warn('[WebOrient] Connection error:', err);
-        weborient.client = null;
-        syncAssistUI(false, 'offline');
+        if (err?.name === 'AbortError' || weborient.client?._userStopped) {
+          weborient.client = null;
+          syncAssistUI(false, 'idle');
+        } else {
+          console.warn('[WebOrient] Connection error:', err);
+          if (!weborient.client?.isReconnecting) {
+            weborient.client = null;
+            syncAssistUI(false, 'offline');
+          }
+        }
       }
     } else {
       weborient.stop();
@@ -342,7 +355,15 @@ function wireAssistToggleActions(weborient, activePage) {
   }
 }
 
-function syncAssistUI(connected, state = 'idle') {
+let _lastAssistErrorDetail = null;
+
+function syncAssistUI(connected, state = 'idle', errorDetail = undefined) {
+  if (connected || state === 'idle') {
+    _lastAssistErrorDetail = null;
+  } else if (errorDetail) {
+    _lastAssistErrorDetail = errorDetail;
+  }
+
   const btn = document.getElementById('btn-assist-toggle');
   const idleIcon = document.getElementById('assist-idle-icon');
   const waveform = document.getElementById('assist-waveform');
@@ -372,6 +393,12 @@ function syncAssistUI(connected, state = 'idle') {
       waveform.style.display = 'none';
       sublabel.textContent = 'Paused · Speak to wake';
       dot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
+    } else if (state === 'connecting') {
+      idleIcon.classList.add('hidden');
+      waveform.classList.remove('hidden');
+      waveform.style.display = 'flex';
+      sublabel.textContent = 'Connecting...';
+      dot.className = 'w-1.5 h-1.5 rounded-full bg-[#E6391E] animate-pulse';
     } else if (state === 'listening') {
       idleIcon.classList.add('hidden');
       waveform.classList.remove('hidden');
@@ -392,7 +419,14 @@ function syncAssistUI(connected, state = 'idle') {
     btn.className = 'flex items-center gap-3 px-4 py-2.5 rounded-full bg-[#0A0A0A] hover:bg-[#181818] border border-[#0A0A0A] text-white shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer';
 
     if (state === 'offline') {
-      sublabel.textContent = 'Relay offline';
+      const errCode = _lastAssistErrorDetail?.code;
+      if (errCode === 'UNAUTHORIZED_OR_NO_CREDITS' || errCode === 'CLOSE_4002') {
+        sublabel.textContent = 'Credits / Origin Error';
+      } else if (errCode === 'RATE_LIMIT_EXCEEDED' || errCode === 'CLOSE_4003') {
+        sublabel.textContent = 'Rate limit reached';
+      } else {
+        sublabel.textContent = 'Relay offline';
+      }
       dot.className = 'w-1.5 h-1.5 rounded-full bg-amber-500';
     } else {
       sublabel.textContent = 'Click to co-browse';

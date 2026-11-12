@@ -2,10 +2,11 @@
  * WebOrient Live Client (v1.0.0 — "VIP + Local Secretary" Zero-Token VAD Gate, 600ms Pre-Roll Ring Buffer & Auto-Resume)
  * - Captures 16kHz mono PCM microphone audio (AudioWorklet with ScriptProcessor fallback)
  * - 3-Stage "VIP + Local Secretary" Architecture:
- *   1. ACTIVE (0s - 10s silence): Streams live 16kHz PCM to Gemini Live.
- *   2. SECRETARY_HOLD (10s - 75s silence): Browser AudioWorklet VAD gates silent PCM packets (0 tokens burned,
- *      0 credits deducted) while keeping a rolling 600ms Pre-Roll Ring Buffer in RAM. The instant the user speaks
- *      (RMS > threshold for 2+ frames), flushes the 600ms pre-roll + live speech in <15ms with zero clipped syllables!
+ *   1. ACTIVE (0s - 12s silence): Streams live 16kHz PCM to Gemini Live (gated until `setupComplete` so initial room noise
+ *      never interrupts Kavya's opening welcome, and protected against speaker echo bleed during model playback).
+ *   2. SECRETARY_HOLD (12s - 75s silence): Browser AudioWorklet VAD gates silent PCM packets (0 tokens burned,
+ *      0 credits deducted) while keeping a rolling ~750ms Pre-Roll Ring Buffer in RAM. The instant the user speaks
+ *      (RMS > threshold), flushes the pre-roll + live speech in <15ms with zero clipped syllables!
  *   3. HIBERNATING (>75s silence or >45s tab hidden): Disconnects upstream WebSocket to free cloud slots while
  *      the Local Secretary keeps monitoring the mic locally to auto-reconnect and flush speech when the user talks again.
  */
@@ -17,6 +18,7 @@ export class LiveClient {
         ? 'ws://localhost:8088'
         : 'wss://relay.deploymate.in');
     this.onToolCall = options.onToolCall || (() => {});
+    this.onToolCallCancellation = options.onToolCallCancellation || (() => {});
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onTranscript = options.onTranscript || (() => {});
     this.onPlaybackChange = options.onPlaybackChange || (() => {});
@@ -35,17 +37,25 @@ export class LiveClient {
     this.activeSourceNodes = new Set();
     this.nextPlayTime = 0;
     this.isPlaying = false;
+    this._playbackEndTimer = null;
+    this._bargeInUnlocked = false;
 
     // "VIP + Local Secretary" VAD & Pre-Roll Ring Buffer state
     this.vadState = 'active'; // 'active' | 'secretary_hold' | 'hibernating' | 'waking'
+    this.isSetupComplete = false;
+    this.resumedWithHandle = false;
+    this._setupCompleteHandler = null;
     this.lastSpeechOrActionAt = Date.now();
-    this.secretaryHoldAfterMs = options.secretaryHoldAfterMs || 10000; // 10s silence -> Secretary Hold (0 token burn)
+    this.secretaryHoldAfterMs = options.secretaryHoldAfterMs || 12000; // 12s silence -> Secretary Hold (0 token burn)
+    this.hiddenTabHoldAfterMs = options.hiddenTabHoldAfterMs || 12000; // 12s hidden tab -> Secretary Hold
     this.hibernateAfterMs = options.hibernateAfterMs || 75000;         // 75s silence -> Deep Hibernation
     this.hiddenTabHibernateMs = options.hiddenTabHibernateMs || 45000; // 45s hidden tab -> Deep Hibernation
-    this.vadThresholdRms = options.vadThresholdRms || 0.008;
+    this.vadThresholdRms = options.vadThresholdRms || 0.0055;
+    this.bargeInThresholdRms = options.bargeInThresholdRms || 0.015;
     this.consecutiveVoiceFrames = 0;
+    this.consecutiveBargeInFrames = 0;
     this.preRollBuffer = [];
-    this.maxPreRollChunks = 6; // ~750ms rolling audio pre-roll at 128ms/frame
+    this.maxPreRollChunks = 10; // ~640ms rolling audio pre-roll at 64ms/frame (1024 samples @ 16kHz)
     this.secretarySavedSeconds = 0;
     this._vadTimer = null;
     this._keepaliveTimer = null;
@@ -53,14 +63,26 @@ export class LiveClient {
     this._reconnectAttempts = 0;
     this._maxReconnectAttempts = 3;
     this.isReconnecting = false;
+    this.isConnecting = false;
     this._userStopped = false;
     this._terminalError = false;
     this._intentionalHibernate = false;
+    this._connectReject = null;
+    this._lastErrorDetail = null;
+  }
+
+  _buildAbortError() {
+    const err = new Error('Connection cancelled by user');
+    err.name = 'AbortError';
+    return err;
   }
 
   async connect(options = {}) {
     this._userStopped = false;
     this._terminalError = false;
+    this._hadConnectionError = false;
+    this._lastErrorDetail = null;
+    this.isConnecting = true;
     if (!options.isAutoReconnect) {
       this.isReconnecting = false;
     }
@@ -69,35 +91,74 @@ export class LiveClient {
       this._reconnectTimer = null;
     }
 
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!this.captureContext || this.captureContext.state === 'closed') {
-      this.captureContext = new AudioCtx({ sampleRate: 16000 });
-    }
-    if (!this.playbackContext || this.playbackContext.state === 'closed') {
-      this.playbackContext = new AudioCtx({ sampleRate: 24000 });
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!this.captureContext || this.captureContext.state === 'closed') {
+        this.captureContext = new AudioCtx({ sampleRate: 16000 });
+      }
+      if (!this.playbackContext || this.playbackContext.state === 'closed') {
+        this.playbackContext = new AudioCtx({ sampleRate: 24000 });
+      }
+
+      if (!this.mediaStream) {
+        this.mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+      }
+    } catch (err) {
+      this.isConnecting = false;
+      if (this._userStopped) {
+        this.stop({ silent: true });
+        throw this._buildAbortError();
+      }
+      throw err;
     }
 
-    if (!this.mediaStream) {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
+    if (this._userStopped) {
+      this.stop({ silent: true });
+      throw this._buildAbortError();
     }
 
     const wasWaking = this.vadState === 'waking' || this._intentionalHibernate;
     this._intentionalHibernate = false;
+    this.isSetupComplete = false;
+    this.resumedWithHandle = false;
     this.vadState = 'waking';
     this.lastSpeechOrActionAt = Date.now();
 
     return new Promise((resolve, reject) => {
       let settled = false;
       let openedThisSocket = false;
-      const ws = new WebSocket(this.endpoint);
+      let setupFallbackTimer = null;
+      const settleResolve = () => {
+        if (settled) return;
+        settled = true;
+        this.isConnecting = false;
+        this._connectReject = null;
+        resolve();
+      };
+      const settleReject = (err) => {
+        if (settled) return;
+        settled = true;
+        this.isConnecting = false;
+        this._connectReject = null;
+        reject(err);
+      };
+      this._connectReject = settleReject;
+
+      let ws;
+      try {
+        ws = new WebSocket(this.endpoint);
+      } catch (wsErr) {
+        settleReject(wsErr);
+        return;
+      }
       this.ws = ws;
 
       const canScheduleRetry = (isTerminal = this._terminalError) =>
@@ -107,35 +168,59 @@ export class LiveClient {
         this._reconnectAttempts < this._maxReconnectAttempts &&
         typeof this.onReconnectNeeded === 'function';
 
-      ws.onopen = async () => {
-        if (this.ws !== ws) return;
-        settled = true;
-        openedThisSocket = true;
+      const finalizeSetupReady = (setupMeta = {}) => {
+        if (this.ws !== ws || this.isSetupComplete) return;
+        if (setupFallbackTimer) {
+          clearTimeout(setupFallbackTimer);
+          setupFallbackTimer = null;
+        }
+        this.isSetupComplete = true;
+        this.resumedWithHandle = Boolean(setupMeta && setupMeta.resumedWithHandle);
+        this._setupCompleteHandler = null;
         this.isReconnecting = false;
         this.vadState = 'active';
         this.consecutiveVoiceFrames = 0;
+        this.consecutiveBargeInFrames = 0;
         this.lastSpeechOrActionAt = Date.now();
         this.onStatusChange('connected');
         this.onVadStateChange('active', { savedSeconds: this.secretarySavedSeconds });
+
+        const explicitFlush = Array.isArray(options.flushAudioChunks) ? options.flushAudioChunks : [];
+        if (explicitFlush.length > 0) {
+          const combinedChunks = [...explicitFlush, ...this.preRollBuffer].slice(-this.maxPreRollChunks);
+          this.preRollBuffer = [];
+          if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
+            this._flushPreRollChunks(combinedChunks);
+          }
+        } else {
+          // Clear pre-connect room noise on fresh session start so it never interrupts Kavya's opening welcome
+          this.preRollBuffer = [];
+        }
+
+        settleResolve();
+      };
+
+      this._setupCompleteHandler = finalizeSetupReady;
+
+      ws.onopen = async () => {
+        if (this.ws !== ws) return;
+        openedThisSocket = true;
+        this.lastSpeechOrActionAt = Date.now();
+        if (options.initialContext && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({ clientInit: options.initialContext }));
+          } catch (_) {}
+        }
         if (!this.workletNode && !this.scriptProcessor) {
           await this._startAudioStreaming();
         }
         this._startSecretaryMonitor();
         this._startKeepaliveLoop();
 
-        const combinedChunks = [
-          ...(Array.isArray(options.flushAudioChunks) ? options.flushAudioChunks : []),
-          ...this.preRollBuffer
-        ].slice(-this.maxPreRollChunks);
-        this.preRollBuffer = [];
-        if (combinedChunks.length > 0) {
-          setTimeout(() => {
-            if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
-              this._flushPreRollChunks(combinedChunks);
-            }
-          }, 160);
-        }
-        resolve();
+        // Wait for relay's setupComplete message (with a 3500ms safety fallback for mock/custom endpoints)
+        setupFallbackTimer = setTimeout(() => {
+          finalizeSetupReady({});
+        }, 3500);
       };
 
       ws.onmessage = async (event) => {
@@ -150,6 +235,12 @@ export class LiveClient {
 
       ws.onclose = (closeEvent) => {
         if (this.ws !== ws) return;
+        if (setupFallbackTimer) {
+          clearTimeout(setupFallbackTimer);
+          setupFallbackTimer = null;
+        }
+        this._setupCompleteHandler = null;
+        this.isSetupComplete = false;
         if (this._keepaliveTimer) {
           clearInterval(this._keepaliveTimer);
           this._keepaliveTimer = null;
@@ -158,6 +249,7 @@ export class LiveClient {
           this.ws = null;
           this.isReconnecting = false;
           this.onStatusChange('hibernating');
+          settleResolve();
           return;
         }
 
@@ -171,6 +263,7 @@ export class LiveClient {
           console.warn(`[WebOrient] Connection interrupted (code=${code}); auto-reconnecting (${this._reconnectAttempts}/${this._maxReconnectAttempts}) in ${delayMs}ms...`);
           this.ws = null;
           this.onStatusChange('reconnecting');
+          settleResolve();
           this._reconnectTimer = setTimeout(() => {
             this._reconnectTimer = null;
             if (!this._userStopped) {
@@ -180,9 +273,20 @@ export class LiveClient {
           return;
         }
 
+        const errorDetail = this._lastErrorDetail;
+        const hadConnectionError = this._hadConnectionError;
+        const hasExplicitError = hadConnectionError || isTerminalClose;
         this.isReconnecting = false;
-        this.stop({ silent: true });
-        this.onStatusChange('disconnected');
+        this.stop({ silent: true, preserveConnectReject: true });
+        if (!hadConnectionError && isTerminalClose) {
+          this.onStatusChange('error', errorDetail || {
+            code: `CLOSE_${code}`,
+            message: closeEvent?.reason || 'Relay rejected connection'
+          });
+        } else if (!hasExplicitError) {
+          this.onStatusChange('disconnected');
+        }
+        settleReject(new Error(errorDetail?.message ? `${errorDetail.message} (code=${code})` : `WebSocket closed (code=${code})`));
       };
 
       ws.onerror = (err) => {
@@ -190,12 +294,15 @@ export class LiveClient {
         console.error('[WebOrient] WebSocket error:', err);
         const willAutoReconnect = this.isReconnecting || canScheduleRetry();
         if (!willAutoReconnect) {
-          this.onStatusChange('error');
+          this._hadConnectionError = true;
+          this.onStatusChange('error', this._lastErrorDetail || {
+            code: 'WS_CONNECTION_ERROR',
+            message: `WebSocket connection failed to ${this.endpoint}`
+          });
         }
         if (!settled) {
-          settled = true;
           this.vadState = wasWaking ? 'hibernating' : 'active';
-          reject(new Error(`WebSocket connection failed to ${this.endpoint}`));
+          settleReject(new Error(`WebSocket connection failed to ${this.endpoint}`));
         }
       };
     });
@@ -232,14 +339,15 @@ export class LiveClient {
       const isTabHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
       if (this.vadState === 'active') {
-        if (idleMs >= this.secretaryHoldAfterMs || (isTabHidden && idleMs >= 5000)) {
+        if (!this.isSetupComplete) return;
+        if (idleMs >= this.secretaryHoldAfterMs || (isTabHidden && idleMs >= this.hiddenTabHoldAfterMs)) {
           this.vadState = 'secretary_hold';
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
               vadControl: {
                 state: 'secretary_hold',
                 idleMs,
-                reason: isTabHidden ? 'tab_hidden' : 'silence_10s',
+                reason: isTabHidden ? 'tab_hidden' : 'silence_12s',
                 savedSeconds: this.secretarySavedSeconds
               }
             }));
@@ -340,7 +448,7 @@ export class LiveClient {
           class WebOrientPCMProcessor extends AudioWorkletProcessor {
             constructor() {
               super();
-              this.buffer = new Float32Array(2048);
+              this.buffer = new Float32Array(1024);
               this.offset = 0;
             }
             process(inputs) {
@@ -376,7 +484,7 @@ export class LiveClient {
       }
     }
 
-    this.scriptProcessor = this.captureContext.createScriptProcessor(4096, 1, 1);
+    this.scriptProcessor = this.captureContext.createScriptProcessor(2048, 1, 1);
     this.scriptProcessor.onaudioprocess = (e) => {
       const inputData = e.inputBuffer.getChannelData(0);
       this._sendFloat32AudioFrame(inputData);
@@ -397,17 +505,42 @@ export class LiveClient {
 
   _sendFloat32AudioFrame(float32Array) {
     const rms = this._computeRmsEnergy(float32Array);
-    const pcm16 = this._floatTo16BitPCM(float32Array);
+
+    // During model playback, attenuate quiet speaker echo (-16dB / 0.15x) instead of hard-dropping the stream
+    // or polluting preRollBuffer with raw speaker bleed; pass 1.0x audio within 64ms when user barges in!
+    let frameToEncode = float32Array;
+    if (this.isPlaying) {
+      if (rms >= this.bargeInThresholdRms) {
+        this.consecutiveBargeInFrames += 1;
+        if (this.consecutiveBargeInFrames >= 2 || rms >= this.bargeInThresholdRms * 1.5) {
+          this._bargeInUnlocked = true;
+        }
+      } else if (!this._bargeInUnlocked) {
+        this.consecutiveBargeInFrames = 0;
+      }
+      if (!this._bargeInUnlocked) {
+        const attenuated = new Float32Array(float32Array.length);
+        for (let i = 0; i < float32Array.length; i++) {
+          attenuated[i] = float32Array[i] * 0.15;
+        }
+        frameToEncode = attenuated;
+      }
+    }
+
+    const pcm16 = this._floatTo16BitPCM(frameToEncode);
     const base64 = this._arrayBufferToBase64(pcm16.buffer);
 
-    this.preRollBuffer.push(base64);
-    if (this.preRollBuffer.length > this.maxPreRollChunks) {
-      this.preRollBuffer.shift();
+    if (!this.isPlaying || this._bargeInUnlocked) {
+      this.preRollBuffer.push(base64);
+      if (this.preRollBuffer.length > this.maxPreRollChunks) {
+        this.preRollBuffer.shift();
+      }
     }
 
     if (!this.isPlaying && rms >= this.vadThresholdRms) {
       this.consecutiveVoiceFrames += 1;
-      if (this.consecutiveVoiceFrames >= 2) {
+      const isStrongVoice = this.consecutiveVoiceFrames >= 2 && rms >= this.vadThresholdRms * 2.2;
+      if (this.consecutiveVoiceFrames >= 3 || isStrongVoice) {
         this.lastSpeechOrActionAt = Date.now();
         if (this.vadState === 'secretary_hold') {
           this._wakeFromSecretaryHold('voice_detected');
@@ -425,7 +558,7 @@ export class LiveClient {
       this.consecutiveVoiceFrames = 0;
     }
 
-    if (this.vadState !== 'active') return;
+    if (!this.isSetupComplete || this.vadState !== 'active') return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     this.ws.send(JSON.stringify({
@@ -442,11 +575,20 @@ export class LiveClient {
 
     if (msg.setupComplete) {
       this._reconnectAttempts = 0;
+      if (typeof this._setupCompleteHandler === 'function') {
+        this._setupCompleteHandler(msg.setupComplete);
+      }
+      return;
+    }
+
+    if (msg.toolCallCancellation?.ids) {
+      this.onToolCallCancellation(msg.toolCallCancellation.ids);
       return;
     }
 
     if (msg.error) {
       console.error('[WebOrient] Relay error:', msg.error, msg.code || '');
+      this._lastErrorDetail = { code: msg.code || null, message: String(msg.error) };
       if (msg.code === 'UNAUTHORIZED_OR_NO_CREDITS' || msg.code === 'RATE_LIMIT_EXCEEDED' || msg.code === 'UPSTREAM_POOL_EXHAUSTED') {
         this._terminalError = true;
       }
@@ -523,8 +665,14 @@ export class LiveClient {
     sourceNode.start(startAt);
     this.nextPlayTime = startAt + audioBuffer.duration;
 
+    if (this._playbackEndTimer) {
+      clearTimeout(this._playbackEndTimer);
+      this._playbackEndTimer = null;
+    }
     if (!this.isPlaying) {
       this.isPlaying = true;
+      this._bargeInUnlocked = false;
+      this.consecutiveBargeInFrames = 0;
       this.onPlaybackChange(true);
     }
 
@@ -532,14 +680,26 @@ export class LiveClient {
     sourceNode.onended = () => {
       this.activeSourceNodes.delete(sourceNode);
       if (this.activeSourceNodes.size === 0) {
-        this.isPlaying = false;
-        this.lastSpeechOrActionAt = Date.now();
-        this.onPlaybackChange(false);
+        if (this._playbackEndTimer) clearTimeout(this._playbackEndTimer);
+        this._playbackEndTimer = setTimeout(() => {
+          this._playbackEndTimer = null;
+          if (this.activeSourceNodes.size === 0) {
+            this.isPlaying = false;
+            this._bargeInUnlocked = false;
+            this.consecutiveBargeInFrames = 0;
+            this.lastSpeechOrActionAt = Date.now();
+            this.onPlaybackChange(false);
+          }
+        }, 160);
       }
     };
   }
 
   _clearAudioQueue() {
+    if (this._playbackEndTimer) {
+      clearTimeout(this._playbackEndTimer);
+      this._playbackEndTimer = null;
+    }
     for (const node of this.activeSourceNodes) {
       try {
         node.stop(0);
@@ -550,6 +710,8 @@ export class LiveClient {
     if (this.playbackContext) {
       this.nextPlayTime = this.playbackContext.currentTime;
     }
+    this._bargeInUnlocked = false;
+    this.consecutiveBargeInFrames = 0;
     if (this.isPlaying) {
       this.isPlaying = false;
       this.onPlaybackChange(false);
@@ -580,7 +742,10 @@ export class LiveClient {
       if (turnComplete) {
         this.markActivity('text_prompt');
       }
-      this.ws.send(JSON.stringify({ text: String(text), turnComplete }));
+      const payload = { text: String(text), turnComplete };
+      if (options.flushRealtime) payload.flushRealtime = true;
+      if (options.userLanguage) payload.userLanguage = options.userLanguage;
+      this.ws.send(JSON.stringify(payload));
     }
   }
 
@@ -625,8 +790,15 @@ export class LiveClient {
   stop(options = {}) {
     this._userStopped = true;
     this._intentionalHibernate = false;
+    this.isSetupComplete = false;
+    this._setupCompleteHandler = null;
+    this.isConnecting = false;
     this.isReconnecting = false;
     this._reconnectAttempts = 0;
+    const pendingConnectReject = options.preserveConnectReject ? null : this._connectReject;
+    if (!options.preserveConnectReject) {
+      this._connectReject = null;
+    }
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
@@ -663,10 +835,19 @@ export class LiveClient {
     if (this.ws) {
       const closingWs = this.ws;
       this.ws = null;
-      try { closingWs.close(); } catch (_) {}
+      try {
+        if (options.forNavigation && closingWs.readyState === WebSocket.OPEN) {
+          closingWs.send(JSON.stringify({ vadControl: { state: 'navigating', savedSeconds: this.secretarySavedSeconds } }));
+        }
+        closingWs.close(1000, options.forNavigation ? 'Page navigation' : 'Client stopped');
+      } catch (_) {}
     }
     if (!options.silent) {
+      this._lastErrorDetail = null;
       this.onStatusChange('disconnected');
+    }
+    if (typeof pendingConnectReject === 'function') {
+      pendingConnectReject(this._buildAbortError());
     }
   }
 }
