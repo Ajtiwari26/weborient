@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """
-WebOrient by DeployMate — Multi-Tenant Live Relay Gateway (`src/relay/weborient_relay.py` v1.0.0)
-- MongoDB Atlas Persistence (`MONGODB_URI` -> `db('deploymate').collection('weborient_tenants')` & `'weborient_sessions'`)
-  with automatic local JSON fallback (`config/tenants.json` & `config/.session_store.json`)
-- Built-in HTTP REST & Health Endpoints on the same port (`/health`, `/api/tenants`, `/api/tenants/register`, `/api/tenants/credits`)
-- Multi-Tenant `siteKey` & HTTP `Origin` Verification
-- Real-Time Credit Balance Gate & 30-Second Atomic Credit Metering Loop with Low-Balance Wrap-Up
-- Bridges 16kHz Mic PCM <-> Gemini 3.8 Live API <-> 24kHz Audio + 11 DOM Function Tools
+WebOrient by DeployMate — Production Multi-Tenant Live Relay Gateway (`src/relay/weborient_relay.py` v1.0.0)
+- Multi-Key Gemini Live API Load Balancer (`GeminiKeyPool`) with MongoDB `weborient_api_keys` persistence,
+  least-loaded routing, 60s error cooldowns, and <150ms automatic failover on 429/403/503 errors
+- "VIP + Local Secretary" VAD Gate Integration (`vadControl`):
+  Pauses tenant credit burn (`is_secretary_hold = True`) and sends `audio_stream_end=True` after 10s of silence
+  so 0 tokens and 0 credits are burned while visitors read the page
+- Context Window Compression (`ContextWindowCompressionConfig`) & Transparent Session Resumption
+- Per-IP Connection Rate Limiter + PII/Card/OTP Redaction (`redact_sensitive_text`)
+- Full Session Telemetry, DOM Action Audit Log (`domEvents[]`), Drop-Off Section Tracking & Partial Lead Capture
 """
 import asyncio
 import base64
 import datetime
+import hashlib
+import hmac
 import json
 import os
+import re
 import secrets
 import sys
+import time
 from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -22,8 +28,8 @@ from urllib.parse import parse_qs, urlparse
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SESSION_CACHE_FILE = PROJECT_ROOT / "config" / ".session_store.json"
 TENANTS_FILE = PROJECT_ROOT / "config" / "tenants.json"
+API_KEYS_FILE = PROJECT_ROOT / "config" / ".api_keys_store.json"
 
-# Load environment from weborient/.env and optionally DeployMate/.env for shared MONGODB_URI
 for candidate_env in [PROJECT_ROOT / ".env", PROJECT_ROOT.parent / "DeployMate" / ".env"]:
     if candidate_env.exists():
         try:
@@ -39,13 +45,80 @@ for candidate_env in [PROJECT_ROOT / ".env", PROJECT_ROOT.parent / "DeployMate" 
         except Exception:
             pass
 
-API_KEY = os.getenv("GEMINI_LIVE_API_KEY") or os.getenv("GEMINI_API_KEY")
+PRIMARY_API_KEY = os.getenv("GEMINI_LIVE_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
+EXTRA_API_KEYS_RAW = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_BACKUP_API_KEYS") or ""
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.8-live")
 PORT = int(os.getenv("PORT", "8088"))
 MONGODB_URI = os.getenv("MONGODB_URI", "")
+ADMIN_SECRET = (
+    os.getenv("ADMIN_KEY")
+    or os.getenv("adminkey")
+    or os.getenv("WEBORIENT_ADMIN_SECRET")
+    or ""
+)
 SERVER_START_TIME = datetime.datetime.now(datetime.timezone.utc)
 
-if not API_KEY:
+
+def _safe_equal(a: str, b: str) -> bool:
+    """Constant-time string comparison matching DeployMate/api-lib/adminAuth.ts."""
+    return hmac.compare_digest(
+        hashlib.sha256(a.encode("utf-8")).digest(),
+        hashlib.sha256(b.encode("utf-8")).digest()
+    )
+
+
+def _verify_admin_hmac_token(token: str, secret: str) -> bool:
+    if not token or "." not in token or not secret:
+        return False
+    exp, sig = token.split(".", 1)
+    if not re.fullmatch(r"\d{10,16}", exp):
+        return False
+    if int(exp) < int(time.time() * 1000):
+        return False
+    expected_sig = base64.urlsafe_b64encode(
+        hmac.new(secret.encode("utf-8"), exp.encode("utf-8"), hashlib.sha256).digest()
+    ).decode("ascii").rstrip("=")
+    return _safe_equal(sig, expected_sig)
+
+
+def verify_admin_token_or_key(candidate: str) -> bool:
+    """Validates either a short-lived HMAC x-admin-token or raw ADMIN_SECRET."""
+    if not ADMIN_SECRET or not candidate:
+        return False
+    clean = str(candidate).strip()
+    if not clean:
+        return False
+    return _verify_admin_hmac_token(clean, ADMIN_SECRET) or _safe_equal(clean, ADMIN_SECRET)
+
+
+def _extract_header(headers, name: str) -> str:
+    if not headers:
+        return ""
+    target = name.lower()
+    if hasattr(headers, "items"):
+        for k, v in headers.items():
+            if str(k).lower() == target:
+                return str(v)
+    return ""
+
+
+def is_admin_request(headers, qs: dict | None = None, extra_token: str = "") -> bool:
+    """Returns True only when request carries a valid HMAC admin token or raw ADMIN_SECRET."""
+    candidates = [
+        _extract_header(headers, "X-Admin-Token"),
+        _extract_header(headers, "X-Admin-Key"),
+    ]
+    auth_hdr = _extract_header(headers, "Authorization")
+    if auth_hdr.lower().startswith("bearer "):
+        candidates.append(auth_hdr[7:].strip())
+    if qs:
+        candidates.append((qs.get("adminToken") or [""])[0])
+        candidates.append((qs.get("adminKey") or [""])[0])
+    if extra_token:
+        candidates.append(extra_token)
+    return any(verify_admin_token_or_key(c) for c in candidates if c)
+
+if not PRIMARY_API_KEY and not EXTRA_API_KEYS_RAW:
     print("[ERROR] GEMINI_LIVE_API_KEY not found in environment or .env file.")
     sys.exit(1)
 
@@ -55,10 +128,8 @@ try:
     from google.genai import types
 except ImportError as e:
     print(f"[ERROR] Missing required libraries: {e}")
-    print("Install with: pip install -r requirements.txt")
     sys.exit(1)
 
-# Optional MongoDB Atlas driver (falls back to JSON files if pymongo is not installed or offline)
 mongo_db = None
 if MONGODB_URI:
     try:
@@ -90,10 +161,340 @@ def save_json_file(path: Path, data: dict):
 
 SESSION_MEMORY_STORE = load_json_file(SESSION_CACHE_FILE)
 TENANT_STORE = load_json_file(TENANTS_FILE)
+API_KEY_STORE = load_json_file(API_KEYS_FILE)
+
+# Per-IP Rate Limiter State: { ip_hash: {"active": int, "timestamps": [float]} }
+IP_RATE_STATE: dict[str, dict] = {}
+MAX_CONCURRENT_PER_IP = int(os.getenv("WEBORIENT_MAX_CONCURRENT_PER_IP", "5"))
+MAX_CONNECTIONS_PER_HOUR_IP = int(os.getenv("WEBORIENT_MAX_HOURLY_PER_IP", "60"))
+
+# PII & Sensitive Digit Redactor (masks 10-16 digit card/Aadhaar/phone/account sequences in stored logs)
+SENSITIVE_DIGITS_RE = re.compile(r"\b(?:\d[ -]*?){12,16}\b")
+
+
+def redact_sensitive_text(text: str) -> str:
+    if not text:
+        return ""
+    return SENSITIVE_DIGITS_RE.sub("[REDACTED-SENSITIVE-DIGITS]", str(text))
+
+
+def mask_api_key(raw_key: str) -> str:
+    k = str(raw_key or "").strip()
+    if len(k) <= 10:
+        return "***"
+    return f"{k[:6]}...{k[-4:]}"
+
+
+class GeminiKeyPool:
+    """
+    Multi-Key Gemini Live API Load Balancer & Automatic Failover Pool.
+    Persists keys in MongoDB `weborient_api_keys` (with local JSON fallback),
+    selects the least-loaded active key, and places keys on a 60s cooldown on 429/503 errors.
+    """
+    def __init__(self):
+        self.keys: dict[str, dict] = {}
+        self._rr_counter = 0
+        self.reload_keys()
+        self._reset_active_sessions_on_boot()
+
+    def _reset_active_sessions_on_boot(self):
+        """Resets stale in-flight session counters after process restart."""
+        changed = False
+        for kid, doc in self.keys.items():
+            if int(doc.get("activeSessions", 0)) != 0:
+                doc["activeSessions"] = 0
+                API_KEY_STORE[kid] = doc
+                changed = True
+        if changed:
+            save_json_file(API_KEYS_FILE, API_KEY_STORE)
+        if mongo_db is not None:
+            try:
+                mongo_db["weborient_api_keys"].update_many(
+                    {"activeSessions": {"$ne": 0}},
+                    {"$set": {"activeSessions": 0}}
+                )
+            except Exception as e:
+                print(f"[WARN] Could not reset stale activeSessions in Mongo: {e}")
+
+    def reload_keys(self):
+        global API_KEY_STORE
+        API_KEY_STORE = load_json_file(API_KEYS_FILE) or API_KEY_STORE
+        mongo_docs: dict[str, dict] = {}
+        mongo_ok = False
+        if mongo_db is not None:
+            try:
+                docs = list(mongo_db["weborient_api_keys"].find({}, {"_id": 0}).sort("priority", 1))
+                mongo_ok = True
+                for d in docs:
+                    if "keyId" in d and "apiKey" in d:
+                        mongo_docs[d["keyId"]] = d
+                        self.keys[d["keyId"]] = d
+                        API_KEY_STORE[d["keyId"]] = d
+            except Exception as e:
+                print(f"[WARN] Could not load weborient_api_keys from Mongo: {e}")
+
+        # Prune dashboard-deleted keys when MongoDB is authoritative and non-empty
+        if mongo_ok and mongo_docs:
+            stale_ids = [kid for kid in list(self.keys.keys()) if kid not in mongo_docs]
+            for kid in stale_ids:
+                self.keys.pop(kid, None)
+                API_KEY_STORE.pop(kid, None)
+            if stale_ids:
+                save_json_file(API_KEYS_FILE, API_KEY_STORE)
+
+        for kid, kdoc in API_KEY_STORE.items():
+            if kid not in self.keys and "apiKey" in kdoc:
+                self.keys[kid] = kdoc
+
+        # Seed primary & backup env keys if not already present
+        env_candidates = []
+        if PRIMARY_API_KEY:
+            env_candidates.append(("Primary Env Key (GCP #1)", PRIMARY_API_KEY, 1))
+        if EXTRA_API_KEYS_RAW:
+            for idx, k in enumerate([x.strip() for x in EXTRA_API_KEYS_RAW.split(",") if x.strip()], start=2):
+                env_candidates.append((f"Backup Env Key #{idx}", k, idx))
+
+        existing_raw = {v.get("apiKey") for v in self.keys.values()}
+        for label, raw_key, prio in env_candidates:
+            if raw_key not in existing_raw:
+                key_hash = hashlib.sha1(raw_key.encode("utf-8")).hexdigest()[:8]
+                kid = f"gkey_{key_hash}"
+                doc = {
+                    "keyId": kid,
+                    "label": label,
+                    "apiKey": raw_key,
+                    "maskedKey": mask_api_key(raw_key),
+                    "status": "active",
+                    "priority": prio,
+                    "activeSessions": 0,
+                    "totalSessions": 0,
+                    "totalMinutes": 0.0,
+                    "errorCount": 0,
+                    "lastError": None,
+                    "cooldownUntil": 0.0,
+                    "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                }
+                self.keys[kid] = doc
+                self._persist_key(doc)
+
+    def _persist_key(self, doc: dict):
+        kid = doc["keyId"]
+        self.keys[kid] = doc
+        API_KEY_STORE[kid] = doc
+        save_json_file(API_KEYS_FILE, API_KEY_STORE)
+        if mongo_db is not None:
+            try:
+                config_fields = {
+                    "keyId": kid,
+                    "label": doc.get("label", kid),
+                    "apiKey": doc.get("apiKey", ""),
+                    "maskedKey": doc.get("maskedKey") or mask_api_key(doc.get("apiKey", "")),
+                    "status": doc.get("status", "active"),
+                    "priority": int(doc.get("priority", 1)),
+                }
+                init_fields = {
+                    "activeSessions": int(doc.get("activeSessions", 0)),
+                    "totalSessions": int(doc.get("totalSessions", 0)),
+                    "totalMinutes": float(doc.get("totalMinutes", 0.0)),
+                    "errorCount": int(doc.get("errorCount", 0)),
+                    "lastError": doc.get("lastError"),
+                    "cooldownUntil": float(doc.get("cooldownUntil", 0.0)),
+                    "createdAt": doc.get("createdAt") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                }
+                mongo_db["weborient_api_keys"].update_one(
+                    {"keyId": kid},
+                    {"$set": config_fields, "$setOnInsert": init_fields},
+                    upsert=True
+                )
+            except Exception:
+                pass
+
+    def _update_key_fields(self, key_id: str, set_fields: dict | None = None, inc_fields: dict | None = None):
+        """Applies targeted field updates/increments without clobbering concurrent workers or admin edits."""
+        doc = self.keys.get(key_id)
+        if doc:
+            API_KEY_STORE[key_id] = doc
+            save_json_file(API_KEYS_FILE, API_KEY_STORE)
+        if mongo_db is not None:
+            update_op: dict = {}
+            if set_fields:
+                update_op["$set"] = set_fields
+            if inc_fields:
+                update_op["$inc"] = inc_fields
+            if update_op:
+                try:
+                    mongo_db["weborient_api_keys"].update_one({"keyId": key_id}, update_op)
+                except Exception:
+                    pass
+
+    def list_public_keys(self) -> list[dict]:
+        self.reload_keys()
+        now = time.time()
+        out = []
+        for k in sorted(self.keys.values(), key=lambda x: (x.get("priority", 1), x.get("createdAt", ""))):
+            cooldown_rem = max(0, int((k.get("cooldownUntil") or 0) - now))
+            out.append({
+                "keyId": k["keyId"],
+                "label": k.get("label", k["keyId"]),
+                "maskedKey": k.get("maskedKey") or mask_api_key(k.get("apiKey", "")),
+                "status": "cooldown" if cooldown_rem > 0 and k.get("status") == "active" else k.get("status", "active"),
+                "cooldownRemainingSec": cooldown_rem,
+                "priority": k.get("priority", 1),
+                "activeSessions": k.get("activeSessions", 0),
+                "totalSessions": k.get("totalSessions", 0),
+                "totalMinutes": round(float(k.get("totalMinutes", 0.0)), 1),
+                "errorCount": k.get("errorCount", 0),
+                "lastError": k.get("lastError"),
+                "createdAt": k.get("createdAt")
+            })
+        return out
+
+    def add_key(self, label: str, api_key: str, priority: int = 1) -> dict:
+        clean_key = str(api_key or "").strip()
+        if not clean_key:
+            raise ValueError("API key cannot be empty")
+        key_hash = hashlib.sha1(clean_key.encode("utf-8")).hexdigest()[:8]
+        kid = f"gkey_{key_hash}"
+        doc = {
+            "keyId": kid,
+            "label": (label or f"Gemini Key {kid}").strip(),
+            "apiKey": clean_key,
+            "maskedKey": mask_api_key(clean_key),
+            "status": "active",
+            "priority": int(priority or 1),
+            "activeSessions": 0,
+            "totalSessions": 0,
+            "totalMinutes": 0.0,
+            "errorCount": 0,
+            "lastError": None,
+            "cooldownUntil": 0.0,
+            "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        self._persist_key(doc)
+        print(f"[KEY-POOL] 🔑 Added/Updated Gemini API Key: {doc['label']} ({doc['maskedKey']})")
+        return doc
+
+    def update_key(self, key_id: str, label: str = None, status: str = None, priority: int = None) -> dict | None:
+        self.reload_keys()
+        doc = self.keys.get(key_id)
+        if not doc:
+            return None
+        if label is not None and str(label).strip():
+            doc["label"] = str(label).strip()
+        if status in ("active", "paused"):
+            doc["status"] = status
+            if status == "active":
+                doc["cooldownUntil"] = 0.0
+                self._update_key_fields(key_id, set_fields={"cooldownUntil": 0.0})
+        if priority is not None:
+            doc["priority"] = int(priority)
+        self._persist_key(doc)
+        return doc
+
+    def delete_key(self, key_id: str) -> bool:
+        self.reload_keys()
+        if len(self.keys) <= 1:
+            return False  # Never delete the last remaining API key
+        if key_id in self.keys:
+            del self.keys[key_id]
+        if key_id in API_KEY_STORE:
+            del API_KEY_STORE[key_id]
+            save_json_file(API_KEYS_FILE, API_KEY_STORE)
+        if mongo_db is not None:
+            try:
+                mongo_db["weborient_api_keys"].delete_one({"keyId": key_id})
+            except Exception:
+                pass
+        return True
+
+    def get_ordered_candidate_keys(self) -> list[dict]:
+        self.reload_keys()
+        now = time.time()
+        active_healthy = [
+            k for k in self.keys.values()
+            if k.get("status", "active") == "active" and float(k.get("cooldownUntil") or 0) <= now
+        ]
+        if not active_healthy:
+            # Fallback: if all active keys are in cooldown, try the one whose cooldown expires soonest
+            active_healthy = [k for k in self.keys.values() if k.get("status", "active") == "active"]
+            if not active_healthy:
+                active_healthy = list(self.keys.values())
+
+        # Sort by least active sessions, then priority, with round-robin tie-breaker
+        self._rr_counter = (self._rr_counter + 1) % 1000
+        active_healthy.sort(
+            key=lambda k: (
+                int(k.get("activeSessions", 0)),
+                int(k.get("priority", 1)),
+                (hash(k["keyId"]) + self._rr_counter) % 17
+            )
+        )
+        return active_healthy
+
+    def mark_session_started(self, key_id: str):
+        doc = self.keys.get(key_id)
+        if not doc:
+            return
+        doc["activeSessions"] = max(0, int(doc.get("activeSessions", 0))) + 1
+        doc["totalSessions"] = int(doc.get("totalSessions", 0)) + 1
+        self._update_key_fields(key_id, inc_fields={"activeSessions": 1, "totalSessions": 1})
+
+    def mark_session_ended(self, key_id: str, minutes_used: float = 0.0):
+        doc = self.keys.get(key_id)
+        if not doc:
+            return
+        new_active = max(0, int(doc.get("activeSessions", 1)) - 1)
+        inc_mins = round(float(minutes_used), 2)
+        doc["activeSessions"] = new_active
+        doc["totalMinutes"] = round(float(doc.get("totalMinutes", 0.0)) + inc_mins, 2)
+        self._update_key_fields(
+            key_id,
+            set_fields={"activeSessions": new_active},
+            inc_fields={"totalMinutes": inc_mins} if inc_mins else None,
+        )
+
+    def mark_key_error(self, key_id: str, error_msg: str, cooldown_sec: int = 60):
+        doc = self.keys.get(key_id)
+        if not doc:
+            return
+        last_err = f"{datetime.datetime.now(datetime.timezone.utc).strftime('%H:%M:%S UTC')}: {str(error_msg)[:140]}"
+        cooldown_until = time.time() + cooldown_sec
+        doc["errorCount"] = int(doc.get("errorCount", 0)) + 1
+        doc["lastError"] = last_err
+        doc["cooldownUntil"] = cooldown_until
+        self._update_key_fields(
+            key_id,
+            set_fields={"lastError": last_err, "cooldownUntil": cooldown_until},
+            inc_fields={"errorCount": 1},
+        )
+        print(f"[KEY-POOL] ⚠️ Key {doc.get('label')} ({doc.get('maskedKey')}) placed on {cooldown_sec}s cooldown: {error_msg}")
+
+
+KEY_POOL = GeminiKeyPool()
+
+
+def check_ip_rate_limit(remote_ip: str) -> tuple[bool, str]:
+    if not remote_ip or remote_ip in ("127.0.0.1", "::1", "localhost"):
+        return True, "OK"
+    ip_hash = hashlib.sha256(remote_ip.encode("utf-8")).hexdigest()[:16]
+    now = time.time()
+    entry = IP_RATE_STATE.setdefault(ip_hash, {"active": 0, "timestamps": []})
+    entry["timestamps"] = [ts for ts in entry["timestamps"] if now - ts < 3600]
+    if entry["active"] >= MAX_CONCURRENT_PER_IP:
+        return False, f"Rate limit exceeded: max {MAX_CONCURRENT_PER_IP} concurrent voice sessions per IP."
+    if len(entry["timestamps"]) >= MAX_CONNECTIONS_PER_HOUR_IP:
+        return False, "Hourly voice session rate limit reached for this IP. Please try again shortly."
+    entry["active"] += 1
+    entry["timestamps"].append(now)
+    return True, ip_hash
+
+
+def release_ip_slot(ip_hash: str):
+    if ip_hash and ip_hash in IP_RATE_STATE:
+        IP_RATE_STATE[ip_hash]["active"] = max(0, IP_RATE_STATE[ip_hash]["active"] - 1)
 
 
 def sync_seed_tenants_to_mongo():
-    """Seeds default tenants from config/tenants.json into MongoDB Atlas if not present."""
     if mongo_db is None:
         return
     try:
@@ -151,6 +552,27 @@ def list_all_tenants() -> list[dict]:
     return list(TENANT_STORE.values())
 
 
+def list_recent_sessions(site_key: str = "", limit: int = 50) -> list[dict]:
+    if mongo_db is not None:
+        try:
+            query = {"siteKey": site_key} if site_key else {}
+            docs = list(
+                mongo_db["weborient_sessions"]
+                .find(query, {"_id": 0})
+                .sort("updatedAt", -1)
+                .limit(limit)
+            )
+            if docs:
+                return docs
+        except Exception:
+            pass
+    all_sess = list(SESSION_MEMORY_STORE.values())
+    if site_key:
+        all_sess = [s for s in all_sess if s.get("siteKey") == site_key or s.get("siteId") == site_key]
+    all_sess.sort(key=lambda s: s.get("updatedAt", ""), reverse=True)
+    return all_sess[:limit]
+
+
 def register_new_tenant(
     company_name: str,
     domain: str,
@@ -190,6 +612,8 @@ def register_new_tenant(
         "email": email.strip(),
         "plan": plan,
         "creditsMinutes": float(initial_credits),
+        "totalCreditsBurned": 0.0,
+        "totalSecretarySavedSeconds": 0,
         "allowedOrigins": [
             clean_domain,
             f"www.{clean_domain}",
@@ -226,7 +650,7 @@ def register_new_tenant(
     return tenant_doc
 
 
-def add_tenant_credits(site_key: str, minutes_to_add: float = 150.0) -> dict | None:
+def add_tenant_credits(site_key: str, minutes_to_add: float = 150.0, plan: str = None) -> dict | None:
     global TENANT_STORE
     tenant = get_tenant(site_key)
     if not tenant:
@@ -238,16 +662,18 @@ def add_tenant_credits(site_key: str, minutes_to_add: float = 150.0) -> dict | N
     if mongo_db is not None:
         try:
             from pymongo import ReturnDocument
+            update_op: dict = {"$inc": {"creditsMinutes": inc_amount}}
+            if plan:
+                update_op["$set"] = {"plan": plan}
             doc = mongo_db["weborient_tenants"].find_one_and_update(
                 {"siteKey": real_key},
-                {"$inc": {"creditsMinutes": inc_amount}},
+                update_op,
                 return_document=ReturnDocument.AFTER,
                 projection={"_id": 0}
             )
             if doc:
                 TENANT_STORE[real_key] = doc
                 save_json_file(TENANTS_FILE, TENANT_STORE)
-                print(f"[RELAY] 💳 Added +{minutes_to_add}m credits to {real_key} -> New balance: {doc.get('creditsMinutes')}m")
                 return doc
         except Exception as e:
             print(f"[WARN] MongoDB credit top-up update failed: {e}")
@@ -255,17 +681,14 @@ def add_tenant_credits(site_key: str, minutes_to_add: float = 150.0) -> dict | N
     current = float(tenant.get("creditsMinutes", 0.0))
     updated = round(current + inc_amount, 2)
     tenant["creditsMinutes"] = updated
+    if plan:
+        tenant["plan"] = plan
     TENANT_STORE[real_key] = tenant
     save_json_file(TENANTS_FILE, TENANT_STORE)
-    print(f"[RELAY] 💳 Added +{minutes_to_add}m credits to {real_key} -> New balance: {updated}m")
     return tenant
 
 
 def verify_tenant_and_origin(site_key: str, origin_header: str) -> tuple[bool, str, dict]:
-    """
-    Validates tenant siteKey, checks HTTP Origin against allowed domains,
-    and verifies positive voice credit balance.
-    """
     tenant = get_tenant(site_key)
     if not tenant:
         return False, f"Invalid or unregistered siteKey '{site_key}'. Please register at weborient.deploymate.in", {}
@@ -294,74 +717,106 @@ def verify_tenant_and_origin(site_key: str, origin_header: str) -> tuple[bool, s
     return True, "OK", tenant
 
 
-def deduct_tenant_credits(site_key: str, minutes_used: float = 0.5) -> float:
+def deduct_tenant_credits(site_key: str, minutes_used: float = 0.5, saved_seconds_delta: int = 0) -> float:
     global TENANT_STORE
     tenant = get_tenant(site_key)
     if not tenant:
         return 0.0
 
     real_key = tenant.get("siteKey", site_key)
+    dec_amount = round(float(minutes_used), 2)
 
     if mongo_db is not None:
         try:
             from pymongo import ReturnDocument
-            # Atomic deduction in MongoDB Atlas preventing concurrent tab race conditions
-            dec_amount = round(float(minutes_used), 2)
             res = mongo_db["weborient_tenants"].find_one_and_update(
                 {"siteKey": real_key},
-                {"$inc": {"creditsMinutes": -dec_amount}},
+                {
+                    "$inc": {
+                        "creditsMinutes": -dec_amount,
+                        "totalCreditsBurned": dec_amount,
+                        "totalSecretarySavedSeconds": int(saved_seconds_delta)
+                    }
+                },
                 return_document=ReturnDocument.AFTER,
-                projection={"creditsMinutes": 1, "_id": 0}
+                projection={"_id": 0}
             )
             if res and "creditsMinutes" in res:
                 raw_bal = float(res["creditsMinutes"])
                 updated = max(0.0, round(raw_bal, 2))
                 if raw_bal < 0:
                     mongo_db["weborient_tenants"].update_one({"siteKey": real_key}, {"$set": {"creditsMinutes": 0.0}})
-                tenant["creditsMinutes"] = updated
-                TENANT_STORE[real_key] = tenant
+                TENANT_STORE[real_key] = res
+                TENANT_STORE[real_key]["creditsMinutes"] = updated
                 save_json_file(TENANTS_FILE, TENANT_STORE)
                 return updated
         except Exception as e:
             print(f"[WARN] Atomic credit deduction failed in MongoDB, using fallback: {e}")
 
     current = float(tenant.get("creditsMinutes", 0.0))
-    updated = max(0.0, round(current - minutes_used, 2))
+    updated = max(0.0, round(current - dec_amount, 2))
     tenant["creditsMinutes"] = updated
+    tenant["totalCreditsBurned"] = round(float(tenant.get("totalCreditsBurned", 0.0)) + dec_amount, 2)
+    tenant["totalSecretarySavedSeconds"] = int(tenant.get("totalSecretarySavedSeconds", 0)) + int(saved_seconds_delta)
     TENANT_STORE[real_key] = tenant
     save_json_file(TENANTS_FILE, TENANT_STORE)
     return updated
 
 
-def get_or_create_session_memory(session_id: str, site_id: str, lang: str) -> dict:
+def get_or_create_session_memory(session_id: str, site_key: str, site_id: str, lang: str, company_name: str = "") -> dict:
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     if session_id not in SESSION_MEMORY_STORE:
         SESSION_MEMORY_STORE[session_id] = {
             "sessionId": session_id,
+            "siteKey": site_key,
             "siteId": site_id,
+            "companyName": company_name or site_id,
             "userLanguage": lang or "en-IN",
-            "userGoal": "Explore DeployMate WebOrient capabilities, pricing ROI, and voice form co-pilot",
+            "userGoal": "Explore solutions, live demos, and pricing ROI",
             "interestedTier": "Pro Co-Pilot",
             "completedTodoIds": [],
             "remainingTodos": [],
             "orientedHistory": [],
-            "reconnectCount": 0
+            "domEvents": [],
+            "failedSelectorsCount": 0,
+            "lastSectionViewed": None,
+            "partialLead": {"fullName": "", "email": "", "phone": "", "company": "", "submitted": False},
+            "transcripts": [],
+            "creditsBurned": 0.0,
+            "secretarySavedSeconds": 0,
+            "apiKeyId": None,
+            "apiKeyLabel": None,
+            "status": "active",
+            "terminationReason": None,
+            "reconnectCount": 0,
+            "startedAt": now_iso,
+            "updatedAt": now_iso
         }
     else:
         SESSION_MEMORY_STORE[session_id]["reconnectCount"] = SESSION_MEMORY_STORE[session_id].get("reconnectCount", 0) + 1
+        SESSION_MEMORY_STORE[session_id]["status"] = "active"
+        SESSION_MEMORY_STORE[session_id]["updatedAt"] = now_iso
         if lang:
             SESSION_MEMORY_STORE[session_id]["userLanguage"] = lang
 
+    persist_session_memory(session_id)
+    return SESSION_MEMORY_STORE[session_id]
+
+
+def persist_session_memory(session_id: str):
+    if session_id not in SESSION_MEMORY_STORE:
+        return
+    SESSION_MEMORY_STORE[session_id]["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     save_json_file(SESSION_CACHE_FILE, SESSION_MEMORY_STORE)
     if mongo_db is not None:
         try:
             mongo_db["weborient_sessions"].update_one(
                 {"sessionId": session_id},
-                {"$set": {**SESSION_MEMORY_STORE[session_id], "updatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat()}},
+                {"$set": SESSION_MEMORY_STORE[session_id]},
                 upsert=True
             )
         except Exception:
             pass
-    return SESSION_MEMORY_STORE[session_id]
 
 
 def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dict) -> str:
@@ -415,6 +870,7 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
         f"- SILENT SEAMLESS LANGUAGE HANDLING (CRITICAL): When speaking or when language changes, NEVER say aloud 'I will speak in English/Hindi' or announce what language you are using! Simply speak directly in that language without commenting on it or breaking the conversation flow.\n"
         f"- SHOWING vs. SAYING SYNCHRONIZATION RULE: Every single `explanation` badge you pass to `move_and_highlight`, `click_element`, `fill_form_field`, `scroll_page`, or `swipe_or_swap` MUST be written in the exact same language that you are speaking aloud! Never show an English tooltip badge while speaking Hindi/Hinglish!\n"
         f"- ZERO TO-DO OBSESSION — NO RUSHING (CRITICAL): The site sections and features are purely background reference for you so you can answer accurately. There is NO requirement to complete, visit, or check off every section! NEVER rush the user, NEVER mention remaining to-dos or checklists, and NEVER push unrequested sections onto the user. Patiently listen to the user, answer their questions, and follow their curiosity.\n"
+        f"- TWO-LOCK FORM SUBMIT SAFETY: Never click a final Submit/Checkout button with `confirmed: true` unless the user has explicitly confirmed they want to submit.\n"
         f"- ONE TOOL PER SPOKEN TURN RULE (CRITICAL FOR ZERO-LAG AUDIO SYNC): Call at most ONE visual tool (`move_and_highlight` or `click_element` or `swipe_or_swap`) per turn and IMMEDIATELY speak aloud to the user while the Ghost Cursor moves to that element! NEVER chain 2 or 3 `move_and_highlight` calls in silence before speaking!\n"
         f"- FULL PAGE, POPUP, '/contact' SOUND GATE & CLOSE-BUTTON ('X') CONTROL: Every button, popup, modal, drawer, banner, input, 'Sound on' / 'Keep it silent' gate button, and Close ('X') button on the user's screen is indexed. If the user asks to click 'Sound on', 'Keep it silent', or close any popup/modal/drawer, immediately call `click_element` on its selector.\n"
         f"- USER GOAL / WANT: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
@@ -448,14 +904,14 @@ def get_gemini_tools():
                         properties={
                             "selector": types.Schema(type=types.Type.STRING, description="CSS selector, data-wo-id, or label of element (including Close 'X' buttons on popups/modals)"),
                             "explanation": types.Schema(type=types.Type.STRING, description="Short badge text in the exact language you are speaking aloud"),
-                            "confirmed": types.Schema(type=types.Type.BOOLEAN, description="Set to true when user has verbally confirmed a submit action")
+                            "confirmed": types.Schema(type=types.Type.BOOLEAN, description="Set to true ONLY when user has verbally confirmed a form submit action")
                         },
                         required=["selector"]
                     )
                 ),
                 types.FunctionDeclaration(
                     name="fill_form_field",
-                    description="Fills or sets a form control (text, email, tel, date, textarea, select dropdown, checkbox, radio, or range slider) with typewriter animation and validation checking.",
+                    description="Fills or sets a form control (text, email, tel, date, textarea, select dropdown, combobox, checkbox, radio, or range slider) with typewriter animation and validation checking.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
@@ -491,7 +947,7 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="scroll_page",
-                    description="Smoothly scrolls the page up, down, to the top/bottom, or directly to a specific component.",
+                    description="Smoothly scrolls the page or active inner scrollable container up, down, to the top/bottom, or directly to a specific component.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
@@ -518,7 +974,7 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="navigate_route",
-                    description="Navigates the website to another page route (e.g. 'pricing.html', 'features.html', 'docs.html', 'contact.html', 'dashboard.html') while preserving session memory.",
+                    description="Navigates the website to another page route while preserving session memory.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
@@ -575,14 +1031,14 @@ def get_gemini_tools():
                 ),
                 types.FunctionDeclaration(
                     name="update_session_memory",
-                    description="Updates cross-page session memory with what the user wants (goal, interested plan tier, native language, or marking a To-Do item complete).",
+                    description="Updates cross-page session memory with what the user wants (goal, interested plan tier, or custom note).",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
                             "goal": types.Schema(type=types.Type.STRING, description="What the user wants to achieve"),
                             "interestedTier": types.Schema(type=types.Type.STRING, description="Plan tier user is interested in"),
-                            "language": types.Schema(type=types.Type.STRING, description="User's preferred language code (e.g. en-IN, hi-IN, hinglish, es-ES)"),
-                            "todoIdDone": types.Schema(type=types.Type.STRING, description="ID or selector of To-Do item completed"),
+                            "language": types.Schema(type=types.Type.STRING, description="User's preferred language code"),
+                            "todoIdDone": types.Schema(type=types.Type.STRING, description="ID or selector of section viewed"),
                             "note": types.Schema(type=types.Type.STRING, description="Additional preference or fact to remember across pages")
                         }
                     )
@@ -593,14 +1049,13 @@ def get_gemini_tools():
 
 
 def build_http_response(status_code: int, payload: dict):
-    """Compatible with both websockets >=13 (Response object) and older versions (tuple)."""
     body_bytes = json.dumps(payload, indent=2).encode("utf-8")
     headers_list = [
         ("Content-Type", "application/json; charset=utf-8"),
         ("Content-Length", str(len(body_bytes))),
         ("Access-Control-Allow-Origin", "*"),
-        ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token")
+        ("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token, X-Admin-Key")
     ]
     if hasattr(websockets, "http11") and hasattr(websockets.http11, "Response"):
         from websockets.datastructures import Headers
@@ -613,20 +1068,18 @@ def build_http_response(status_code: int, payload: dict):
     return (HTTPStatus(status_code), headers_list, body_bytes)
 
 
+def _scrub_tenant_public(tenant: dict) -> dict:
+    """Omits tenant owner contact email from unauthenticated public responses."""
+    return {k: v for k, v in tenant.items() if k != "email"}
+
+
 async def process_http_request(*args):
-    """
-    Handles HTTP health checks and tenant onboarding REST requests on the same port
-    before WebSocket upgrade:
-    - GET /health
-    - GET /api/tenants
-    - GET /api/tenants/status?siteKey=wo_live_...
-    - GET /api/tenants/register?companyName=...&domain=...&email=...&plan=...&theme=...&lang=...
-    - GET /api/tenants/credits?siteKey=...&minutes=150
-    """
+    request_method = ""
     if len(args) == 2 and hasattr(args[1], "path"):
         request = args[1]
         raw_path = request.path
         headers = request.headers
+        request_method = str(getattr(request, "method", "") or "").upper()
     else:
         raw_path = args[0]
         headers = args[1]
@@ -635,33 +1088,65 @@ async def process_http_request(*args):
     if upgrade and upgrade.lower() == "websocket":
         return None
 
+    if request_method == "OPTIONS":
+        return build_http_response(200, {"ok": True})
+
     parsed = urlparse(raw_path)
     path = parsed.path.rstrip("/") or "/"
     qs = parse_qs(parsed.query)
+    admin_ok = is_admin_request(headers, qs)
 
     if path in ("/health", "/ping", "/healthz", "/"):
         now_utc = datetime.datetime.now(datetime.timezone.utc)
-        uptime_seconds = int((now_utc - SERVER_START_TIME).total_seconds()) if "SERVER_START_TIME" in globals() else 0
-        return build_http_response(200, {
+        uptime_seconds = int((now_utc - SERVER_START_TIME).total_seconds())
+        keys_list = KEY_POOL.list_public_keys()
+        payload = {
             "status": "ok",
             "service": "weborient-relay",
             "model": MODEL_NAME,
             "mongoConnected": mongo_db is not None,
             "tenantCount": len(TENANT_STORE),
+            "apiKeyPoolCount": len(keys_list),
             "uptimeSeconds": uptime_seconds,
             "timestamp": now_utc.isoformat()
-        })
+        }
+        if admin_ok:
+            payload["apiKeyPool"] = keys_list
+        return build_http_response(200, payload)
 
     if path == "/api/tenants":
-        tenants = list_all_tenants()
-        return build_http_response(200, {"ok": True, "tenants": tenants})
+        if admin_ok:
+            return build_http_response(200, {"ok": True, "tenants": list_all_tenants()})
+        site_key = qs.get("siteKey", [""])[0].strip()
+        if not site_key:
+            return build_http_response(401, {"ok": False, "error": "Unauthorized"})
+        tenant = get_tenant(site_key)
+        if not tenant:
+            return build_http_response(404, {"ok": False, "error": f"Tenant '{site_key}' not found"})
+        return build_http_response(200, {"ok": True, "tenants": [_scrub_tenant_public(tenant)]})
+
+    if path == "/api/sessions":
+        if not admin_ok:
+            return build_http_response(401, {"ok": False, "error": "Unauthorized"})
+        site_key = qs.get("siteKey", [""])[0]
+        try:
+            limit = max(1, min(int(qs.get("limit", ["50"])[0]), 200))
+        except ValueError:
+            return build_http_response(400, {"ok": False, "error": "Invalid limit parameter"})
+        return build_http_response(200, {"ok": True, "sessions": list_recent_sessions(site_key, limit)})
+
+    if path == "/api/keys":
+        if not admin_ok:
+            return build_http_response(401, {"ok": False, "error": "Unauthorized"})
+        return build_http_response(200, {"ok": True, "keys": KEY_POOL.list_public_keys()})
 
     if path == "/api/tenants/status":
         site_key = qs.get("siteKey", ["wo_live_deploymate_demo"])[0]
         tenant = get_tenant(site_key)
         if not tenant:
             return build_http_response(404, {"ok": False, "error": f"Tenant '{site_key}' not found"})
-        return build_http_response(200, {"ok": True, "tenant": tenant})
+        safe_tenant = tenant if admin_ok else _scrub_tenant_public(tenant)
+        return build_http_response(200, {"ok": True, "tenant": safe_tenant})
 
     if path == "/api/tenants/register":
         company = qs.get("companyName", ["My Store"])[0]
@@ -670,35 +1155,89 @@ async def process_http_request(*args):
         plan = qs.get("plan", ["Starter ($29/mo)"])[0]
         theme = qs.get("theme", ["signal"])[0]
         lang = qs.get("lang", ["en-IN"])[0]
-    if not lang or lang == "undefined":
-        lang = "en-IN"
-        credits = float(qs.get("credits", ["25.0"])[0])
+        if not lang or lang == "undefined":
+            lang = "en-IN"
+        try:
+            credits = float(qs.get("credits", ["25.0"])[0])
+        except ValueError:
+            return build_http_response(400, {"ok": False, "error": "Invalid credits parameter"})
         tenant_doc = register_new_tenant(company, domain, email, plan, theme, lang, credits)
         return build_http_response(201, {"ok": True, "tenant": tenant_doc})
 
     if path == "/api/tenants/credits":
         site_key = qs.get("siteKey", ["wo_live_deploymate_demo"])[0]
-        minutes = float(qs.get("minutes", ["150.0"])[0])
+        is_demo_topup = bool(qs.get("demoTopup", [""])[0]) and site_key == "wo_live_deploymate_demo"
+        if not admin_ok and not is_demo_topup:
+            return build_http_response(401, {"ok": False, "error": "Unauthorized credit top-up request"})
+        try:
+            minutes = float(qs.get("minutes", ["150.0"])[0])
+        except ValueError:
+            return build_http_response(400, {"ok": False, "error": "Invalid minutes parameter"})
+        if not admin_ok and (minutes <= 0 or minutes > 500):
+            return build_http_response(400, {"ok": False, "error": "Demo top-up must be between 1 and 500 minutes"})
         updated = add_tenant_credits(site_key, minutes)
         if not updated:
             return build_http_response(404, {"ok": False, "error": f"Tenant '{site_key}' not found"})
-        return build_http_response(200, {"ok": True, "tenant": updated})
+        safe_updated = updated if admin_ok else _scrub_tenant_public(updated)
+        return build_http_response(200, {"ok": True, "tenant": safe_updated})
 
     return None
+
+
+def build_live_connect_config(
+    full_prompt: str,
+    tools: list,
+    resumption_handle: str | None = None
+) -> types.LiveConnectConfig:
+    speech_config = types.SpeechConfig(
+        voice_config=types.VoiceConfig(
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kavya")
+        )
+    )
+    cfg_kwargs = {
+        "response_modalities": [types.Modality.AUDIO],
+        "speech_config": speech_config,
+        "input_audio_transcription": types.AudioTranscriptionConfig(),
+        "output_audio_transcription": types.AudioTranscriptionConfig(),
+        "system_instruction": types.Content(parts=[types.Part.from_text(text=full_prompt)]),
+        "tools": tools
+    }
+    # Enable ContextWindowCompressionConfig and SessionResumptionConfig if supported by SDK
+    if hasattr(types, "ContextWindowCompressionConfig") and hasattr(types, "SlidingWindow"):
+        try:
+            cfg_kwargs["context_window_compression"] = types.ContextWindowCompressionConfig(
+                trigger_tokens=12000,
+                sliding_window=types.SlidingWindow(target_tokens=8000)
+            )
+        except Exception:
+            pass
+    if hasattr(types, "SessionResumptionConfig"):
+        try:
+            resumption_kwargs: dict = {"transparent": True}
+            if resumption_handle:
+                resumption_kwargs["handle"] = resumption_handle
+            cfg_kwargs["session_resumption"] = types.SessionResumptionConfig(**resumption_kwargs)
+        except Exception:
+            pass
+    return types.LiveConnectConfig(**cfg_kwargs)
 
 
 async def handle_browser_client(websocket):
     raw_path = getattr(websocket, "path", "") or (websocket.request.path if hasattr(websocket, "request") and websocket.request else "/")
     parsed_url = urlparse(raw_path)
     qs = parse_qs(parsed_url.query)
+    ws_headers = getattr(getattr(websocket, "request", None), "headers", None) or getattr(websocket, "request_headers", None)
 
-    # Support lightweight WebSocket admin/portal RPC if mode=portal
+    # Portal & Admin RPC mode (`wss://relay.deploymate.in/?mode=portal`)
     mode = qs.get("mode", [""])[0]
     if mode == "portal":
         try:
             async for raw_msg in websocket:
                 req = json.loads(raw_msg)
                 action = req.get("tenantAction")
+                req_token = str(req.get("adminToken") or req.get("adminKey") or "")
+                portal_admin = is_admin_request(ws_headers, qs, extra_token=req_token)
+
                 if action == "register":
                     doc = register_new_tenant(
                         req.get("companyName", "Client Store"),
@@ -711,10 +1250,59 @@ async def handle_browser_client(websocket):
                     )
                     await websocket.send(json.dumps({"ok": True, "action": "register", "tenant": doc}))
                 elif action == "addCredits":
-                    doc = add_tenant_credits(req.get("siteKey", "wo_live_deploymate_demo"), float(req.get("minutes", 150.0)))
-                    await websocket.send(json.dumps({"ok": bool(doc), "action": "addCredits", "tenant": doc}))
+                    target_key = req.get("siteKey", "wo_live_deploymate_demo")
+                    mins = float(req.get("minutes", 150.0))
+                    is_demo_topup = bool(req.get("demoTopup")) and target_key == "wo_live_deploymate_demo" and 0 < mins <= 500
+                    if not portal_admin and not is_demo_topup:
+                        await websocket.send(json.dumps({"ok": False, "action": "addCredits", "error": "Unauthorized"}))
+                        continue
+                    doc = add_tenant_credits(
+                        target_key,
+                        mins,
+                        req.get("plan") if portal_admin else None
+                    )
+                    safe_doc = doc if (not doc or portal_admin) else _scrub_tenant_public(doc)
+                    await websocket.send(json.dumps({"ok": bool(doc), "action": "addCredits", "tenant": safe_doc}))
                 elif action == "list":
-                    await websocket.send(json.dumps({"ok": True, "action": "list", "tenants": list_all_tenants()}))
+                    tenants_out = list_all_tenants()
+                    if portal_admin:
+                        await websocket.send(json.dumps({
+                            "ok": True,
+                            "action": "list",
+                            "tenants": tenants_out,
+                            "sessions": list_recent_sessions(req.get("siteKey", ""), max(1, min(int(req.get("limit", 40)), 200))),
+                            "keys": KEY_POOL.list_public_keys()
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "ok": True,
+                            "action": "list",
+                            "tenants": [_scrub_tenant_public(t) for t in tenants_out],
+                            "sessions": [],
+                            "keys": []
+                        }))
+                elif action in ("listSessions", "listKeys", "addKey", "updateKey", "deleteKey"):
+                    if not portal_admin:
+                        await websocket.send(json.dumps({"ok": False, "action": action, "error": "Unauthorized: admin token required"}))
+                        continue
+                    if action == "listSessions":
+                        limit_val = max(1, min(int(req.get("limit", 50)), 200))
+                        await websocket.send(json.dumps({
+                            "ok": True,
+                            "action": "listSessions",
+                            "sessions": list_recent_sessions(req.get("siteKey", ""), limit_val)
+                        }))
+                    elif action == "listKeys":
+                        await websocket.send(json.dumps({"ok": True, "action": "listKeys", "keys": KEY_POOL.list_public_keys()}))
+                    elif action == "addKey":
+                        kdoc = KEY_POOL.add_key(req.get("label", "Gemini Live Key"), req.get("apiKey", ""), int(req.get("priority", 1)))
+                        await websocket.send(json.dumps({"ok": True, "action": "addKey", "key": kdoc, "keys": KEY_POOL.list_public_keys()}))
+                    elif action == "updateKey":
+                        kdoc = KEY_POOL.update_key(req.get("keyId", ""), req.get("label"), req.get("status"), req.get("priority"))
+                        await websocket.send(json.dumps({"ok": bool(kdoc), "action": "updateKey", "keys": KEY_POOL.list_public_keys()}))
+                    elif action == "deleteKey":
+                        deleted = KEY_POOL.delete_key(req.get("keyId", ""))
+                        await websocket.send(json.dumps({"ok": deleted, "action": "deleteKey", "keys": KEY_POOL.list_public_keys()}))
         except Exception:
             pass
         return
@@ -727,231 +1315,406 @@ async def handle_browser_client(websocket):
         lang = "en-IN"
 
     origin_header = ""
+    remote_ip = "local"
     if hasattr(websocket, "request") and websocket.request and hasattr(websocket.request, "headers"):
         origin_header = websocket.request.headers.get("Origin", "")
+        remote_ip = websocket.request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or remote_ip
     elif hasattr(websocket, "request_headers"):
         origin_header = websocket.request_headers.get("Origin", "")
+        remote_ip = websocket.request_headers.get("X-Forwarded-For", "").split(",")[0].strip() or remote_ip
+
+    ip_ok, ip_token_or_err = check_ip_rate_limit(remote_ip)
+    if not ip_ok:
+        await websocket.send(json.dumps({"error": ip_token_or_err, "code": "RATE_LIMIT_EXCEEDED"}))
+        await websocket.close(code=4003, reason=ip_token_or_err[:120])
+        return
 
     authorized, auth_msg, tenant = verify_tenant_and_origin(site_key, origin_header)
     if not authorized:
+        release_ip_slot(ip_token_or_err)
         print(f"[RELAY] ❌ Rejected connection: {auth_msg}")
         await websocket.send(json.dumps({"error": auth_msg, "code": "UNAUTHORIZED_OR_NO_CREDITS"}))
         await websocket.close(code=4002, reason=auth_msg[:120])
         return
 
-    session_mem = get_or_create_session_memory(session_id, site_id, lang)
-    print(
-        f"[RELAY] ✅ Client connected | tenant={tenant.get('companyName')} ({site_key}) | "
-        f"origin={origin_header or 'local'} | credits={tenant.get('creditsMinutes')}m | "
-        f"sessionId={session_id} | lang={session_mem['userLanguage']}"
-    )
-
-    client = genai.Client(api_key=API_KEY, http_options={"api_version": "v1alpha"})
+    session_mem = get_or_create_session_memory(session_id, site_key, site_id, lang, tenant.get("companyName", ""))
     full_prompt = load_system_prompt_and_manifest(site_id, session_mem, tenant)
     tools = get_gemini_tools()
+    resumption_handle = session_mem.get("resumptionHandle") or None
+    config = build_live_connect_config(full_prompt, tools, resumption_handle=resumption_handle)
 
-    speech_config = types.SpeechConfig(
-        voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kavya")
-        )
-    )
-
-    config = types.LiveConnectConfig(
-        response_modalities=[types.Modality.AUDIO],
-        speech_config=speech_config,
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-        system_instruction=types.Content(parts=[types.Part.from_text(text=full_prompt)]),
-        tools=tools
-    )
+    # Multi-Key Load Balancer & Zero-Downtime Failover Loop
+    candidates = KEY_POOL.get_ordered_candidate_keys()
+    last_connect_err = None
 
     try:
-        async with client.aio.live.connect(model=MODEL_NAME, config=config) as gemini_session:
-            print(f"[RELAY] Active session established with {MODEL_NAME} for {session_id}!")
+        for key_doc in candidates[:3]:
+            selected_key_id = key_doc["keyId"]
+            selected_api_key = key_doc["apiKey"]
+            selected_label = key_doc.get("label", selected_key_id)
+            connected_once = False
+            session_completed = False
 
-            async def credit_metering_loop():
-                """Meters active voice co-browsing credits every 30 seconds."""
-                try:
-                    while True:
-                        await asyncio.sleep(30)
-                        remaining = deduct_tenant_credits(site_key, 0.5)
-                        print(f"[RELAY] ⏱️ Credit tick for {site_key}: {remaining} mins remaining")
-                        await websocket.send(json.dumps({
-                            "creditUpdate": {
-                                "siteKey": site_key,
-                                "remainingMinutes": remaining
-                            }
-                        }))
-                        if remaining == 0.5:
-                            await gemini_session.send_realtime_input(
-                                text="[SYSTEM NOTICE: Only 30 seconds of voice credits remain. Wrap up your current action concisely.]"
-                            )
-                        elif remaining <= 0:
-                            await gemini_session.send_realtime_input(
-                                text="[SYSTEM NOTICE: Voice credits for this session have ended. Politely say: 'Your voice assistant minutes for this session have ended. You can continue browsing manually.' and stop.]"
-                            )
-                            await asyncio.sleep(5)
-                            await websocket.close(code=4002, reason="Voice credits exhausted")
-                            break
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    print(f"[RELAY] Metering loop stopped: {e}")
-
-            async def forward_gemini_to_browser():
-                try:
-                    while True:
-                        async for response in gemini_session.receive():
-                            sc = response.server_content
-                            if sc:
-                                if getattr(sc, "interrupted", False):
-                                    await websocket.send(json.dumps({
-                                        "serverContent": {"interrupted": True}
-                                    }))
-
-                                if getattr(sc, "input_transcription", None) and getattr(sc.input_transcription, "text", None):
-                                    print(f"[RELAY] 🗣️ User said: {sc.input_transcription.text}")
-                                    await websocket.send(json.dumps({
-                                        "serverContent": {
-                                            "inputTranscription": {"text": sc.input_transcription.text}
-                                        }
-                                    }))
-
-                                if getattr(sc, "output_transcription", None) and getattr(sc.output_transcription, "text", None):
-                                    print(f"[RELAY] 🤖 Gemini: {sc.output_transcription.text}")
-                                    await websocket.send(json.dumps({
-                                        "serverContent": {
-                                            "outputTranscription": {"text": sc.output_transcription.text}
-                                        }
-                                    }))
-
-                                parts = []
-                                if sc.model_turn and sc.model_turn.parts:
-                                    for part in sc.model_turn.parts:
-                                        if part.inline_data and part.inline_data.data:
-                                            b64_audio = base64.b64encode(part.inline_data.data).decode("utf-8")
-                                            parts.append({
-                                                "inlineData": {
-                                                    "mimeType": "audio/pcm;rate=24000",
-                                                    "data": b64_audio
-                                                }
-                                            })
-                                        if part.text:
-                                            parts.append({"text": part.text})
-
-                                if parts:
-                                    await websocket.send(json.dumps({
-                                        "serverContent": {
-                                            "modelTurn": {"parts": parts}
-                                        }
-                                    }))
-
-                                if getattr(sc, "turn_complete", False):
-                                    print(f"[RELAY] Turn complete for {session_id}. Ready for next voice turn.")
-                                    break
-
-                            if response.tool_call:
-                                calls = []
-                                for call in response.tool_call.function_calls:
-                                    calls.append({
-                                        "id": call.id,
-                                        "name": call.name,
-                                        "args": call.args
-                                    })
-                                print(f"[RELAY] Forwarding {len(calls)} tool calls to Ghost Cursor:", [c["name"] for c in calls])
-                                await websocket.send(json.dumps({
-                                    "toolCall": {"functionCalls": calls}
-                                }))
-                except websockets.exceptions.ConnectionClosed:
-                    pass
-                except Exception as exc:
-                    print(f"[RELAY] Gemini receiver loop error: {exc}")
-                finally:
-                    try:
-                        await websocket.close()
-                    except Exception:
-                        pass
-
-            async def forward_browser_to_gemini():
-                audio_count = 0
-                try:
-                    async for raw_msg in websocket:
-                        try:
-                            data = json.loads(raw_msg)
-
-                            if "realtimeInput" in data:
-                                media_chunks = data["realtimeInput"].get("mediaChunks", [])
-                                for chunk in media_chunks:
-                                    pcm_bytes = base64.b64decode(chunk["data"])
-                                    await gemini_session.send_realtime_input(
-                                        audio=types.Blob(
-                                            mime_type="audio/pcm;rate=16000",
-                                            data=pcm_bytes
-                                        )
-                                    )
-                                    audio_count += 1
-                                    if audio_count % 50 == 0:
-                                        print(f"[RELAY] Streamed {audio_count} mic chunks to Gemini for {session_id}")
-
-                            elif "toolResponse" in data:
-                                responses = data["toolResponse"].get("functionResponses", [])
-                                print(f"[RELAY] Delivering tool response to Gemini:", [r.get("name") for r in responses])
-                                fn_responses = []
-                                for r in responses:
-                                    out = r.get("response", {}).get("output", {})
-                                    digest = out.get("sessionMemoryDigest")
-                                    if digest:
-                                        session_mem["userLanguage"] = digest.get("userLanguage", session_mem["userLanguage"])
-                                        session_mem["userGoal"] = digest.get("userGoal", session_mem["userGoal"])
-                                        session_mem["completedTodoIds"] = digest.get("completedTodoIds", session_mem.get("completedTodoIds", []))
-                                        session_mem["remainingTodos"] = digest.get("remainingTodos", session_mem.get("remainingTodos", []))
-                                    if out.get("selector"):
-                                        session_mem["orientedHistory"].append(out.get("selector"))
-                                    save_json_file(SESSION_CACHE_FILE, SESSION_MEMORY_STORE)
-
-                                    fn_responses.append(
-                                        types.FunctionResponse(
-                                            id=r["id"],
-                                            name=r.get("name", "move_and_highlight"),
-                                            response=r["response"]
-                                        )
-                                    )
-                                await gemini_session.send_tool_response(function_responses=fn_responses)
-
-                            elif "text" in data:
-                                turn_complete = bool(data.get("turnComplete", True))
-                                print(f"[RELAY] Text frame received (turnComplete={turn_complete}): {data['text'][:120]}")
-                                if turn_complete:
-                                    await gemini_session.send_realtime_input(text=data["text"])
-                                else:
-                                    await gemini_session.send_client_content(
-                                        turns=types.Content(role="user", parts=[types.Part.from_text(text=data["text"])]),
-                                        turn_complete=False
-                                    )
-
-                        except websockets.exceptions.ConnectionClosed:
-                            break
-                        except Exception as err:
-                            print(f"[RELAY] Error processing client message: {err}")
-                except websockets.exceptions.ConnectionClosed:
-                    pass
-
-            meter_task = asyncio.create_task(credit_metering_loop())
             try:
-                await asyncio.gather(forward_gemini_to_browser(), forward_browser_to_gemini())
-            finally:
-                meter_task.cancel()
+                client = genai.Client(api_key=selected_api_key, http_options={"api_version": "v1alpha"})
+                attempt_handles = [resumption_handle, None] if resumption_handle else [None]
+                for attempt_idx, attempt_handle in enumerate(attempt_handles):
+                    if attempt_idx > 0:
+                        if connected_once:
+                            break
+                        session_mem["resumptionHandle"] = None
+                        resumption_handle = None
+                        persist_session_memory(session_id)
+                        config = build_live_connect_config(full_prompt, tools, resumption_handle=None)
+                        print(f"[RELAY] 🔄 Stale session resumption handle rejected; retrying fresh Live session cleanly.")
+                    try:
+                        async with client.aio.live.connect(model=MODEL_NAME, config=config) as gemini_session:
+                            connected_once = True
+                            KEY_POOL.mark_session_started(selected_key_id)
+                            session_mem["apiKeyId"] = selected_key_id
+                            session_mem["apiKeyLabel"] = f"{selected_label} ({key_doc.get('maskedKey')})"
+                            persist_session_memory(session_id)
 
+                            print(
+                                f"[RELAY] ✅ Active session | tenant={tenant.get('companyName')} ({site_key}) | "
+                                f"key={selected_label} | credits={tenant.get('creditsMinutes')}m | sessionId={session_id}"
+                            )
+
+                            is_secretary_hold = False
+                            session_minutes_burned = 0.0
+                            last_saved_sec_reported = int(session_mem.get("secretarySavedSeconds", 0))
+
+                            async def credit_metering_loop():
+                                """Meters active voice co-browsing credits every 30s; pauses when Local Secretary holds stream."""
+                                nonlocal session_minutes_burned, last_saved_sec_reported
+                                try:
+                                    while True:
+                                        await asyncio.sleep(30)
+                                        current_saved = int(session_mem.get("secretarySavedSeconds", 0))
+                                        saved_delta = max(0, current_saved - last_saved_sec_reported)
+                                        last_saved_sec_reported = current_saved
+
+                                        if is_secretary_hold:
+                                            # Zero credit deduction while visitor is silently reading in Secretary Hold!
+                                            if saved_delta > 0:
+                                                deduct_tenant_credits(site_key, 0.0, saved_delta)
+                                            await websocket.send(json.dumps({
+                                                "creditUpdate": {
+                                                    "siteKey": site_key,
+                                                    "remainingMinutes": get_tenant(site_key).get("creditsMinutes", 0.0),
+                                                    "secretaryHold": True,
+                                                    "secretarySavedSeconds": current_saved
+                                                }
+                                            }))
+                                            continue
+
+                                        remaining = deduct_tenant_credits(site_key, 0.5, saved_delta)
+                                        session_minutes_burned = round(session_minutes_burned + 0.5, 2)
+                                        session_mem["creditsBurned"] = round(float(session_mem.get("creditsBurned", 0.0)) + 0.5, 2)
+                                        persist_session_memory(session_id)
+
+                                        print(f"[RELAY] ⏱️ Credit tick for {site_key}: {remaining} mins remaining (Secretary saved: {current_saved}s)")
+                                        await websocket.send(json.dumps({
+                                            "creditUpdate": {
+                                                "siteKey": site_key,
+                                                "remainingMinutes": remaining,
+                                                "secretaryHold": False,
+                                                "secretarySavedSeconds": current_saved
+                                            }
+                                        }))
+                                        if remaining == 0.5:
+                                            await gemini_session.send_client_content(
+                                                turns=types.Content(role="user", parts=[types.Part.from_text(text="[SYSTEM NOTICE: Only 30 seconds of voice credits remain. Wrap up your current action concisely.]")]),
+                                                turn_complete=False
+                                            )
+                                        elif remaining <= 0:
+                                            session_mem["terminationReason"] = "credits_exhausted"
+                                            persist_session_memory(session_id)
+                                            await gemini_session.send_realtime_input(
+                                                text="[SYSTEM NOTICE: Voice credits for this session have ended. Politely say: 'Your voice assistant minutes for this session have ended. You can continue browsing manually.' and stop.]"
+                                            )
+                                            await asyncio.sleep(5)
+                                            await websocket.close(code=4002, reason="Voice credits exhausted")
+                                            break
+                                except asyncio.CancelledError:
+                                    pass
+                                except Exception as e:
+                                    print(f"[RELAY] Metering loop stopped: {e}")
+
+                            async def forward_gemini_to_browser():
+                                try:
+                                    while True:
+                                        async for response in gemini_session.receive():
+                                            resumption_update = getattr(response, "session_resumption_update", None)
+                                            if (
+                                                resumption_update
+                                                and getattr(resumption_update, "resumable", False)
+                                                and getattr(resumption_update, "new_handle", None)
+                                            ):
+                                                session_mem["resumptionHandle"] = resumption_update.new_handle
+                                                persist_session_memory(session_id)
+
+                                            sc = response.server_content
+                                            if sc:
+                                                if getattr(sc, "interrupted", False):
+                                                    await websocket.send(json.dumps({
+                                                        "serverContent": {"interrupted": True}
+                                                    }))
+
+                                                if getattr(sc, "input_transcription", None) and getattr(sc.input_transcription, "text", None):
+                                                    raw_utext = sc.input_transcription.text
+                                                    clean_utext = redact_sensitive_text(raw_utext)
+                                                    print(f"[RELAY] 🗣️ User said: {clean_utext}")
+                                                    session_mem.setdefault("transcripts", []).append({
+                                                        "role": "user",
+                                                        "text": clean_utext,
+                                                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                                                    })
+                                                    session_mem["transcripts"] = session_mem["transcripts"][-40:]
+                                                    persist_session_memory(session_id)
+                                                    await websocket.send(json.dumps({
+                                                        "serverContent": {
+                                                            "inputTranscription": {"text": raw_utext}
+                                                        }
+                                                    }))
+
+                                                if getattr(sc, "output_transcription", None) and getattr(sc.output_transcription, "text", None):
+                                                    raw_mtext = sc.output_transcription.text
+                                                    clean_mtext = redact_sensitive_text(raw_mtext)
+                                                    print(f"[RELAY] 🤖 Kavya: {clean_mtext}")
+                                                    session_mem.setdefault("transcripts", []).append({
+                                                        "role": "model",
+                                                        "text": clean_mtext,
+                                                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                                                    })
+                                                    session_mem["transcripts"] = session_mem["transcripts"][-40:]
+                                                    persist_session_memory(session_id)
+                                                    await websocket.send(json.dumps({
+                                                        "serverContent": {
+                                                            "outputTranscription": {"text": raw_mtext}
+                                                        }
+                                                    }))
+
+                                                parts = []
+                                                if sc.model_turn and sc.model_turn.parts:
+                                                    for part in sc.model_turn.parts:
+                                                        if part.inline_data and part.inline_data.data:
+                                                            b64_audio = base64.b64encode(part.inline_data.data).decode("utf-8")
+                                                            parts.append({
+                                                                "inlineData": {
+                                                                    "mimeType": "audio/pcm;rate=24000",
+                                                                    "data": b64_audio
+                                                                }
+                                                            })
+                                                        if part.text:
+                                                            parts.append({"text": part.text})
+
+                                                if parts:
+                                                    await websocket.send(json.dumps({
+                                                        "serverContent": {
+                                                            "modelTurn": {"parts": parts}
+                                                        }
+                                                    }))
+
+                                                if getattr(sc, "turn_complete", False):
+                                                    break
+
+                                            if response.tool_call:
+                                                calls = []
+                                                for call in response.tool_call.function_calls:
+                                                    calls.append({
+                                                        "id": call.id,
+                                                        "name": call.name,
+                                                        "args": call.args
+                                                    })
+                                                print(f"[RELAY] Forwarding {len(calls)} tool calls to Ghost Cursor:", [c["name"] for c in calls])
+                                                await websocket.send(json.dumps({
+                                                    "toolCall": {"functionCalls": calls}
+                                                }))
+                                except websockets.exceptions.ConnectionClosed:
+                                    pass
+                                except Exception as exc:
+                                    print(f"[RELAY] Gemini receiver loop error: {exc}")
+                                finally:
+                                    try:
+                                        await websocket.close()
+                                    except Exception:
+                                        pass
+
+                            async def forward_browser_to_gemini():
+                                nonlocal is_secretary_hold
+                                audio_count = 0
+                                try:
+                                    async for raw_msg in websocket:
+                                        try:
+                                            data = json.loads(raw_msg)
+
+                                            if "vadControl" in data:
+                                                vc = data["vadControl"] or {}
+                                                vstate = vc.get("state")
+                                                saved_sec = int(vc.get("savedSeconds", session_mem.get("secretarySavedSeconds", 0)))
+                                                session_mem["secretarySavedSeconds"] = saved_sec
+                                                if vstate == "secretary_hold":
+                                                    is_secretary_hold = True
+                                                    print(f"[RELAY] ⏸️ Secretary Hold engaged for {session_id} (0 tokens/sec, credit meter paused)")
+                                                    try:
+                                                        await gemini_session.send_realtime_input(audio_stream_end=True)
+                                                    except Exception:
+                                                        pass
+                                                elif vstate == "active":
+                                                    is_secretary_hold = False
+                                                    print(f"[RELAY] ▶️ Secretary woke session {session_id} (<15ms pre-roll flush)")
+                                                elif vstate == "hibernating":
+                                                    is_secretary_hold = True
+                                                    session_mem["status"] = "hibernating"
+                                                    session_mem["terminationReason"] = vc.get("reason", "idle_75s")
+                                                    persist_session_memory(session_id)
+                                                    print(f"[RELAY] 💤 Session {session_id} entered Deep Hibernation ({vc.get('reason')})")
+                                                    break
+
+                                            elif "telemetry" in data:
+                                                tel = data.get("telemetry") or {}
+                                                if isinstance(tel, dict):
+                                                    if isinstance(tel.get("domEventLogs"), list):
+                                                        session_mem["domEvents"] = tel["domEventLogs"][-40:]
+                                                        session_mem["failedSelectorsCount"] = sum(
+                                                            1 for ev in session_mem["domEvents"] if not ev.get("success", True)
+                                                        )
+                                                    if isinstance(tel.get("partialLead"), dict):
+                                                        existing_lead = dict(session_mem.get("partialLead") or {})
+                                                        existing_lead.update(tel["partialLead"])
+                                                        session_mem["partialLead"] = existing_lead
+                                                        if existing_lead.get("submitted"):
+                                                            session_mem["terminationReason"] = "converted"
+                                                    if tel.get("lastSectionViewed"):
+                                                        session_mem["lastSectionViewed"] = tel["lastSectionViewed"]
+                                                    if "secretarySavedSeconds" in tel:
+                                                        session_mem["secretarySavedSeconds"] = int(tel["secretarySavedSeconds"] or 0)
+                                                    persist_session_memory(session_id)
+
+                                            elif "realtimeInput" in data:
+                                                is_secretary_hold = False
+                                                media_chunks = data["realtimeInput"].get("mediaChunks", [])
+                                                for chunk in media_chunks:
+                                                    pcm_bytes = base64.b64decode(chunk["data"])
+                                                    await gemini_session.send_realtime_input(
+                                                        audio=types.Blob(
+                                                            mime_type="audio/pcm;rate=16000",
+                                                            data=pcm_bytes
+                                                        )
+                                                    )
+                                                    audio_count += 1
+
+                                            elif "toolResponse" in data:
+                                                responses = data["toolResponse"].get("functionResponses", [])
+                                                fn_responses = []
+                                                for r in responses:
+                                                    raw_resp = r.get("response") or {}
+                                                    out = raw_resp.get("output") or {}
+                                                    digest = out.get("sessionMemoryDigest")
+                                                    if digest:
+                                                        session_mem["userLanguage"] = digest.get("userLanguage", session_mem["userLanguage"])
+                                                        session_mem["userGoal"] = digest.get("userGoal", session_mem["userGoal"])
+                                                        session_mem["interestedTier"] = digest.get("interestedTier", session_mem.get("interestedTier"))
+                                                        session_mem["completedTodoIds"] = digest.get("completedTodoIds", session_mem.get("completedTodoIds", []))
+                                                        session_mem["remainingTodos"] = digest.get("remainingTodos", session_mem.get("remainingTodos", []))
+                                                        session_mem["lastSectionViewed"] = digest.get("lastSectionViewed") or session_mem.get("lastSectionViewed")
+                                                        session_mem["secretarySavedSeconds"] = int(digest.get("secretarySavedSeconds") or session_mem.get("secretarySavedSeconds", 0))
+                                                        if digest.get("domEventLogs"):
+                                                            session_mem["domEvents"] = digest["domEventLogs"]
+                                                            session_mem["failedSelectorsCount"] = sum(
+                                                                1 for ev in session_mem["domEvents"] if not ev.get("success", True)
+                                                            )
+                                                        if digest.get("partialLead"):
+                                                            session_mem["partialLead"] = digest["partialLead"]
+                                                            if session_mem["partialLead"].get("submitted"):
+                                                                session_mem["terminationReason"] = "converted"
+                                                    if out.get("selector"):
+                                                        session_mem["orientedHistory"].append(out.get("selector"))
+                                                    persist_session_memory(session_id)
+
+                                                    # Strip heavy telemetry fields before sending response back to Gemini context
+                                                    sanitized_response = dict(raw_resp)
+                                                    if isinstance(out, dict):
+                                                        sanitized_out = dict(out)
+                                                        if isinstance(digest, dict):
+                                                            sanitized_digest = {
+                                                                k: v for k, v in digest.items()
+                                                                if k not in ("domEventLogs", "partialLead")
+                                                            }
+                                                            sanitized_out["sessionMemoryDigest"] = sanitized_digest
+                                                        sanitized_response["output"] = sanitized_out
+
+                                                    fn_responses.append(
+                                                        types.FunctionResponse(
+                                                            id=r["id"],
+                                                            name=r.get("name", "move_and_highlight"),
+                                                            response=sanitized_response
+                                                        )
+                                                    )
+                                                await gemini_session.send_tool_response(function_responses=fn_responses)
+
+                                            elif "text" in data:
+                                                turn_complete = bool(data.get("turnComplete", True))
+                                                if turn_complete:
+                                                    is_secretary_hold = False
+                                                    await gemini_session.send_realtime_input(text=data["text"])
+                                                else:
+                                                    await gemini_session.send_client_content(
+                                                        turns=types.Content(role="user", parts=[types.Part.from_text(text=data["text"])]),
+                                                        turn_complete=False
+                                                    )
+
+                                        except websockets.exceptions.ConnectionClosed:
+                                            break
+                                        except Exception as err:
+                                            print(f"[RELAY] Error processing client message: {err}")
+                                except websockets.exceptions.ConnectionClosed:
+                                    pass
+
+                            meter_task = asyncio.create_task(credit_metering_loop())
+                            try:
+                                await asyncio.gather(forward_gemini_to_browser(), forward_browser_to_gemini())
+                            finally:
+                                meter_task.cancel()
+                                KEY_POOL.mark_session_ended(selected_key_id, session_minutes_burned)
+                                if session_mem.get("status") == "active":
+                                    session_mem["status"] = "completed"
+                                if not session_mem.get("terminationReason"):
+                                    session_mem["terminationReason"] = "converted" if session_mem.get("partialLead", {}).get("submitted") else "user_closed"
+                                persist_session_memory(session_id)
+                            session_completed = True
+                            break
+                    except Exception:
+                        if not connected_once and attempt_handle is not None and attempt_idx == 0:
+                            continue
+                        raise
+
+                if session_completed:
+                    # Session completed normally; break out of failover loop
+                    break
+
+            except Exception as conn_err:
+                last_connect_err = conn_err
+                KEY_POOL.mark_key_error(selected_key_id, str(conn_err), cooldown_sec=60)
+                print(f"[RELAY] 🔄 Failover: Key {selected_label} failed ({conn_err}); trying next key in pool...")
+                continue
+        else:
+            # All candidate keys failed
+            err_str = f"All Gemini API keys in pool failed. Last error: {last_connect_err}"
+            print(f"[RELAY] ❌ {err_str}")
+            await websocket.send(json.dumps({"error": err_str, "code": "UPSTREAM_POOL_EXHAUSTED"}))
     except websockets.exceptions.ConnectionClosed:
         print(f"[RELAY] Client {session_id} disconnected (session persisted).")
-    except Exception as exc:
-        print(f"[RELAY] Session error: {exc}")
+    finally:
+        release_ip_slot(ip_token_or_err)
 
 
 async def main():
     print("=================================================================")
     print(" WebOrient by DeployMate — Multi-Tenant Relay Gateway (v1.0.0)")
-    print(f" Target Model : {MODEL_NAME}")
+    print(f" Target Model : {MODEL_NAME} (Voice: Kavya)")
+    print(f" API Key Pool : {len(KEY_POOL.list_public_keys())} key(s) loaded in load balancer")
     print(f" Storage Mode : {'MongoDB Atlas (deploymate)' if mongo_db is not None else 'Local JSON (config/tenants.json)'}")
     print(f" WebSocket URI: ws://localhost:{PORT}?siteKey=wo_live_deploymate_demo")
     print(f" HTTP Health  : http://localhost:{PORT}/health")

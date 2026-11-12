@@ -1,10 +1,9 @@
 /**
- * WebOrient Multi-Page Demo Shared Shell (v0.6.0 — DeployMate Signature Design System)
+ * WebOrient Multi-Page Demo Shared Shell (v1.0.0 — Client Portal Session Telemetry, Drop-Off Funnel & Lead Rescue Edition)
  * - Exact DeployMate design.md visual language: Paper (#FFFFFF), Ink (#0A0A0A), Signal (#E6391E)
  * - Official DeployMate signature stacked SVG logo in header and footer
- * - Clean standard single-tier website header (like all modern SaaS websites, no subnav debug bars)
- * - Minimal Siri-Like Waveform & Assist Toggle (Shadow DOM & Light DOM synchronized)
- * - Substantive component resolution & collision-free boundary positioning
+ * - Client Portal (`dashboard.html`): Live Credit Burn Ledger, Secretary VAD Savings, Section Drop-Off Funnel,
+ *   DOM Action & Selector Execution Log, and Partial/Abandoned Lead Recovery Table
  */
 import { WebOrient } from '../src/sdk/weborient.js';
 
@@ -21,19 +20,11 @@ export function initMultiPageDemo(pageConfig = {}) {
   const currentFile = window.location.pathname.split('/').pop() || 'test-demo.html';
   const activePage = PAGES.find(p => p.file === currentFile) || PAGES[0];
 
-  // 1. Inject DeployMate design.md CSS Variables & Architectural Grid Utilities
   injectDeployMateBaseStyles();
-
-  // 2. Mount Clean Single-Tier Architectural Header (like standard website headers)
   mountGlobalHeader(activePage);
-
-  // 3. Mount DeployMate Architectural Footer
   mountGlobalFooter();
-
-  // 4. Mount Minimal Siri-Like Waveform & Assist Toggle
   mountMinimalAssistWidget(activePage);
 
-  // 5. Initialize WebOrient SDK with DeployMate Signal (#E6391E) & Ink (#0A0A0A)
   const weborient = new WebOrient({
     siteKey: 'wo_live_deploymate_demo',
     siteId: 'deploymate-weborient-showcase',
@@ -44,7 +35,11 @@ export function initMultiPageDemo(pageConfig = {}) {
     mountWidget: false,
     onEvent: (type, detail) => {
       if (type === 'status') {
-        syncAssistUI(detail.status === 'connected', 'idle');
+        syncAssistUI(detail.status === 'connected' || detail.status === 'hibernating', detail.status === 'hibernating' ? 'hibernating' : 'idle');
+      } else if (type === 'vadState') {
+        if (detail.vadState === 'secretary_hold') syncAssistUI(true, 'secretary_hold');
+        else if (detail.vadState === 'hibernating') syncAssistUI(true, 'hibernating');
+        else syncAssistUI(true, 'listening');
       } else if (type === 'sessionRestored') {
         syncAssistUI(true, 'listening');
       } else if (type === 'transcript') {
@@ -57,7 +52,6 @@ export function initMultiPageDemo(pageConfig = {}) {
   });
   window.weborient = weborient;
 
-  // 6. Wire Interactive Page Widgets
   wireGenericTabs(weborient);
   wireGenericCarousels(weborient);
   wireAssistToggleActions(weborient, activePage);
@@ -133,11 +127,6 @@ function injectDeployMateBaseStyles() {
   document.head.appendChild(style);
 }
 
-/**
- * Standard, clean single-tier website header (like all SaaS websites)
- * Logo on left, clean navigation links in center/right, live assist CTA on right.
- * No second black sub-bar, no debug badges, no cluttered title blocks.
- */
 function mountGlobalHeader(activePage) {
   const existing = document.getElementById('global-site-header');
   if (existing) existing.remove();
@@ -223,9 +212,6 @@ function mountGlobalFooter() {
   document.body.appendChild(footer);
 }
 
-/**
- * Injects the minimal Siri-like Waveform & Assist Toggle styled in DeployMate Ink (#0A0A0A) & Signal (#E6391E).
- */
 function mountMinimalAssistWidget(activePage) {
   const existing = document.getElementById('weborient-assist-widget');
   if (existing) existing.remove();
@@ -257,7 +243,6 @@ function mountMinimalAssistWidget(activePage) {
 
     <div id="assist-pill-container" class="relative group flex items-center">
       <button id="btn-assist-toggle" type="button" aria-label="Toggle WebOrient Voice Assist" class="flex items-center gap-3 px-4 py-2.5 rounded-full bg-[#0A0A0A] hover:bg-[#181818] border border-[#0A0A0A] text-white shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer">
-        <!-- Inactive Mic Icon -->
         <div id="assist-idle-icon" class="w-7 h-7 rounded-full bg-[#E6391E] flex items-center justify-center text-white shadow-sm">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
@@ -266,7 +251,6 @@ function mountMinimalAssistWidget(activePage) {
           </svg>
         </div>
 
-        <!-- Siri Waveform Animation (Hidden when Idle) -->
         <div id="assist-waveform" class="hidden items-center gap-1 h-6 px-1">
           <div class="siri-bar"></div>
           <div class="siri-bar"></div>
@@ -275,7 +259,6 @@ function mountMinimalAssistWidget(activePage) {
           <div class="siri-bar"></div>
         </div>
 
-        <!-- Label / State -->
         <div class="flex flex-col text-left pr-1">
           <span id="assist-label" class="text-[11px] font-mono uppercase tracking-[0.14em] font-semibold text-white flex items-center gap-1.5">
             <span>WebOrient</span>
@@ -285,7 +268,6 @@ function mountMinimalAssistWidget(activePage) {
         </div>
       </button>
 
-      <!-- Language selector dropdown (right-click popover) -->
       <div id="assist-lang-popover" class="hidden absolute bottom-full right-0 mb-2 p-2.5 bg-[#0A0A0A] border border-white/20 shadow-2xl text-[11px] w-48 space-y-1.5">
         <div class="text-[9px] font-mono uppercase tracking-[0.18em] text-[#E6391E] px-1">Session Voice Language</div>
         <select id="quick-lang-select" class="w-full px-2 py-1.5 bg-white/10 border border-white/20 text-[11px] font-mono text-white focus:outline-none">
@@ -310,12 +292,12 @@ function wireAssistToggleActions(weborient, activePage) {
   btnToggle.addEventListener('click', async (e) => {
     if (e.target.closest('#quick-lang-select')) return;
 
-    if (!weborient.client) {
+    if (!weborient.client || weborient.client.vadState === 'hibernating') {
       syncAssistUI(true, 'connecting');
       const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       weborient.options.endpoint = isLocal ? 'ws://localhost:8088' : 'wss://relay.deploymate.in';
       try {
-        await weborient.start();
+        await weborient.start({ isRestore: Boolean(weborient.client) });
         syncAssistUI(true, 'listening');
       } catch (err) {
         console.warn('[WebOrient] Connection error:', err);
@@ -351,18 +333,36 @@ function syncAssistUI(connected, state = 'idle') {
   if (!btn || !waveform || !idleIcon) return;
 
   if (connected) {
-    idleIcon.classList.add('hidden');
-    waveform.classList.remove('hidden');
-    waveform.style.display = 'flex';
     btn.className = 'flex items-center gap-3 px-4 py-2.5 rounded-full bg-[#0A0A0A] border-2 border-[#E6391E] text-white shadow-2xl transition-all duration-300 cursor-pointer';
 
     if (state === 'speaking') {
+      idleIcon.classList.add('hidden');
+      waveform.classList.remove('hidden');
+      waveform.style.display = 'flex';
       sublabel.textContent = 'AI Co-Browsing...';
       dot.className = 'w-1.5 h-1.5 rounded-full bg-[#E6391E] animate-ping';
+    } else if (state === 'secretary_hold') {
+      idleIcon.classList.remove('hidden');
+      waveform.classList.add('hidden');
+      waveform.style.display = 'none';
+      sublabel.textContent = 'Standby (0m burn · Speak)';
+      dot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
+    } else if (state === 'hibernating') {
+      idleIcon.classList.remove('hidden');
+      waveform.classList.add('hidden');
+      waveform.style.display = 'none';
+      sublabel.textContent = 'Paused · Speak to wake';
+      dot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
     } else if (state === 'listening') {
+      idleIcon.classList.add('hidden');
+      waveform.classList.remove('hidden');
+      waveform.style.display = 'flex';
       sublabel.textContent = 'Listening Live...';
       dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
     } else {
+      idleIcon.classList.add('hidden');
+      waveform.classList.remove('hidden');
+      waveform.style.display = 'flex';
       sublabel.textContent = 'Live Session';
       dot.className = 'w-1.5 h-1.5 rounded-full bg-[#E6391E]';
     }
@@ -443,7 +443,7 @@ function wireGenericCarousels(weborient) {
 }
 
 /**
- * Wires the Customer Onboarding & 1-Line Script Generator Portal (dashboard.html)
+ * Wires the Customer Onboarding, Credit Burn Analytics, Section Drop-Off Funnel & Lead Rescue Portal (dashboard.html)
  */
 export function initPortalDashboard(weborient) {
   const form = document.getElementById('tenant-register-form');
@@ -494,14 +494,124 @@ export function initPortalDashboard(weborient) {
     });
   }
 
+  /**
+   * Escapes dynamic text before interpolating into HTML templates.
+   * @param {*} value Raw value from tenant or session telemetry
+   * @returns {string} HTML-safe escaped string
+   */
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Renders client session telemetry, drop-off funnel, and rescued leads safely.
+   * @param {Array<Object>} sessions Recent visitor sessions
+   */
+  function renderClientSessionTelemetry(sessions = []) {
+    let container = document.getElementById('client-session-telemetry-panel');
+    if (!container) {
+      const mainEl = document.querySelector('main');
+      if (!mainEl) return;
+      container = document.createElement('section');
+      container.id = 'client-session-telemetry-panel';
+      container.className = 'border border-[#0A0A0A] bg-white p-8 mt-12 space-y-6';
+      mainEl.appendChild(container);
+    }
+
+    const totalBurned = sessions.reduce((acc, s) => acc + Number(s.creditsBurned || 0), 0);
+    const totalSavedSec = sessions.reduce((acc, s) => acc + Number(s.secretarySavedSeconds || 0), 0);
+    const partialLeads = sessions.filter(s => s.partialLead && (s.partialLead.email || s.partialLead.phone || s.partialLead.fullName));
+    const dropOffCounts = {};
+    for (const s of sessions) {
+      const sec = s.lastSectionViewed || 'Hero / Overview';
+      dropOffCounts[sec] = (dropOffCounts[sec] || 0) + 1;
+    }
+    const topDropOffs = Object.entries(dropOffCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
+
+    container.innerHTML = `
+      <div class="flex flex-wrap items-center justify-between gap-4 border-b border-[#0A0A0A] pb-4">
+        <div>
+          <div class="text-[10px] font-mono uppercase tracking-[0.2em] text-[#E6391E]">04 // Visitor Session Analytics, Drop-Off Funnel &amp; Lead Rescue</div>
+          <h2 class="font-display font-bold text-2xl mt-1">Credit Burn Ledger, Section Engagement &amp; Unconverted Leads</h2>
+        </div>
+        <span class="font-mono text-xs px-3 py-1.5 bg-[#0A0A0A] text-white">
+          Burned: ${totalBurned.toFixed(1)}m · Secretary Auto-Hold Saved: ${totalSavedSec}s
+        </span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="border border-[#0A0A0A]/20 p-5 space-y-3">
+          <div class="text-[10px] font-mono uppercase tracking-[0.18em] text-[#E6391E]">Where Visitors Back Off (Exit Section Funnel)</div>
+          ${topDropOffs.length === 0 ? '<p class="text-xs text-[#0A0A0A]/50">No visitor drop-offs recorded yet.</p>' : topDropOffs.map(([sec, count]) => `
+            <div class="flex items-center justify-between text-xs font-mono border-b border-[#0A0A0A]/10 pb-2">
+              <span class="truncate pr-3">${escapeHtml(sec)}</span>
+              <span class="font-bold text-[#E6391E]">${count} visitor${count > 1 ? 's' : ''}</span>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="border border-[#0A0A0A]/20 p-5 space-y-3">
+          <div class="text-[10px] font-mono uppercase tracking-[0.18em] text-[#E6391E]">Rescued Partial &amp; Converted Leads (${partialLeads.length})</div>
+          ${partialLeads.length === 0 ? '<p class="text-xs text-[#0A0A0A]/50">When a visitor speaks or types their phone/email (even if they leave before clicking Submit), their lead appears here.</p>' : partialLeads.slice(0, 5).map(s => `
+            <div class="text-xs font-mono border-b border-[#0A0A0A]/10 pb-2">
+              <div class="font-bold">${escapeHtml(s.partialLead.fullName || 'Visitor')} · ${escapeHtml(s.partialLead.email || s.partialLead.phone || '')}</div>
+              <div class="text-[10px] text-[#0A0A0A]/60">Status: ${s.partialLead.submitted ? '✓ Submitted' : '⚡ Abandoned at ' + escapeHtml(s.lastSectionViewed || 'Form')}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <div class="text-[10px] font-mono uppercase tracking-[0.18em] text-[#0A0A0A]/60">Recent Visitor Sessions, DOM Actions &amp; Voice Transcripts (${sessions.length})</div>
+        ${sessions.slice(0, 8).map(s => `
+          <details class="border border-[#0A0A0A]/20 p-4 bg-[#0A0A0A]/[0.01]">
+            <summary class="cursor-pointer font-mono text-xs flex flex-wrap items-center justify-between gap-2">
+              <span><strong>${escapeHtml(s.sessionId)}</strong> (${escapeHtml(s.userLanguage || 'en-IN')}) · Last Section: ${escapeHtml(s.lastSectionViewed || 'Hero')}</span>
+              <span>Burned: <strong>${Number(s.creditsBurned || 0).toFixed(1)}m</strong> · Saved: <strong>${Number(s.secretarySavedSeconds || 0)}s</strong> · DOM Actions: <strong>${(s.domEvents || []).length}</strong></span>
+            </summary>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-3 border-t border-[#0A0A0A]/15 text-xs font-mono">
+              <div>
+                <div class="text-[10px] uppercase text-[#E6391E] mb-2">DOM Highlights, Clicks, Swipes &amp; Scrolls</div>
+                ${(s.domEvents || []).length === 0 ? '<div class="text-[#0A0A0A]/45">No DOM actions yet.</div>' : (s.domEvents || []).slice(-10).map(ev => `
+                  <div class="py-1 border-b border-[#0A0A0A]/10">
+                    <span>${ev.success ? '✓' : '✕'} <strong>${escapeHtml(ev.tool)}</strong> -> <code>${escapeHtml(ev.selector)}</code></span>
+                    ${ev.error ? `<div class="text-[#E6391E]">${escapeHtml(ev.error)}</div>` : ''}
+                  </div>
+                `).join('')}
+              </div>
+              <div>
+                <div class="text-[10px] uppercase text-[#E6391E] mb-2">Voice Conversation Transcript</div>
+                ${(s.transcripts || []).length === 0 ? '<div class="text-[#0A0A0A]/45">No speech turns recorded.</div>' : (s.transcripts || []).slice(-8).map(t => `
+                  <div class="py-1 border-b border-[#0A0A0A]/10">
+                    <strong>${t.role === 'model' ? 'Kavya' : 'Visitor'}:</strong> ${escapeHtml(t.text)}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </details>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  /**
+   * Loads registered tenants from relay portal RPC (with local config fallback) and binds selection controls.
+   */
   async function loadTenantsRegistry() {
     const tbody = document.getElementById('tenants-table-body');
     if (!tbody) return;
     let tenants = [];
+    let sessions = [];
 
     const rpcRes = await callRelayPortalRpc({ tenantAction: 'list' });
     if (rpcRes && Array.isArray(rpcRes.tenants)) {
       tenants = rpcRes.tenants;
+      sessions = rpcRes.sessions || [];
     } else {
       try {
         const fallback = await fetch('../config/tenants.json');
@@ -517,6 +627,8 @@ export function initPortalDashboard(weborient) {
       if (!tenants.some(t => t.siteKey === lt.siteKey)) tenants.unshift(lt);
     }
 
+    renderClientSessionTelemetry(sessions);
+
     if (!tenants.length) return;
 
     const current = tenants.find(t => t.siteKey === activeSiteKey) || tenants[0];
@@ -529,13 +641,13 @@ export function initPortalDashboard(weborient) {
 
     tbody.innerHTML = tenants.map(t => `
       <tr class="hover:bg-[#0A0A0A]/5">
-        <td class="py-3.5 px-5 font-display font-bold text-sm">${t.companyName || t.siteId}</td>
-        <td class="py-3.5 px-5 font-mono text-[#E6391E] font-semibold">${t.siteKey}</td>
-        <td class="py-3.5 px-5 font-mono text-[11px]">${(t.allowedOrigins || []).slice(0, 3).join(', ')}</td>
-        <td class="py-3.5 px-5 font-mono">${t.plan || 'Pro Co-Pilot'}</td>
+        <td class="py-3.5 px-5 font-display font-bold text-sm">${escapeHtml(t.companyName || t.siteId)}</td>
+        <td class="py-3.5 px-5 font-mono text-[#E6391E] font-semibold">${escapeHtml(t.siteKey)}</td>
+        <td class="py-3.5 px-5 font-mono text-[11px]">${escapeHtml((t.allowedOrigins || []).slice(0, 3).join(', '))}</td>
+        <td class="py-3.5 px-5 font-mono">${escapeHtml(t.plan || 'Pro Co-Pilot')}</td>
         <td class="py-3.5 px-5 font-mono font-bold">${Number(t.creditsMinutes || 0).toFixed(1)} mins</td>
         <td class="py-3.5 px-5">
-          <button type="button" data-select-key="${t.siteKey}" data-select-domain="${(t.allowedOrigins || [''])[0]}" data-select-credits="${t.creditsMinutes || 0}" class="px-3 py-1 bg-[#0A0A0A] hover:bg-[#E6391E] text-white font-mono text-[10px] uppercase tracking-wider transition cursor-pointer">
+          <button type="button" data-select-key="${escapeHtml(t.siteKey)}" data-select-domain="${escapeHtml((t.allowedOrigins || [''])[0])}" data-select-credits="${Number(t.creditsMinutes || 0)}" class="px-3 py-1 bg-[#0A0A0A] hover:bg-[#E6391E] text-white font-mono text-[10px] uppercase tracking-wider transition cursor-pointer">
             Use Key
           </button>
         </td>
@@ -614,7 +726,8 @@ export function initPortalDashboard(weborient) {
     const rpcRes = await callRelayPortalRpc({
       tenantAction: 'addCredits',
       siteKey: activeSiteKey,
-      minutes: minutesToAdd
+      minutes: minutesToAdd,
+      demoTopup: activeSiteKey === 'wo_live_deploymate_demo'
     });
     const minsEl = document.getElementById('wallet-minutes-value');
     if (rpcRes && rpcRes.tenant && minsEl) {

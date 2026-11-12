@@ -1,5 +1,6 @@
 .env
 config/.session_store.json
+config/.api_keys_store.json
 node_modules/
 __pycache__/
 *.pyc

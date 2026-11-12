@@ -1,12 +1,11 @@
 /**
- * WebOrient Persistent Session, Language Note-Taking & Non-Linear To-Do Memory Engine (`src/sdk/session-memory.js` v0.6.0)
+ * WebOrient Persistent Session, Language Sync, Partial Lead Auto-Capture & DOM Telemetry Engine (`src/sdk/session-memory.js` v1.0.0)
  * - Uses `localStorage` (with `sessionStorage` mirror) so session state, active connection status,
- *   detected user language, agent language notes, user goals, and orientation To-Do progress survive
- *   BOTH cross-page redirects AND hard browser refreshes (F5 / Cmd+R).
- * - Multi-Signal Language Detection & Persistent Note-Taking:
- *   Continuously detects user/model language (English, Hindi, Hinglish, Spanish, French), locks it,
- *   records timestamped language notes in `state.languageNotes`, and fires `onLanguageChange` so
- *   what the agent SAYS aloud and what the Ghost Cursor SHOWS on screen stay 100% synchronized.
+ *   detected user language, partial lead capture, DOM event logs, and section dwell history survive
+ *   cross-page redirects and hard refreshes.
+ * - Silent User-Only Language Detection (`en-IN`, `hinglish`, `hi-IN`, `es-ES`, `fr-FR`)
+ * - Partial Lead Auto-Capture: Automatically extracts name, email, phone, and company when inputs are filled
+ *   even if the visitor closes the tab before clicking Submit.
  */
 
 const MEMORY_STORAGE_KEY = 'weborient_persistent_session_v4';
@@ -73,9 +72,8 @@ export class SessionMemory {
           if (!isDemo && parsed.todoChecklist.some(t => t.page === 'test-demo.html')) {
             parsed.todoChecklist = [];
           }
-          if (!Array.isArray(parsed.languageNotes)) {
-            parsed.languageNotes = [];
-          }
+          if (!Array.isArray(parsed.languageNotes)) parsed.languageNotes = [];
+          if (!Array.isArray(parsed.domEventLogs)) parsed.domEventLogs = [];
           return parsed;
         }
       }
@@ -108,6 +106,8 @@ export class SessionMemory {
         ? DEFAULT_TODO_CHECKLIST.map(item => ({ ...item, completedAt: null }))
         : [],
       orientedHistory: [],
+      domEventLogs: [],
+      lastSectionViewed: null,
       recentTranscripts: [],
       pendingNavigationActions: [],
       formFacts: {
@@ -118,7 +118,8 @@ export class SessionMemory {
         website: '',
         framework: 'Next.js / React',
         plan: 'Pro Co-Pilot',
-        teamSize: '25'
+        teamSize: '25',
+        submitted: false
       }
     };
 
@@ -126,10 +127,6 @@ export class SessionMemory {
     return freshState;
   }
 
-  /**
-   * Dynamically populates `todoChecklist` from any client website's live DOM sections
-   * or manifest so 1-line `<script>` embeds get automatic non-linear orientation tracking!
-   */
   syncDynamicDomChecklist(scanner, manifest = null) {
     if (isWebOrientDemoSite() && this.state.todoChecklist.length > 0) {
       return this.state.todoChecklist;
@@ -227,6 +224,62 @@ export class SessionMemory {
     return this.state;
   }
 
+  /**
+   * Records every DOM tool execution (`move_and_highlight`, `click_element`, `fill_form_field`, `swipe_or_swap`, `scroll_page`)
+   * with success/error status so Client & Super-Admin Dashboards can audit exact DOM actions and failed selectors.
+   */
+  recordDomEvent({ tool, selector, label, explanation, success = true, error = null }) {
+    if (!Array.isArray(this.state.domEventLogs)) {
+      this.state.domEventLogs = [];
+    }
+    const pageUrl = typeof window !== 'undefined' ? (window.location.pathname + window.location.hash) : '/';
+    const evt = {
+      timestamp: new Date().toISOString(),
+      tool: tool || 'move_and_highlight',
+      selector: String(selector || ''),
+      label: label ? String(label).slice(0, 90) : null,
+      explanation: explanation ? String(explanation).slice(0, 120) : null,
+      pageUrl,
+      success: Boolean(success),
+      error: error ? String(error).slice(0, 160) : null
+    };
+    this.state.domEventLogs.push(evt);
+    if (this.state.domEventLogs.length > 45) {
+      this.state.domEventLogs = this.state.domEventLogs.slice(-45);
+    }
+    if (success && selector) {
+      this.state.lastSectionViewed = `${selector}${label ? ` (${label})` : ''}`;
+    }
+    this._persist(this.state, false);
+    return evt;
+  }
+
+  /**
+   * Automatically captures partial lead details whenever any form input is filled by voice or tool call
+   */
+  capturePartialFormFact(selectorOrName, value, submitted = false) {
+    if (!this.state.formFacts) {
+      this.state.formFacts = { fullName: '', email: '', phone: '', company: '', submitted: false };
+    }
+    if (submitted) {
+      this.state.formFacts.submitted = true;
+    }
+    const key = String(selectorOrName || '').toLowerCase();
+    const val = String(value ?? '').trim();
+    if (!val) return;
+
+    if (/@/.test(val) || key.includes('email') || key.includes('mail')) {
+      this.state.formFacts.email = val;
+    } else if (/^\+?[\d\s\-()]{7,16}$/.test(val) || key.includes('phone') || key.includes('tel') || key.includes('mobile') || key.includes('whatsapp')) {
+      this.state.formFacts.phone = val;
+    } else if (key.includes('company') || key.includes('org') || key.includes('business')) {
+      this.state.formFacts.company = val;
+    } else if (key.includes('name') || key.includes('client') || key.includes('founder')) {
+      this.state.formFacts.fullName = val;
+    }
+    this._persist(this.state, false);
+  }
+
   markOriented({ page, selector, title, explanation }) {
     const currentFile = page || (typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || window.location.pathname || '/') : '/');
     const selStr = String(selector || '').trim();
@@ -267,6 +320,7 @@ export class SessionMemory {
       this.state.orientedHistory.push(entry);
     }
 
+    this.state.lastSectionViewed = `${selStr} (${title || selStr})`;
     this._persist();
     return entry;
   }
@@ -283,10 +337,6 @@ export class SessionMemory {
     return item;
   }
 
-  /**
-   * Updates and locks the user's native language throughout the entire session (surviving redirects & refreshes)
-   * and records an explicit agent language note so voice ("saying") and UI tooltip ("showing") stay 100% in sync!
-   */
   setLanguage(langCode, lock = true, reason = 'detected from conversation') {
     if (!langCode) return this.getLanguageConfig();
     const prevLang = this.state.userLanguage;
@@ -331,16 +381,11 @@ export class SessionMemory {
     return cfg;
   }
 
-  /**
-   * Auto-detects language strictly from the USER's spoken/typed transcript (never model output)
-   * and updates session state silently without announcing the switch aloud.
-   */
   detectLanguageFromText(text, role = 'user') {
     if (!text || role !== 'user') return null;
     const clean = String(text).trim();
     const lower = clean.toLowerCase();
 
-    // 1. Explicit user language switch commands always override lock
     if (/\b(speak in english|talk in english|english mein|switch to english|only english)\b/i.test(lower)) {
       return this.setLanguage('en-IN', true, 'explicit user request for English');
     }
@@ -357,13 +402,11 @@ export class SessionMemory {
       return this.setLanguage('fr-FR', true, 'explicit user request for French');
     }
 
-    // 2. Detect Devanagari script -> Hindi or Hinglish (if mixed with Latin words)
     if (/[\u0900-\u097F]/.test(clean)) {
       const hasLatinWords = /[a-zA-Z]{4,}/.test(clean);
       return this.setLanguage(hasLatinWords ? 'hinglish' : 'hi-IN', true, 'user Devanagari speech transcript');
     }
 
-    // 3. Detect conversational Hinglish / Romanized Hindi markers
     const hinglishMatches = lower.match(
       /\b(kya|kaise|dikhao|dikhaiye|batao|bataiye|samjhao|chaliye|mujhe|mera|meri|humara|hamara|aap|aapka|karo|kariye|kijiye|band|kholo|isko|usko|yeh|ye|woh|wo|hai|hain|aur|mein|ke|ka|ki|se|par|pe|bhi|nahi|haan|accha|theek|kitna|kitne|kahan|kaunsa|dekho|dekhiye|suno|chahiye|krna|karna)\b/g
     );
@@ -371,7 +414,6 @@ export class SessionMemory {
       return this.setLanguage('hinglish', true, `user Hinglish speech markers (${hinglishMatches.slice(0, 3).join(', ')})`);
     }
 
-    // 4. Detect clear English sentences from user so switching back to English works naturally
     const englishMatches = lower.match(
       /\b(what|how|show|tell|can|you|please|where|which|about|this|that|the|for|with|open|close|book|demo|pricing|features|contact|calculate|voice|website)\b/g
     );
@@ -391,6 +433,11 @@ export class SessionMemory {
     const clean = String(text).replace(/\s+/g, ' ').trim();
     if (role === 'user') {
       this.detectLanguageFromText(clean, 'user');
+      // Extract email/phone if spoken directly in user transcript
+      const emailHit = clean.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailHit) this.capturePartialFormFact('email', emailHit[0]);
+      const phoneHit = clean.match(/(?:\+91[\s-]?)?[6-9]\d{9}\b/);
+      if (phoneHit) this.capturePartialFormFact('phone', phoneHit[0]);
     }
 
     const last = this.state.recentTranscripts[this.state.recentTranscripts.length - 1];
@@ -406,8 +453,8 @@ export class SessionMemory {
       });
     }
 
-    if (this.state.recentTranscripts.length > 14) {
-      this.state.recentTranscripts = this.state.recentTranscripts.slice(-14);
+    if (this.state.recentTranscripts.length > 18) {
+      this.state.recentTranscripts = this.state.recentTranscripts.slice(-18);
     }
     this._persist();
   }
@@ -447,7 +494,6 @@ export class SessionMemory {
     const langCfg = this.getLanguageConfig();
     const currentFile = typeof window !== 'undefined' ? (window.location.pathname.split('/').pop() || window.location.pathname || '/') : '/';
 
-    const doneItems = this.state.todoChecklist.filter(t => t.done);
     const pendingOnThisPage = this.state.todoChecklist.filter(t => !t.done && (!t.page || t.page === currentFile || t.page === window.location?.pathname));
     const pendingOtherPages = this.state.todoChecklist.filter(t => !t.done && t.page && t.page !== currentFile && t.page !== window.location?.pathname);
 
@@ -459,7 +505,7 @@ export class SessionMemory {
     const notesList = (this.state.userIntent.customNotes || []).slice(-5).join(' | ') || `Language locked to ${langCfg.name}`;
 
     return [
-      `=== PERSISTENT SESSION, LANGUAGE NOTES & NON-LINEAR TO-DO MEMORY (${this.state.sessionId}) ===`,
+      `=== PERSISTENT SESSION, LANGUAGE NOTES & SITE REFERENCE (${this.state.sessionId}) ===`,
       `1. DETECTED & LOCKED LANGUAGE: ${langCfg.name} (code: ${langCfg.code}).`,
       `   - SHOWING & SAYING SYNC RULE (CRITICAL): Everything you SAY aloud AND every \`explanation\` badge text you pass to \`move_and_highlight\`, \`click_element\`, \`fill_form_field\`, or \`swipe_or_swap\` MUST be in ${langCfg.name}! Never show an English tooltip badge when speaking ${langCfg.name}, and never switch language unless the user asks!`,
       `   - AGENT SESSION NOTES: ${notesList}`,

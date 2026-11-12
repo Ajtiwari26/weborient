@@ -1,17 +1,17 @@
 /**
- * WebOrient DOM Scanner & Semantic Grounding Engine (v0.6.0 — Full-Page, Popup, Banner & Close-Button Indexing)
+ * WebOrient DOM Scanner & Semantic Grounding Engine (v1.0.0 — Full-Page, Popup, Iframe & PII/OTP Security Edition)
  * - Assigns persistent deterministic `data-wo-id` attributes to EVERY actionable element, popup, banner, and close button
- * - Infers semantic labels for icon-only buttons (`<svg class="lucide-x">` -> "Close Popup / Modal (X)", arrows, etc.)
- *   and sibling `<label>` fields (React/Tailwind forms where `<label>` is a sibling of `<input>`)
- * - `scanActiveOverlaysAndPopups()`: detects any open modal, drawer, popup, ad overlay, banner, or expanded dossier
- *   along with its exact `closeButtonSelector` and internal controls
- * - `discoverSiteRoutes()`: indexes all internal routes, hash sections, and SPA navigation triggers from a 1-line embed
+ * - Strict Sensitive Field Guardrail: Blocks passwords, credit cards, CVV/CVC, bank account/IFSC/UPI PINs,
+ *   OTP/2FA inputs (`autocomplete="one-time-code"`), and Government IDs (`Aadhaar`, `PAN`, `SSN`, `Passport`, `GSTIN`)
+ * - Cross-Origin Iframe Indexing: Detects embedded `<iframe>` widgets (Calendly, Stripe, Typeform, YouTube, HubSpot)
+ *   so the agent spotlights the iframe container and guides the visitor verbally without false click failures
  */
 export class DOMScanner {
   constructor(options = {}) {
     this.ignoredSelectors = options.ignoredSelectors || [
       'input[type="password"]',
       'input[autocomplete*="cc-"]',
+      'input[autocomplete="one-time-code"]',
       '[data-agent-ignore]',
       '.weborient-ignore',
       '#weborient-overlay',
@@ -20,20 +20,15 @@ export class DOMScanner {
       '#test-toolbar',
       '#test-toolbar *'
     ];
+    this.sensitiveFieldRegex = /\b(password|passwd|cc-number|cc-csc|cc-exp|card.?num|credit.?card|debit.?card|cvv|cvc|iban|routing.?num|ifsc|account.?num|upi.?pin|one-time-code|otp|2fa|totp|aadhaar|aadhar|pan.?card|pan.?num|ssn|social.?security|passport.?num|gstin)\b/i;
     this._idCounter = 1;
   }
 
-  /**
-   * Real-time Transcript-to-DOM Matcher:
-   * Given a phrase currently being spoken by the Gemini Live Agent, finds the best matching
-   * DOM section, popup, card, tab, button, or form field on the active page.
-   */
   matchElementFromSpeech(spokenText, todoChecklist = []) {
     if (!spokenText || typeof document === 'undefined') return null;
     const text = String(spokenText).toLowerCase().trim();
     if (text.length < 4) return null;
 
-    // 0. If an active modal/popup/drawer is open on screen, prioritize matching controls inside it
     const activePopups = this.scanActiveOverlaysAndPopups();
     if (activePopups.length > 0) {
       const topPopup = activePopups[0];
@@ -50,8 +45,6 @@ export class DOMScanner {
     }
 
     const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
-
-    // 1. Check current-page To-Do checklist keywords first for high-precision section matching
     const pageTodos = (todoChecklist || []).filter(t => !t.page || t.page === currentFile || t.page === window.location.pathname);
     for (const todo of pageTodos) {
       if (Array.isArray(todo.keywords)) {
@@ -70,9 +63,8 @@ export class DOMScanner {
       }
     }
 
-    // 2. Match against interactive controls, popups, cards, tabs, headings, and sections on the page
     const candidates = this._querySelectorAllDeep(
-      'section[id], [id*="modal"], [id*="drawer"], [id*="calculator"], .pricing-card, [role="tab"], [role="switch"], [data-carousel], details[id], form, button, input, select, h2, h3, h4'
+      'section[id], [id*="modal"], [id*="drawer"], [id*="calculator"], .pricing-card, [role="tab"], [role="switch"], [data-carousel], details[id], form, iframe, button, input, select, h2, h3, h4'
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
 
     let bestEl = null;
@@ -111,10 +103,6 @@ export class DOMScanner {
     return null;
   }
 
-  /**
-   * Detects any active modals, popups, drawers, ad overlays, banners, or expanded dossiers
-   * currently visible on screen, including their exact Close (`X`) button selector!
-   */
   scanActiveOverlaysAndPopups() {
     if (typeof document === 'undefined') return [];
     const popupSelectors = [
@@ -144,7 +132,6 @@ export class DOMScanner {
       const selector = this._getUniqueSelector(node);
       const title = this._extractHeading(node) || node.id || 'Active Popup / Overlay';
 
-      // Find close / dismiss button inside this popup/overlay
       let closeBtn = node.querySelector(
         'button[aria-label*="close" i], button[aria-label*="dismiss" i], button[title*="close" i], [data-dismiss], [data-close]'
       );
@@ -159,7 +146,7 @@ export class DOMScanner {
         closeButtonSelector = this._getUniqueSelector(closeBtn);
       }
 
-      const controls = Array.from(node.querySelectorAll('button, a[href], input, select, textarea'))
+      const controls = Array.from(node.querySelectorAll('button, a[href], input, select, textarea, [role="combobox"], iframe'))
         .filter(c => !this._isIgnored(c) && this._isVisible(c, true))
         .slice(0, 25)
         .map(c => {
@@ -167,7 +154,7 @@ export class DOMScanner {
           return {
             selector: this._getUniqueSelector(c),
             tag: c.tagName.toLowerCase(),
-            type: c.type || null,
+            type: c.type || c.getAttribute('role') || null,
             label: this._getAccessibleLabel(c)
           };
         });
@@ -184,14 +171,10 @@ export class DOMScanner {
     return results;
   }
 
-  /**
-   * Discovers all internal routes, section anchors, and SPA navigation buttons on the client site
-   */
   discoverSiteRoutes() {
     if (typeof document === 'undefined') return [];
     const routes = new Map();
 
-    // 1. Anchor links (<a href="...">)
     document.querySelectorAll('a[href]').forEach(a => {
       if (this._isIgnored(a)) return;
       const href = (a.getAttribute('href') || '').trim();
@@ -203,7 +186,6 @@ export class DOMScanner {
       }
     });
 
-    // 2. SPA Navigation / Action Triggers (e.g. Playground, Start a project, Book demo, Personalize Proposal, Voice agent)
     document.querySelectorAll('header button, nav button, #hero button, footer button, #proposal-personalizer-toggle').forEach(btn => {
       if (this._isIgnored(btn) || !this._isVisible(btn, true)) return;
       const label = this._getAccessibleLabel(btn);
@@ -215,9 +197,6 @@ export class DOMScanner {
     return Array.from(routes.values()).slice(0, 35);
   }
 
-  /**
-   * Resolves a selector, data-wo-id, element ID, or accessible label (including Close / X buttons) to a DOM element
-   */
   resolveElement(target) {
     if (!target) return null;
     if (target instanceof Element) return target;
@@ -245,7 +224,6 @@ export class DOMScanner {
 
     const needle = raw.toLowerCase();
 
-    // Special resolution for "close", "close modal", "close popup", "x" when an overlay is open
     if (/\b(close|dismiss|band|exit)\b/i.test(needle)) {
       const popups = this.scanActiveOverlaysAndPopups();
       for (const p of popups) {
@@ -284,9 +262,6 @@ export class DOMScanner {
     return bestMatch;
   }
 
-  /**
-   * Scans and returns ALL interactive elements, buttons, inputs, popups, banners, and close buttons on the page
-   */
   scan(options = {}) {
     const includeOffscreen = Boolean(options.includeOffscreen);
     const selectorString = [
@@ -296,10 +271,12 @@ export class DOMScanner {
       'select',
       'textarea',
       'summary',
+      'iframe',
       '[role="button"]',
       '[role="tab"]',
       '[role="switch"]',
       '[role="slider"]',
+      '[role="combobox"]',
       '[role="option"]',
       '[data-carousel]',
       '[data-tab]',
@@ -336,6 +313,11 @@ export class DOMScanner {
           isInteractive: true,
           disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true')
         };
+
+        if (el.tagName === 'IFRAME') {
+          item.isIframeEmbed = true;
+          item.iframeSrc = (el.getAttribute('src') || '').slice(0, 140);
+        }
 
         if (this._isCloseOrDismissButton(el)) {
           item.isCloseButton = true;
@@ -404,7 +386,6 @@ export class DOMScanner {
       document.querySelectorAll('section, article, main, [data-section], #roi-savings-calculator, #scheduler-booking-modal, #personalize-drawer, .pricing-card, details')
     ).filter(el => !this._isIgnored(el) && this._isVisible(el, true));
 
-    // Fallback for sectionless SPA takeover pages (like /contact, /playground, /call) that use div.fixed.inset-0 or #root > div
     if (sectionNodes.length === 0) {
       sectionNodes = Array.from(
         document.querySelectorAll('div.fixed.inset-0:not(#weborient-overlay), div.absolute.inset-x-0.z-20, #root > div')
@@ -520,7 +501,6 @@ export class DOMScanner {
       if (svgClass.includes('lucide-x') || svgClass.includes('icon-x') || svgClass.includes('close')) {
         return true;
       }
-      // Check if it's an X icon path (two crossing diagonal lines: M18 6 6 18 and M6 6 18 18)
       const paths = Array.from(svg.querySelectorAll('path, line')).map(p => p.getAttribute('d') || '').join(' ');
       if (paths.includes('18 6') && paths.includes('6 18')) {
         return true;
@@ -530,9 +510,9 @@ export class DOMScanner {
   }
 
   _getCarouselState(carouselEl) {
-    const slides = Array.from(carouselEl.querySelectorAll('[data-carousel-slide], .carousel-slide'));
+    const slides = Array.from(carouselEl.querySelectorAll('[data-carousel-slide], .carousel-slide, .swiper-slide, .embla__slide'));
     const activeIndex = slides.findIndex(
-      s => s.classList.contains('active') || s.getAttribute('aria-hidden') === 'false' || !s.classList.contains('hidden')
+      s => s.classList.contains('active') || s.classList.contains('swiper-slide-active') || s.getAttribute('aria-hidden') === 'false' || !s.classList.contains('hidden')
     );
     return {
       totalSlides: slides.length,
@@ -554,7 +534,7 @@ export class DOMScanner {
     if (style.display === 'none' || style.visibility === 'hidden') {
       return false;
     }
-    const isInteractive = /^(BUTTON|A|INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    const isInteractive = /^(BUTTON|A|INPUT|SELECT|TEXTAREA|IFRAME)$/.test(el.tagName);
     if (!isInteractive && parseFloat(style.opacity) === 0) {
       return false;
     }
@@ -584,10 +564,34 @@ export class DOMScanner {
         }
       } catch (_) {}
     }
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+      const fieldMeta = [
+        el.getAttribute('name') || '',
+        el.id || '',
+        el.getAttribute('placeholder') || '',
+        el.getAttribute('aria-label') || '',
+        el.getAttribute('autocomplete') || '',
+        el.getAttribute('data-testid') || ''
+      ].join(' ');
+      if (this.sensitiveFieldRegex.test(fieldMeta)) {
+        return true;
+      }
+    }
     return false;
   }
 
   _getAccessibleLabel(el) {
+    if (el.tagName === 'IFRAME') {
+      const title = (el.getAttribute('title') || el.getAttribute('aria-label') || '').trim();
+      const src = (el.getAttribute('src') || '').toLowerCase();
+      if (src.includes('calendly')) return title || 'Calendly Booking Calendar (Embedded Iframe)';
+      if (src.includes('stripe')) return title || 'Stripe Secure Checkout (Embedded Iframe)';
+      if (src.includes('typeform')) return title || 'Typeform Interactive Form (Embedded Iframe)';
+      if (src.includes('youtube') || src.includes('vimeo')) return title || 'Embedded Video Player (Iframe)';
+      if (src.includes('hubspot')) return title || 'HubSpot Booking / Form Widget (Iframe)';
+      return title || `Embedded Interactive Widget (${src.split('/')[2] || 'Iframe'})`;
+    }
+
     const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel) return ariaLabel.trim();
 
@@ -608,7 +612,6 @@ export class DOMScanner {
       if (cloneText) return cloneText.slice(0, 80);
     }
 
-    // For inputs/selects/textareas in React/Tailwind forms where <label> is a sibling inside the field wrapper
     if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') {
       const prevLabel = el.previousElementSibling;
       if (prevLabel && (prevLabel.tagName === 'LABEL' || prevLabel.tagName === 'SPAN' || prevLabel.tagName === 'DIV')) {
@@ -633,7 +636,6 @@ export class DOMScanner {
     const text = (el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
     if (text) return text.slice(0, 90);
 
-    // Icon-only button inference (Close 'X' buttons, arrows, mic, send, etc.)
     if (this._isCloseOrDismissButton(el)) {
       const modalParent = el.closest('[id*="modal"], [id*="drawer"], [role="dialog"], .col-span-full');
       const modalTitle = modalParent ? (this._extractHeading(modalParent) || modalParent.id) : 'Popup';
@@ -709,7 +711,7 @@ export class DOMScanner {
 
   _collectAllCandidateElements() {
     return this._querySelectorAllDeep(
-      'button, a, input, select, textarea, summary, section, article, [role], [data-tab], [data-carousel], h1, h2, h3, h4'
+      'button, a, input, select, textarea, summary, iframe, section, article, [role], [data-tab], [data-carousel], h1, h2, h3, h4'
     );
   }
 }

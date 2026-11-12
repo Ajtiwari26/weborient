@@ -1,11 +1,10 @@
 /**
- * WebOrient by DeployMate: Multi-Tenant Voice Co-Pilot & Shadow DOM SDK (`src/sdk/weborient.js` v0.6.0)
+ * WebOrient by DeployMate: Multi-Tenant Voice Co-Pilot & Shadow DOM SDK (`src/sdk/weborient.js` v1.0.0)
  * - 1-Line Embed Ready (`<script async src="..." data-site-key="wo_live_..." data-theme="signal" data-lang="en-IN">`)
- * - Full-Page, Popup, Modal, Drawer, Banner & Close-Button (`X`) Auto-Indexing via Live `MutationObserver`
- * - Strict Showing-vs-Saying Language Synchronization:
- *   Detects & locks user language (`en-IN`, `hinglish`, `hi-IN`, `es-ES`, `fr-FR`), records persistent
- *   agent notes, updates the Shadow DOM language badge, and synchronizes the floating Ghost Cursor
- *   coachmark badge (`explanation`) with the exact language and phrasing the agent is speaking!
+ * - 3-Stage "VIP + Local Secretary" VAD Gate + 600ms Pre-Roll Ring Buffer + Auto-Wake from Hibernation
+ * - Mandatory Two-Lock Form Submit Confirmation (`requireSubmitConfirmation: true` by default + On-Screen Confirm Pill)
+ * - Progressive Lazy-Load Viewport Scroll Fallback when target selector is offscreen/unmounted
+ * - Granular DOM Action Audit Log (`domEventLogs`) & Partial Lead Auto-Capture (`formFacts`) synced to Relay & MongoDB
  */
 import { GhostCursor } from './ghost-cursor.js';
 import { DOMScanner } from './dom-scanner.js';
@@ -41,7 +40,7 @@ export class WebOrient {
       cursorStyle: 'deploymate-signal',
       defaultLanguage: null,
       manifestUrl: null,
-      requireSubmitConfirmation: false,
+      requireSubmitConfirmation: true, // Enforced by default for production form safety!
       autoMountLauncher: false,
       onEvent: null
     }, options);
@@ -73,6 +72,7 @@ export class WebOrient {
     this.client = null;
     this.manifest = null;
     this.remainingCredits = null;
+    this.secretarySavedSeconds = 0;
     this._modelSpeechBuffer = '';
     this._lastAutoGroundedSelector = null;
     this._lastExplicitToolTime = 0;
@@ -113,12 +113,6 @@ export class WebOrient {
     } catch (_) {}
   }
 
-  /**
-   * Watches the host website for dynamically opened popups, modals, drawers, banners,
-   * lazy-loaded React routes (`React.lazy` + Framer Motion), and `history.pushState`/`replaceState`
-   * transitions so newly rendered buttons (like 'Sound on' / 'Keep it silent' on `/contact`)
-   * and Close ('X') buttons are indexed automatically!
-   */
   _startLiveDomObserver() {
     if (typeof window === 'undefined' || typeof MutationObserver === 'undefined') return;
 
@@ -165,7 +159,6 @@ export class WebOrient {
       setTimeout(checkDomDelta, 1050);
     };
 
-    // Hook history.pushState & history.replaceState so React Router / Next.js SPA navigations are always caught
     if (!window.__weborientHistoryHooked) {
       window.__weborientHistoryHooked = true;
       const origPushState = window.history.pushState;
@@ -213,10 +206,6 @@ export class WebOrient {
     window.addEventListener('hashchange', triggerMultiStageRouteScan);
   }
 
-  /**
-   * Synchronizes UI language badge and broadcasts an immediate language lock directive
-   * to the active Gemini Live session whenever user language is detected or changed.
-   */
   _handleLanguageChange(langCfg, prevLang) {
     const shadowRoot = this.cursor?.shadowRoot;
     if (shadowRoot) {
@@ -234,9 +223,6 @@ export class WebOrient {
     if (lightSelect && lightSelect.value !== langCfg.code) {
       lightSelect.value = langCfg.code;
     }
-
-    // Silent language handling: language change is tracked in session memory and tool responses;
-    // do not send text prompts here so the model does not announce language switches aloud.
 
     this._emit('languageChange', langCfg);
   }
@@ -271,9 +257,6 @@ export class WebOrient {
     }
   }
 
-  /**
-   * Connects microphone audio to the DeployMate Multi-Tenant Relay & Gemini Live Model
-   */
   async start(options = {}) {
     const endpoint = this.options.endpoint || this.memory.state.liveEndpoint || getDefaultRelayEndpoint();
     this.options.endpoint = endpoint;
@@ -286,44 +269,81 @@ export class WebOrient {
       `&sessionId=${encodeURIComponent(this.memory.state.sessionId)}` +
       `&lang=${encodeURIComponent(this.memory.state.userLanguage || this.options.defaultLanguage || 'en-IN')}`;
 
-    this.client = new LiveClient({
-      endpoint: wsUrl,
-      onToolCall: (callsOrName, args, callId) => {
-        if (Array.isArray(callsOrName)) {
-          return this.handleToolCallBatch(callsOrName);
-        }
-        return this.handleToolCall(callsOrName, args, callId);
-      },
-      onStatusChange: (status) => {
-        console.log(`[WebOrient] Status: ${status}`);
-        this._syncShadowWidgetState(status === 'connected', 'idle');
-        this._emit('status', { status });
-      },
-      onTranscript: (text, role) => {
-        this.memory.appendTranscript(role, text);
-        if (role === 'model') {
-          this._autoGroundFromModelSpeech(text);
-        }
-        this._syncShadowWidgetState(true, role === 'model' ? 'speaking' : 'listening');
-        this._emit('transcript', { text, role });
-      },
-      onPlaybackChange: (isPlaying) => {
-        if (!isPlaying) {
+    if (!this.client) {
+      this.client = new LiveClient({
+        endpoint: wsUrl,
+        onToolCall: (callsOrName, args, callId) => {
+          if (Array.isArray(callsOrName)) {
+            return this.handleToolCallBatch(callsOrName);
+          }
+          return this.handleToolCall(callsOrName, args, callId);
+        },
+        onStatusChange: (status) => {
+          console.log(`[WebOrient] Status: ${status}`);
+          if (status === 'hibernating') {
+            this._syncShadowWidgetState(true, 'hibernating');
+          } else {
+            this._syncShadowWidgetState(status === 'connected', 'idle');
+          }
+          this._emit('status', { status });
+        },
+        onVadStateChange: async (vadState, meta = {}) => {
+          this.secretarySavedSeconds = meta.savedSeconds || this.secretarySavedSeconds;
+          if (vadState === 'secretary_hold') {
+            this._syncShadowWidgetState(true, 'secretary_hold');
+          } else if (vadState === 'hibernating') {
+            this._syncShadowWidgetState(true, 'hibernating');
+          } else if (vadState === 'wake_from_hibernation') {
+            if (this._isWaking) return;
+            this._isWaking = true;
+            this._syncShadowWidgetState(true, 'connecting');
+            try {
+              await this.start({ isRestore: true, flushAudioChunks: meta.bufferedChunks || [] });
+            } catch (err) {
+              console.warn('[WebOrient] Auto-wake from hibernation failed:', err);
+              if (this.client) this.client.vadState = 'hibernating';
+              this._syncShadowWidgetState(true, 'hibernating');
+            } finally {
+              this._isWaking = false;
+            }
+          } else {
+            this._syncShadowWidgetState(true, 'listening');
+          }
+          this._emit('vadState', { vadState, ...meta });
+        },
+        onCreditUpdate: (creditInfo) => {
+          this.remainingCredits = creditInfo.remainingMinutes;
+          this.secretarySavedSeconds = creditInfo.secretarySavedSeconds ?? this.secretarySavedSeconds;
+          this._emit('creditUpdate', creditInfo);
+        },
+        onTranscript: (text, role) => {
+          this.memory.appendTranscript(role, text);
+          if (role === 'model') {
+            this._autoGroundFromModelSpeech(text);
+          }
+          this._syncShadowWidgetState(true, role === 'model' ? 'speaking' : 'listening');
+          this._emit('transcript', { text, role });
+        },
+        onPlaybackChange: (isPlaying) => {
+          if (!isPlaying) {
+            this._modelSpeechBuffer = '';
+            this._syncShadowWidgetState(Boolean(this.client), 'listening');
+          } else {
+            this._syncShadowWidgetState(true, 'speaking');
+          }
+        },
+        onInterrupted: () => {
           this._modelSpeechBuffer = '';
-          this._syncShadowWidgetState(Boolean(this.client), 'listening');
-        } else {
-          this._syncShadowWidgetState(true, 'speaking');
+          this.cursor.cancelActiveActions();
+          this._syncShadowWidgetState(true, 'listening');
+          this._emit('interrupted', {});
         }
-      },
-      onInterrupted: () => {
-        this._modelSpeechBuffer = '';
-        this.cursor.cancelActiveActions();
-        this._syncShadowWidgetState(true, 'listening');
-        this._emit('interrupted', {});
-      }
-    });
+      });
+    } else {
+      this.client.endpoint = wsUrl;
+    }
 
-    await this.client.connect();
+    await this.client.connect({ flushAudioChunks: options.flushAudioChunks || [] });
     this.memory.setLiveSessionStatus(true, endpoint);
     this._syncShadowWidgetState(true, 'listening');
 
@@ -344,8 +364,8 @@ export class WebOrient {
       (activePopups.length > 0 ? `[ACTIVE POPUPS / MODALS / DRAWERS ON SCREEN]:\n${JSON.stringify(activePopups)}\n` : '') +
       `[CURRENT PAGE SECTIONS ("${document.title}" - ${initialSnapshot.url})]:\n` +
       `${JSON.stringify((pageContent.matchingSections || []).map(s => ({ selector: s.selector, heading: s.heading, summary: (s.summary || '').slice(0, 180) })))}\n` +
-      `[ALL INDEXED BUTTONS, INPUTS, BANNERS & CLOSE ('X') CONTROLS ON PAGE (${initialElements.length} items)]:\n` +
-      `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false })))}` +
+      `[ALL INDEXED BUTTONS, INPUTS, IFRAMES, BANNERS & CLOSE ('X') CONTROLS ON PAGE (${initialElements.length} items)]:\n` +
+      `${JSON.stringify(initialElements.map(e => ({ selector: e.selector, label: e.label, tag: e.tag, type: e.type, section: e.section, isCloseButton: e.isCloseButton || false, isIframeEmbed: e.isIframeEmbed || false })))}` +
       (isRestore
         ? ''
         : `\n\n[SESSION START — SPEAK FIRST NOW]: A visitor just connected to WebOrient on ${document.title || 'DeployMate'}. Do NOT wait for them to say hello! Speak aloud right now with a warm, friendly 1-2 sentence welcome (introduce yourself as WebOrient on DeployMate, mention you can guide them around the website with the Ghost Cursor, and suggest 1 or 2 things to explore like testing the live voice agent, WhatsApp CRM, or calculating ROI savings). Never mention what language you are speaking—just speak naturally and pause to follow the user's lead!`);
@@ -365,7 +385,6 @@ export class WebOrient {
     this._modelSpeechBuffer = `${this._modelSpeechBuffer} ${chunk}`.slice(-280);
     const spokenCaption = this._getCleanSpokenCaption(this._modelSpeechBuffer);
 
-    // Keep the active Ghost Cursor coachmark tooltip synchronized with what the agent is currently saying!
     if (this.cursor.activeTarget && spokenCaption.length >= 12) {
       this.cursor.updateActiveExplanation(spokenCaption);
     }
@@ -386,12 +405,25 @@ export class WebOrient {
         title: match.title,
         explanation: badgeToDisplay
       });
+      this.memory.recordDomEvent({
+        tool: 'auto_ground_speech',
+        selector: match.selector,
+        label: match.title,
+        explanation: badgeToDisplay,
+        success: true
+      });
       this._emit('autoGrounded', { selector: match.selector, title: match.title, explanation: badgeToDisplay });
     }
   }
 
   async orientTopic(todoOrQuery) {
     if (!todoOrQuery) return;
+    if (this.client && this.client.vadState === 'hibernating') {
+      await this.start({ isRestore: true });
+    } else if (this.client) {
+      this.client.markActivity('orient_topic');
+    }
+
     const currentFile = window.location.pathname.split('/').pop() || window.location.pathname || '/';
 
     if (typeof todoOrQuery === 'object' && todoOrQuery.selector) {
@@ -441,11 +473,6 @@ export class WebOrient {
     this.memory.setPendingNavigationActions(actions);
   }
 
-  /**
-   * Processes a batch of 1 or more Gemini tool calls and returns a single synchronized
-   * `functionResponses` payload in <40ms for visual moves so Gemini starts speaking audio
-   * AT THE EXACT SAME MOMENT the Ghost Cursor glides on screen (zero silent multi-callback lag!).
-   */
   async handleToolCallBatch(calls = []) {
     if (!Array.isArray(calls) || calls.length === 0) return [];
     const responses = [];
@@ -484,6 +511,19 @@ export class WebOrient {
     return this._visualQueue;
   }
 
+  _isSubmitButton(el) {
+    if (!el || !(el instanceof Element)) return false;
+    if (el.type === 'submit' || el.hasAttribute('data-confirm-required')) return true;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'button' || (tag === 'input' && el.type === 'button') || el.getAttribute('role') === 'button') {
+      const txt = `${el.innerText || el.value || ''} ${el.getAttribute('aria-label') || ''}`.toLowerCase();
+      if (/\b(submit|pay now|place order|confirm booking|complete order|send request|send message|confirm & submit)\b/i.test(txt)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   async handleToolCall(name, args = {}, callId = null, options = {}) {
     console.log(`[WebOrient] Executing Tool Call: ${name}`, args);
     this._lastExplicitToolTime = Date.now();
@@ -500,9 +540,19 @@ export class WebOrient {
       switch (name) {
         case 'show_and_describe':
         case 'move_and_highlight': {
-          const targetEl = this.scanner.resolveElement(args.selector);
+          let targetEl = this.scanner.resolveElement(args.selector);
+          // Progressive lazy-load viewport scroll fallback only when page still has room to scroll below
+          if (!targetEl && typeof window !== 'undefined' && !options.skipAnimation) {
+            const nearBottom = (window.scrollY + window.innerHeight) >= (document.documentElement.scrollHeight - 24);
+            if (!nearBottom) {
+              await this.cursor.scroll('down', null, 'half', 'Scanning page...');
+              await this._waitForDOMSettle(100);
+              targetEl = this.scanner.resolveElement(args.selector);
+            }
+          }
+
           if (!targetEl) {
-            result = { success: false, elementFound: false, error: `Element not found: ${args.selector}` };
+            result = { success: false, elementFound: false, selector: args.selector, error: `Element not found: ${args.selector}` };
           } else if (options.skipAnimation) {
             this.memory.markOriented({ selector: args.selector, title: args.selector, explanation });
             result = {
@@ -541,20 +591,35 @@ export class WebOrient {
 
         case 'click_element': {
           const el = this.scanner.resolveElement(args.selector);
-          const isSubmit = el && (
-            el.type === 'submit' ||
-            el.hasAttribute('data-confirm-required')
-          );
+          const isSubmit = el && this._isSubmitButton(el);
 
           if (isSubmit && this.options.requireSubmitConfirmation && !args.confirmed) {
             await this.cursor.moveToElement(el, true, explanation || 'Confirm submit');
+            this.cursor.showSubmitConfirmationPrompt(
+              el,
+              () => {
+                this.memory.capturePartialFormFact('submitted', 'true', true);
+                if (this.client) {
+                  this.client.sendText('[USER CONFIRMED & SUBMITTED ON SCREEN]: The visitor clicked the on-screen Confirm & Submit button.', { turnComplete: false });
+                }
+                this.handleToolCall('click_element', { ...args, confirmed: true });
+              },
+              () => {
+                if (this.client) {
+                  this.client.sendText('[USER CANCELLED SUBMIT]: The user clicked Cancel on the submit confirmation prompt.', { turnComplete: false });
+                }
+              }
+            );
             result = {
               success: true,
               requiresConfirmation: true,
               selector: args.selector,
-              message: 'Moved cursor to submit button. Ask user to confirm before calling click_element with confirmed=true.'
+              label: el ? this.scanner._getAccessibleLabel(el) : args.selector,
+              message: 'Moved cursor to submit button and displayed on-screen [Confirm & Submit / Cancel] bar. Ask the user to verbally confirm or click Confirm on screen before calling click_element with confirmed=true.'
             };
           } else if (fastAck && el) {
+            this.cursor.hideSubmitConfirmationPrompt();
+            if (isSubmit) this.memory.capturePartialFormFact('submitted', 'true', true);
             this.memory.markOriented({ selector: args.selector, title: explanation || `Clicked ${args.selector}` });
             deferredVisualTask = true;
             this._enqueueVisualTask(() => this.cursor.click(el, explanation));
@@ -563,9 +628,12 @@ export class WebOrient {
               elementFound: true,
               action: 'click_element',
               selector: args.selector,
+              label: this.scanner._getAccessibleLabel(el) || args.selector,
               audioSyncDirective: 'SPEAK_ALOUD_NOW: The Ghost Cursor is now clicking this element. Confirm the click aloud to the user right now!'
             };
           } else {
+            this.cursor.hideSubmitConfirmationPrompt();
+            if (isSubmit) this.memory.capturePartialFormFact('submitted', 'true', true);
             result = await this.cursor.click(args.selector, explanation);
             this.memory.markOriented({ selector: args.selector, title: explanation || `Clicked ${args.selector}` });
           }
@@ -574,11 +642,15 @@ export class WebOrient {
 
         case 'fill_form_field':
           result = await this.cursor.typeIntoField(args.selector, args.value ?? '', 22, explanation);
+          this.memory.capturePartialFormFact(result.fieldName || args.selector, args.value ?? '');
           this.memory.markOriented({ selector: args.selector, title: explanation || `Filled ${args.selector}` });
           break;
 
         case 'fill_form_batch':
           result = await this.cursor.fillFormBatch(args.fields || [], explanation);
+          for (const f of args.fields || []) {
+            if (f && f.selector) this.memory.capturePartialFormFact(f.selector, f.value ?? '');
+          }
           this.memory.markOriented({ selector: args.fields?.[0]?.selector || 'form', title: explanation || `Batch filled ${result.filledCount} fields` });
           break;
 
@@ -589,6 +661,7 @@ export class WebOrient {
             result = {
               success: true,
               action: 'scroll_page',
+              selector: args.targetSelector || `scroll:${args.direction || 'down'}`,
               direction: args.direction || 'down',
               targetSelector: args.targetSelector || null,
               audioSyncDirective: 'SPEAK_ALOUD_NOW: Page is scrolling smoothly now. Speak aloud while scrolling!'
@@ -699,6 +772,16 @@ export class WebOrient {
       this._lastExplicitToolTime = Date.now();
     }
 
+    // Record DOM telemetry event for Client & Super-Admin Dashboards
+    const latestDomEvent = this.memory.recordDomEvent({
+      tool: name,
+      selector: args.selector || args.targetSelector || args.path || (args.fields?.[0]?.selector) || 'page',
+      label: result.label || args.explanation || null,
+      explanation: explanation || null,
+      success: result.success !== false,
+      error: result.error || null
+    });
+
     if (!fastAck) {
       await this._waitForDOMSettle(120);
     }
@@ -707,14 +790,31 @@ export class WebOrient {
     const doneTodos = this.memory.state.todoChecklist.filter(t => t.done).map(t => t.id);
     const pendingTodos = this.memory.state.todoChecklist.filter(t => !t.done).map(t => ({ id: t.id, page: t.page, selector: t.selector, title: t.title }));
     const langCfg = this.memory.getLanguageConfig();
+    const secretarySaved = this.client?.secretarySavedSeconds || this.secretarySavedSeconds || 0;
+    const lastSection = this.memory.state.lastSectionViewed || result.viewportSummary?.activeSection || null;
+
+    if (this.client && typeof this.client.sendTelemetry === 'function') {
+      this.client.sendTelemetry({
+        userLanguage: langCfg.code,
+        userGoal: this.memory.state.userIntent.goal,
+        interestedTier: this.memory.state.userIntent.interestedTier,
+        lastSectionViewed: lastSection,
+        secretarySavedSeconds: secretarySaved,
+        domEventLogs: (this.memory.state.domEventLogs || []).slice(-25),
+        partialLead: this.memory.state.formFacts || {}
+      });
+    }
 
     result.sessionMemoryDigest = {
       userLanguage: langCfg.code,
       userLanguageName: langCfg.name,
       languageNotes: this.memory.state.languageNotes || [],
       userGoal: this.memory.state.userIntent.goal,
+      interestedTier: this.memory.state.userIntent.interestedTier,
       completedTodoIds: doneTodos,
-      remainingTodos: pendingTodos.slice(0, 6)
+      remainingTodos: pendingTodos.slice(0, 6),
+      lastSectionViewed: lastSection,
+      latestDomEvent
     };
 
     if (this.client && callId) {
@@ -732,8 +832,10 @@ export class WebOrient {
 
     await this._manifestReadyPromise;
     const path = String(rawPath).trim();
+    if (/^(javascript|data|vbscript):/i.test(path)) {
+      return { success: false, error: 'Blocked unsafe URI scheme in navigate_route' };
+    }
 
-    // 1. If path is a CSS selector or hash on the current page, scroll & highlight it directly
     if (path.startsWith('#')) {
       const hashEl = document.querySelector(path);
       if (hashEl) {
@@ -744,7 +846,6 @@ export class WebOrient {
       }
     }
 
-    // 2. Check if there is an interactive SPA button/link on screen matching this route name (e.g. "Playground", "Start a project", "Book demo")
     const cleanKey = path.toLowerCase().replace(/^\/+|\/+$/g, '').replace(/\.html$/, '');
     if (!isWebOrientDemoSite() && cleanKey) {
       const candidateLinkOrBtn = Array.from(document.querySelectorAll('a[href], header button, nav button, #hero button, footer button'))
@@ -922,10 +1023,6 @@ export class WebOrient {
     }
   }
 
-  /**
-   * Mounts the self-contained Siri-like Assist Pill + 5-Bar Soundwave + Active Language Badge +
-   * Right-Click Language Popover inside the isolated Shadow DOM (`#weborient-shadow-host`).
-   */
   _mountShadowAssistWidget() {
     const shadowRoot = this.cursor?.getOrCreateShadowRoot();
     if (!shadowRoot || shadowRoot.getElementById('wo-shadow-assist')) return;
@@ -1039,6 +1136,9 @@ export class WebOrient {
         .wo-dot.wo-listening {
           background: #34d399;
           animation: wo-pulse-dot 1.4s ease-in-out infinite;
+        }
+        .wo-dot.wo-hold {
+          background: #fbbf24;
         }
         .wo-dot.wo-speaking {
           background: ${this.options.themeColor};
@@ -1155,6 +1255,13 @@ export class WebOrient {
           } catch (_) {
             this._syncShadowWidgetState(false, 'offline');
           }
+        } else if (this.client.vadState === 'hibernating') {
+          this._syncShadowWidgetState(true, 'connecting');
+          try {
+            await this.start({ isRestore: true });
+          } catch (_) {
+            this._syncShadowWidgetState(false, 'offline');
+          }
         } else {
           this.stop();
         }
@@ -1179,15 +1286,29 @@ export class WebOrient {
 
     if (connected) {
       btn?.classList.add('wo-active');
-      mic.style.display = 'none';
-      wave.style.display = 'flex';
       if (state === 'speaking') {
+        mic.style.display = 'none';
+        wave.style.display = 'flex';
         sub.textContent = 'AI Co-Browsing...';
         if (dot) dot.className = 'wo-dot wo-speaking';
+      } else if (state === 'secretary_hold') {
+        mic.style.display = 'flex';
+        wave.style.display = 'none';
+        sub.textContent = 'Standby (0m burn · Speak)';
+        if (dot) dot.className = 'wo-dot wo-hold';
+      } else if (state === 'hibernating') {
+        mic.style.display = 'flex';
+        wave.style.display = 'none';
+        sub.textContent = 'Paused · Speak to wake';
+        if (dot) dot.className = 'wo-dot wo-hold';
       } else if (state === 'connecting') {
+        mic.style.display = 'none';
+        wave.style.display = 'flex';
         sub.textContent = 'Connecting...';
         if (dot) dot.className = 'wo-dot';
       } else {
+        mic.style.display = 'none';
+        wave.style.display = 'flex';
         sub.textContent = 'Listening Live...';
         if (dot) dot.className = 'wo-dot wo-listening';
       }
@@ -1215,6 +1336,7 @@ export class WebOrient {
     if (this.cursor) {
       this.cursor.hideSpeechBubble();
       this.cursor.hideSpotlight();
+      this.cursor.hideSubmitConfirmationPrompt();
     }
     this._syncShadowWidgetState(false, 'idle');
   }
@@ -1222,10 +1344,6 @@ export class WebOrient {
 
 export { SUPPORTED_LANGUAGES };
 
-/**
- * 1-Line Embed Auto-Bootstrap:
- * Works with both synchronous and `<script async src=".../weborient.js" data-site-key="wo_live_...">` tags!
- */
 if (typeof window !== 'undefined') {
   window.WebOrient = WebOrient;
 
@@ -1249,6 +1367,7 @@ if (typeof window !== 'undefined') {
         accentColor: scriptEl.dataset.accentColor || preset.accentColor,
         defaultLanguage: scriptEl.dataset.lang || 'en-IN',
         manifestUrl: scriptEl.dataset.manifest || null,
+        requireSubmitConfirmation: scriptEl.dataset.confirmSubmit !== 'false',
         autoMountLauncher: scriptEl.dataset.autoMount !== 'false'
       });
       window.weborient = window.weborientInstance;

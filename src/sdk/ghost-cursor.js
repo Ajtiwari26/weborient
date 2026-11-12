@@ -1,12 +1,11 @@
 /**
- * WebOrient Ghost Cursor & Deterministic UI Actuator (v0.5.0 — DeployMate Shadow DOM Edition)
+ * WebOrient Ghost Cursor & Deterministic UI Actuator (v1.0.0 — Inner Scroll, TouchEvent, Combobox & Two-Lock Submit Edition)
  * - Encapsulated inside an open ShadowRoot (`#weborient-shadow-host` on `document.documentElement`)
- *   so client website CSS (Tailwind/Bootstrap resets, body transforms) never distorts the cursor or spotlight
- * - DeployMate Signal (`#E6391E`) & Ink (`#0A0A0A`) Brutalist-Editorial Coachmark & Spotlight aesthetic
- * - True Cubic Bézier + Fitts's Law human-like 60fps cursor trajectory with tip hotspot offset
- * - Exact smooth scroll completion listener (`_smoothScrollTo`) so elements are 100% settled in center
- * - Cross-page cursor coordinate persistence (`weborient_cursor_pos_v5`)
- * - React/Vue/Angular compatible form filling (`HTMLInputElement.prototype.value` setter)
+ * - Inner Scroll Container Detection (`_getScrollableContainer` + `_smoothScrollContainerTo`) so modals,
+ *   split-pane dashboards, and `overflow-y: auto` containers scroll smoothly alongside `window`
+ * - TouchEvent + PointerEvent Carousel Swipe (`_animateSwipeGesture`) for Swiper.js, Embla, Slick & mobile sliders
+ * - Radix UI / Shadcn / MUI / HeadlessUI Portal Combobox support (`role="combobox"` -> click trigger -> select portal option)
+ * - Two-Lock On-Screen Submit Confirmation Bar (`showSubmitConfirmationPrompt`) inside Shadow DOM
  */
 
 const CURSOR_POS_STORAGE_KEY = 'weborient_cursor_pos_v5';
@@ -61,10 +60,6 @@ export class GhostCursor {
     } catch (_) {}
   }
 
-  /**
-   * Mounts or reuses `#weborient-shadow-host` on `document.documentElement` (`<html>`)
-   * with an open ShadowRoot so host website CSS rules can never collide with WebOrient UI.
-   */
   getOrCreateShadowRoot() {
     if (typeof document === 'undefined') return null;
     let host = document.getElementById('weborient-shadow-host');
@@ -102,7 +97,6 @@ export class GhostCursor {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     `;
 
-    // Spotlight Element Bounding Box (DeployMate Signal #E6391E crisp architectural frame)
     this.spotlight = document.createElement('div');
     this.spotlight.id = 'weborient-spotlight';
     this.spotlight.style.cssText = `
@@ -116,7 +110,6 @@ export class GhostCursor {
       z-index: 2147483645;
     `;
 
-    // Floating Explanation Coachmark / Tooltip (DeployMate Ink #0A0A0A + Signal #E6391E border)
     this.tooltip = document.createElement('div');
     this.tooltip.id = 'weborient-tooltip';
     this.tooltip.style.cssText = `
@@ -140,7 +133,25 @@ export class GhostCursor {
       z-index: 2147483646;
     `;
 
-    // Swipe Trail SVG Canvas
+    // Two-Lock On-Screen Form Submit Confirmation Pill
+    this.confirmModal = document.createElement('div');
+    this.confirmModal.id = 'weborient-submit-confirm';
+    this.confirmModal.style.cssText = `
+      position: fixed;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: #0A0A0A;
+      border: 2px solid ${this.primaryColor};
+      color: #FFFFFF;
+      font-family: 'Fira Code', ui-monospace, monospace;
+      font-size: 11px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
+      pointer-events: auto;
+      z-index: 2147483647;
+    `;
+
     this.trailSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     this.trailSvg.setAttribute('width', '100%');
     this.trailSvg.setAttribute('height', '100%');
@@ -161,7 +172,6 @@ export class GhostCursor {
     this.trailPath.style.transition = 'opacity 0.35s ease';
     this.trailSvg.appendChild(this.trailPath);
 
-    // Ghost Cursor Pointer (Tip hotspot at SVG (4, 3) aligned to (0, 0) via margin offset)
     this.cursor = document.createElement('div');
     this.cursor.id = 'weborient-cursor';
     this.cursor.innerHTML = `
@@ -189,6 +199,7 @@ export class GhostCursor {
     this.container.appendChild(this.trailSvg);
     this.container.appendChild(this.spotlight);
     this.container.appendChild(this.tooltip);
+    this.container.appendChild(this.confirmModal);
     this.container.appendChild(this.cursor);
     this.shadowRoot.appendChild(this.container);
 
@@ -200,13 +211,46 @@ export class GhostCursor {
   showSpeechBubble() {}
   hideSpeechBubble() {}
 
-  async performSpeakingGesture(el) {
-    if (!el || !document.body.contains(el)) return;
+  /**
+   * Renders an on-screen Two-Lock Submit Confirmation Bar above the target submit button
+   */
+  showSubmitConfirmationPrompt(el, onConfirm, onCancel) {
+    if (!this.confirmModal || !el) return;
     const rect = el.getBoundingClientRect();
-    const baseX = Math.max(16, Math.min(window.innerWidth - 24, rect.left + rect.width * 0.35));
-    const baseY = Math.max(16, Math.min(window.innerHeight - 24, rect.top + Math.min(48, rect.height * 0.4)));
-    await this.moveTo(baseX + 24, baseY - 6, 300);
-    await this.moveTo(baseX, baseY, 300);
+    const top = Math.max(16, rect.top - 56);
+    const left = Math.max(16, Math.min(window.innerWidth - 320, rect.left));
+
+    this.confirmModal.style.top = `${top}px`;
+    this.confirmModal.style.left = `${left}px`;
+    this.confirmModal.style.display = 'flex';
+    this.confirmModal.innerHTML = `
+      <span style="text-transform:uppercase;letter-spacing:0.1em;font-size:10px;">Confirm Submit?</span>
+      <button type="button" id="wo-confirm-submit-yes" style="background:${this.primaryColor};color:#FFF;border:none;padding:4px 10px;font-family:inherit;font-size:10px;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;font-weight:600;">✓ Confirm &amp; Submit</button>
+      <button type="button" id="wo-confirm-submit-no" style="background:transparent;color:#FFF;border:1px solid rgba(255,255,255,0.35);padding:4px 8px;font-family:inherit;font-size:10px;text-transform:uppercase;cursor:pointer;">✕ Cancel</button>
+    `;
+
+    const yesBtn = this.confirmModal.querySelector('#wo-confirm-submit-yes');
+    const noBtn = this.confirmModal.querySelector('#wo-confirm-submit-no');
+
+    if (yesBtn) {
+      yesBtn.onclick = () => {
+        this.hideSubmitConfirmationPrompt();
+        if (typeof onConfirm === 'function') onConfirm();
+      };
+    }
+    if (noBtn) {
+      noBtn.onclick = () => {
+        this.hideSubmitConfirmationPrompt();
+        if (typeof onCancel === 'function') onCancel();
+      };
+    }
+  }
+
+  hideSubmitConfirmationPrompt() {
+    if (this.confirmModal) {
+      this.confirmModal.style.display = 'none';
+      this.confirmModal.innerHTML = '';
+    }
   }
 
   _resolve(selectorOrElement) {
@@ -224,9 +268,71 @@ export class GhostCursor {
   }
 
   /**
-   * Deterministic smooth scroll that waits until window.scrollY reaches targetScrollY.
-   * Works seamlessly with both native browser scrolling AND custom smooth-scroll engines (Lenis / Locomotive).
+   * Finds the nearest inner scrollable container (`overflow-y: auto | scroll | overlay`)
+   * for SaaS dashboards, modals, drawers, and split-pane layouts where `window` doesn't scroll.
    */
+  _getScrollableContainer(el) {
+    if (!el || typeof window === 'undefined') return null;
+    let node = el.parentElement;
+    while (node && node !== document.body && node !== document.documentElement) {
+      const style = window.getComputedStyle(node);
+      const overflowY = (style.overflowY || style.overflow || '').toLowerCase();
+      if (/(auto|scroll|overlay)/.test(overflowY) && node.scrollHeight > node.clientHeight + 12) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * Smoothly scrolls an inner scrollable container to `targetScrollTop`
+   */
+  async _smoothScrollContainerTo(container, targetScrollTop, maxWaitMs = 480) {
+    if (!container) return;
+    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+    const clampedTarget = Math.max(0, Math.min(maxScroll, Math.round(targetScrollTop)));
+    const initialTop = container.scrollTop;
+    if (Math.abs(initialTop - clampedTarget) <= 6) return;
+
+    return new Promise(resolve => {
+      const startTime = performance.now();
+      const duration = Math.min(420, maxWaitMs);
+
+      const step = (now) => {
+        const progress = Math.min(1, (now - startTime) / duration);
+        const easeOut = 1 - Math.pow(1 - progress, 3);
+        container.scrollTop = Math.round(initialTop + (clampedTarget - initialTop) * easeOut);
+        this._syncSpotlightPosition();
+        if (progress < 1 && Math.abs(container.scrollTop - clampedTarget) > 2) {
+          requestAnimationFrame(step);
+        } else {
+          container.scrollTop = clampedTarget;
+          this._syncSpotlightPosition();
+          resolve();
+        }
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  /**
+   * Dynamically detects the height of any sticky or fixed top header on the host website
+   */
+  _getStickyHeaderInfo(targetEl) {
+    let header = document.querySelector('#global-site-header, header, [data-site-header]');
+    if (!header) {
+      const candidates = Array.from(document.querySelectorAll('nav, [role="banner"], div.fixed, div.sticky'));
+      header = candidates.find(c => {
+        const r = c.getBoundingClientRect();
+        return r.top <= 12 && r.height >= 36 && r.height <= 140 && r.width >= window.innerWidth * 0.5;
+      }) || null;
+    }
+    const isInsideHeader = Boolean(header && targetEl && header.contains(targetEl));
+    const headerHeight = header ? Math.max(0, Math.min(140, Math.round(header.getBoundingClientRect().bottom))) : 70;
+    return { header, isInsideHeader, headerHeight };
+  }
+
   async _smoothScrollTo(targetScrollY, maxWaitMs = 680) {
     const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     const clampedTarget = Math.max(0, Math.min(maxScroll, Math.round(targetScrollY)));
@@ -250,7 +356,6 @@ export class GhostCursor {
       const checkScroll = (now) => {
         const elapsed = now - startTime;
 
-        // If native smooth scroll was intercepted or blocked by a host scroll library after 95ms, switch to direct 60fps cubic-out tween
         if (!useManualTween && elapsed > 95 && Math.abs(window.scrollY - initialY) < 2) {
           useManualTween = true;
         }
@@ -306,9 +411,6 @@ export class GhostCursor {
     });
   }
 
-  /**
-   * Moves cursor along a human-like Cubic Bézier trajectory with Fitts's Law easing
-   */
   async moveTo(targetX, targetY, durationMs = 460) {
     if (this._rafId) {
       cancelAnimationFrame(this._rafId);
@@ -405,9 +507,7 @@ export class GhostCursor {
       return;
     }
 
-    const header = document.querySelector('#global-site-header, header, [data-site-header]');
-    const isInsideHeader = header && header.contains(this.activeTarget);
-    const headerBottom = (!isInsideHeader && header) ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
+    const { isInsideHeader, headerHeight: headerBottom } = this._getStickyHeaderInfo(this.activeTarget);
 
     const pad = 6;
     const safeTop = isInsideHeader ? Math.max(4, rect.top - pad) : Math.max(headerBottom + 4, rect.top - pad);
@@ -435,8 +535,7 @@ export class GhostCursor {
         </div>
       `;
 
-      // Smart boundary placement: Tooltip MUST NEVER touch or overlap the highlighted component or spotlight
-      const CLEARANCE = 22; // Strict safety buffer so tooltip never touches component boundary
+      const CLEARANCE = 22;
       const tooltipW = Math.min(380, Math.max(220, this.tooltip.offsetWidth || 280));
       const tooltipH = Math.max(34, this.tooltip.offsetHeight || 38);
 
@@ -447,18 +546,14 @@ export class GhostCursor {
       let leftPos = Math.max(16, Math.min(window.innerWidth - tooltipW - 16, safeLeft + (safeWidth - tooltipW) / 2));
 
       if (!isInsideHeader && spaceAbove >= tooltipH + CLEARANCE + 10) {
-        // Place strictly above component with clear boundary
         topPos = safeTop - tooltipH - CLEARANCE;
       } else if (spaceBelow >= tooltipH + CLEARANCE + 16) {
-        // Place strictly below component with clear boundary
         topPos = safeTop + safeHeight + CLEARANCE;
       } else {
-        // Component is tall or near viewport edges: dock cleanly at top safe boundary below header
         topPos = Math.max(headerBottom + 16, 20);
         leftPos = Math.max(16, Math.min(window.innerWidth - tooltipW - 20, window.innerWidth - tooltipW - 24));
       }
 
-      // Avoid collision with cursor pointer: if tooltip bounds cover current cursor hotspot, offset left
       if (
         this.currentPosition &&
         this.currentPosition.x >= leftPos - 12 &&
@@ -482,17 +577,11 @@ export class GhostCursor {
     }
   }
 
-  /**
-   * Resolves landmark sections, headers, or containers down to their ACTUAL substantive component
-   * (e.g., interactive tabs + code viewer, table, carousel, cards grid, form, sliders, or accordion)
-   * NEVER highlights or lands on title headers, H1/H2 tags, or page section banners!
-   */
   _resolveActualContent(el, explanation = '') {
     if (!el || !(el instanceof Element)) return el;
 
     const tag = el.tagName.toLowerCase();
 
-    // 0. If el itself is a heading tag or title container, immediately find the actual substantive widget
     if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'header' || tag === 'nav' || el.classList.contains('pricing-header') || el.classList.contains('grid-fine')) {
       const parentScope = el.closest('section, main, article, div.space-y-24, div.space-y-12, div.space-y-8') || el.parentElement;
       if (parentScope && parentScope !== el) {
@@ -508,7 +597,6 @@ export class GhostCursor {
     const isSection = tag === 'section' || tag === 'article' || tag === 'main' || (el.id && el.id.includes('section'));
     if (!isSection) return el;
 
-    // 1. Interactive Tabs / Framework Tabs / Workflow Tabs + Code/Content Viewer
     const tabWidget = el.querySelector('[role="tablist"], [data-tab-group]');
     if (tabWidget) {
       const tabsParent = tabWidget.closest('.space-y-6, .space-y-4, div:has(>[role="tablist"])') || tabWidget.parentElement;
@@ -518,49 +606,27 @@ export class GhostCursor {
       return tabWidget;
     }
 
-    // 2. Tables (e.g. 10-Tool API Reference Table, Latency Benchmark Table, Security Matrix, SLA)
     const tableContainer = el.querySelector('.overflow-x-auto, table');
-    if (tableContainer) {
-      return tableContainer;
-    }
+    if (tableContainer) return tableContainer;
 
-    // 3. Form (e.g. #contact-form)
     const form = el.querySelector('form');
-    if (form) {
-      return form;
-    }
+    if (form) return form;
 
-    // 4. Pricing Cards Grid / Feature Grid
     const cardsGrid = el.querySelector('#pricing-cards-grid, .pricing-grid, [data-plan="pro"], .grid:has(.pricing-card)');
-    if (cardsGrid) {
-      return cardsGrid;
-    }
+    if (cardsGrid) return cardsGrid;
 
-    // 5. Interactive Calculator Sliders & Result Card
     const calcGrid = el.querySelector('#roi-savings-calculator, .grid:has(input[type="range"]), .grid:has(#roi-result-card)');
-    if (calcGrid) {
-      return calcGrid;
-    }
+    if (calcGrid) return calcGrid;
 
-    // 6. Carousel / Case-Study Showcase
-    const carousel = el.querySelector('[data-carousel], .carousel');
-    if (carousel) {
-      return carousel;
-    }
+    const carousel = el.querySelector('[data-carousel], .carousel, .swiper, .embla');
+    if (carousel) return carousel;
 
-    // 7. Telemetry / Metric strips
     const telemetryStrip = el.querySelector('#telemetry-strip, .grid:has(>div>div.text-2xl)');
-    if (telemetryStrip) {
-      return telemetryStrip;
-    }
+    if (telemetryStrip) return telemetryStrip;
 
-    // 8. Accordion / FAQ Details
     const faqContainer = el.querySelector('.space-y-3:has(details), details');
-    if (faqContainer) {
-      return faqContainer;
-    }
+    if (faqContainer) return faqContainer;
 
-    // 9. First substantive content following the title header block (unwrapping single relative z-10 containers)
     const contentScope = el.querySelector(':scope > .relative.z-10:not(.grid)') || el;
     const headerBlock = contentScope.querySelector(
       ':scope > div.mb-14:has(h1, h2), :scope > div.mb-16:has(h1, h2), :scope > div.space-y-2:has(h1), :scope > div.space-y-1:has(h2), :scope > div.space-y-4:has(h2), :scope > .pricing-header, :scope > header'
@@ -585,6 +651,7 @@ export class GhostCursor {
       role === 'button' ||
       role === 'tab' ||
       role === 'switch' ||
+      role === 'combobox' ||
       role === 'link' ||
       (rect.width <= 340 && rect.height <= 95);
 
@@ -604,7 +671,7 @@ export class GhostCursor {
       };
     }
 
-    const activeSlide = el.querySelector?.('[data-carousel-slide]:not(.hidden), .carousel-slide:not(.hidden)');
+    const activeSlide = el.querySelector?.('[data-carousel-slide]:not(.hidden), .carousel-slide:not(.hidden), .swiper-slide-active');
     if (activeSlide) {
       const slideRect = activeSlide.getBoundingClientRect();
       return {
@@ -649,14 +716,23 @@ export class GhostCursor {
     }
 
     const el = this._resolveActualContent(rawEl, explanation);
-
-    const header = document.querySelector('#global-site-header, header, [data-site-header]');
-    const isInsideHeader = header && header.contains(el);
-    const headerHeight = header ? Math.round(header.getBoundingClientRect().height) : 70;
+    const { isInsideHeader, headerHeight } = this._getStickyHeaderInfo(el);
     const viewportHeight = window.innerHeight;
     const usableHeight = Math.max(200, viewportHeight - headerHeight);
 
     if (!isInsideHeader) {
+      // 1. Check if element lives inside an inner scrollable container (modals, drawers, dashboards)
+      const innerContainer = this._getScrollableContainer(el);
+      if (innerContainer) {
+        const cRect = innerContainer.getBoundingClientRect();
+        const eRect = el.getBoundingClientRect();
+        const relativeTop = eRect.top - cRect.top + innerContainer.scrollTop;
+        const desiredOffset = Math.max(24, Math.round((cRect.height - Math.min(eRect.height, cRect.height * 0.7)) / 2));
+        const targetContainerScroll = Math.max(0, relativeTop - desiredOffset);
+        await this._smoothScrollContainerTo(innerContainer, targetContainerScroll);
+      }
+
+      // 2. Also ensure the element is centered within the main window viewport
       const initialRect = el.getBoundingClientRect();
       let targetTopInViewport;
       if (initialRect.height < usableHeight) {
@@ -694,8 +770,9 @@ export class GhostCursor {
       success: true,
       elementFound: true,
       element: el,
+      isIframeEmbed: el.tagName === 'IFRAME',
       selector: typeof selector === 'string' ? selector : (el.id ? `#${el.id}` : el.tagName.toLowerCase()),
-      label: el.innerText?.trim()?.slice(0, 80) || el.getAttribute('aria-label') || null,
+      label: el.innerText?.trim()?.slice(0, 80) || el.getAttribute('aria-label') || el.getAttribute('title') || null,
       explanation: explanation || null
     };
   }
@@ -760,6 +837,19 @@ export class GhostCursor {
       return { success: false, elementFound: false, error: `Element not found: ${selector}` };
     }
 
+    // Cross-origin iframe safety: spotlight and guide verbally instead of failing
+    if (el.tagName === 'IFRAME') {
+      const res = await this.moveToElement(el, true, explanation || 'Interactive Embed');
+      return {
+        success: true,
+        elementFound: true,
+        isIframeEmbed: true,
+        action: 'click_element',
+        selector: typeof selector === 'string' ? selector : 'iframe',
+        message: 'Spotlighted embedded iframe widget. Guide the user to click inside the embedded frame.'
+      };
+    }
+
     const res = await this.moveToElement(el, true, explanation);
     if (!res.success) return res;
 
@@ -784,6 +874,7 @@ export class GhostCursor {
       elementFound: true,
       action: 'click_element',
       selector: typeof selector === 'string' ? selector : (el.id ? `#${el.id}` : el.tagName.toLowerCase()),
+      label: el.innerText?.trim()?.slice(0, 80) || el.getAttribute('aria-label') || null,
       newState: {
         ariaExpanded: el.getAttribute('aria-expanded'),
         ariaSelected: el.getAttribute('aria-selected'),
@@ -793,10 +884,6 @@ export class GhostCursor {
     };
   }
 
-  /**
-   * Live-updates the floating coachmark badge text above the currently spotlighted component
-   * so what the Ghost Cursor SHOWS on screen stays 100% synchronized with what the agent SAYS aloud.
-   */
   updateActiveExplanation(explanation) {
     if (!explanation || !this.activeTarget || !document.body.contains(this.activeTarget)) return;
     this.activeExplanation = String(explanation).trim().slice(0, 140);
@@ -818,6 +905,31 @@ export class GhostCursor {
 
     const tag = el.tagName.toLowerCase();
     const type = (el.type || '').toLowerCase();
+    const role = (el.getAttribute('role') || '').toLowerCase();
+
+    // Support Radix UI / Shadcn / MUI / HeadlessUI Portal Comboboxes (`role="combobox"` or `aria-haspopup="listbox"`)
+    if (role === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox') {
+      await this.playClickAnimation();
+      el.click();
+      await this._sleep(140);
+      const targetStr = String(normalizedValue).toLowerCase().trim();
+      const portalOptions = Array.from(document.querySelectorAll('[role="option"], [data-radix-collection-item]'));
+      const matchedOpt = portalOptions.find(opt => {
+        const txt = (opt.innerText || '').toLowerCase().trim();
+        return txt === targetStr || txt.includes(targetStr) || targetStr.includes(txt);
+      });
+      if (matchedOpt) {
+        await this.click(matchedOpt, explanation || matchedOpt.innerText.trim());
+        return {
+          success: true,
+          elementFound: true,
+          action: 'fill_form_field',
+          selector: typeof selector === 'string' ? selector : 'combobox',
+          currentValue: matchedOpt.innerText.trim(),
+          valid: true
+        };
+      }
+    }
 
     if (tag === 'select') {
       await this.playClickAnimation();
@@ -928,6 +1040,21 @@ export class GhostCursor {
     const distanceRatio = amount === 'small' ? 0.35 : (amount === 'half' ? 0.5 : 0.75);
     const scrollAmount = Math.round(window.innerHeight * distanceRatio);
 
+    // Check if an active modal/drawer or inner scrollable main container should be scrolled first
+    const activeContainer = this.activeTarget ? this._getScrollableContainer(this.activeTarget) : null;
+    if (activeContainer) {
+      const containerDelta = Math.round(activeContainer.clientHeight * distanceRatio);
+      const nextTop = dir === 'top' ? 0 : dir === 'bottom' ? activeContainer.scrollHeight : dir === 'up' ? activeContainer.scrollTop - containerDelta : activeContainer.scrollTop + containerDelta;
+      await this._smoothScrollContainerTo(activeContainer, nextTop);
+      return {
+        success: true,
+        action: 'scroll_page',
+        direction: dir,
+        scrolledContainer: activeContainer.id || activeContainer.tagName.toLowerCase(),
+        scrollY: Math.round(activeContainer.scrollTop)
+      };
+    }
+
     let nextScrollY = window.scrollY;
     if (dir === 'top') {
       nextScrollY = 0;
@@ -958,7 +1085,6 @@ export class GhostCursor {
 
     const act = String(action || 'next').toLowerCase();
 
-    // 1. Range Slider
     const rangeInput = (el.tagName === 'INPUT' && el.type === 'range')
       ? el
       : el.querySelector?.('input[type="range"]');
@@ -979,7 +1105,6 @@ export class GhostCursor {
       return await this.typeIntoField(rangeInput, String(nextVal), 22, explanation);
     }
 
-    // 2. Toggle Switch or Checkbox
     const switchEl = (el.getAttribute('role') === 'switch' || (el.tagName === 'INPUT' && el.type === 'checkbox'))
       ? el
       : el.querySelector?.('[role="switch"], input[type="checkbox"]');
@@ -987,7 +1112,6 @@ export class GhostCursor {
       return await this.click(switchEl, explanation || null);
     }
 
-    // 3. Tablist / Tabs
     if (
       el.getAttribute('role') === 'tablist' ||
       el.getAttribute('role') === 'tab' ||
@@ -1026,10 +1150,9 @@ export class GhostCursor {
       }
     }
 
-    // 4. Carousel / Swipeable Container
     const carouselBox = el.hasAttribute('data-carousel')
       ? el
-      : (el.querySelector('[data-carousel]') || el);
+      : (el.querySelector('[data-carousel], .swiper, .embla, .slick-slider') || el);
 
     await this.moveToElement(carouselBox, true, explanation || null);
     const rect = carouselBox.getBoundingClientRect();
@@ -1042,8 +1165,8 @@ export class GhostCursor {
 
     const searchScope = carouselBox.closest('section') || carouselBox.parentElement || document;
     const btnSelector = isNext
-      ? '[data-carousel-next], .carousel-next, [aria-label*="Next" i]'
-      : '[data-carousel-prev], .carousel-prev, [aria-label*="Prev" i]';
+      ? '[data-carousel-next], .carousel-next, .swiper-button-next, .embla__button--next, .slick-next, [aria-label*="Next" i]'
+      : '[data-carousel-prev], .carousel-prev, .swiper-button-prev, .embla__button--prev, .slick-prev, [aria-label*="Prev" i]';
     const navBtn = carouselBox.querySelector(btnSelector) || searchScope.querySelector(btnSelector);
 
     if (targetValue !== null && targetValue !== undefined && targetValue !== '') {
@@ -1056,7 +1179,7 @@ export class GhostCursor {
 
     this._syncSpotlightPosition();
 
-    const slides = Array.from(carouselBox.querySelectorAll('[data-carousel-slide], .carousel-slide'));
+    const slides = Array.from(carouselBox.querySelectorAll('[data-carousel-slide], .carousel-slide, .swiper-slide, .embla__slide'));
     const activeSlide = slides.find(s => !s.classList.contains('hidden') && s.getAttribute('aria-hidden') !== 'true');
 
     return {
@@ -1068,6 +1191,10 @@ export class GhostCursor {
     };
   }
 
+  /**
+   * Dispatches both PointerEvent (`pointerType: 'touch'`) AND W3C TouchEvent (`touchstart`/`touchmove`/`touchend`)
+   * so Swiper.js, Embla, Slick, and mobile touch carousels respond reliably!
+   */
   async _animateSwipeGesture(el, startX, startY, endX, endY) {
     await this.moveTo(startX, startY, 240);
 
@@ -1079,24 +1206,53 @@ export class GhostCursor {
     const pointer = this.cursor?.querySelector('.weborient-pointer');
     if (pointer) pointer.style.transform = 'scale(0.9)';
 
-    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: startX, clientY: startY }));
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: startX, clientY: startY }));
+    const dispatchTouch = (type, x, y) => {
+      try {
+        if (typeof Touch !== 'undefined' && typeof TouchEvent !== 'undefined') {
+          const touchObj = new Touch({
+            identifier: 1,
+            target: el,
+            clientX: x,
+            clientY: y,
+            pageX: x + window.scrollX,
+            pageY: y + window.scrollY,
+            radiusX: 11.5,
+            radiusY: 11.5,
+            rotationAngle: 0,
+            force: 1
+          });
+          el.dispatchEvent(new TouchEvent(type, {
+            cancelable: true,
+            bubbles: true,
+            touches: type === 'touchend' ? [] : [touchObj],
+            targetTouches: type === 'touchend' ? [] : [touchObj],
+            changedTouches: [touchObj]
+          }));
+        }
+      } catch (_) {}
+    };
+
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, pointerType: 'touch', isPrimary: true, buttons: 1, clientX: startX, clientY: startY }));
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, buttons: 1, clientX: startX, clientY: startY }));
+    dispatchTouch('touchstart', startX, startY);
 
     const steps = 8;
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
       const cx = startX + (endX - startX) * t;
       const cy = startY + (endY - startY) * t;
-      el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: cx, clientY: cy }));
-      el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: cx, clientY: cy }));
+      el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, pointerType: 'touch', isPrimary: true, buttons: 1, clientX: cx, clientY: cy }));
+      el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, buttons: 1, clientX: cx, clientY: cy }));
+      dispatchTouch('touchmove', cx, cy);
     }
 
     await this.moveTo(endX, endY, 320);
 
     if (pointer) pointer.style.transform = 'scale(1)';
 
-    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: endX, clientY: endY }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: endX, clientY: endY }));
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: endX, clientY: endY }));
+    dispatchTouch('touchend', endX, endY);
 
     if (this.trailPath) {
       setTimeout(() => {
@@ -1158,6 +1314,7 @@ export class GhostCursor {
       elementFound: true,
       action: 'fill_form_field',
       selector: typeof selector === 'string' ? selector : (el.id ? `#${el.id}` : el.tagName.toLowerCase()),
+      fieldName: el.name || el.id || el.getAttribute('placeholder') || '',
       currentValue: el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value,
       valid,
       validationMessage
@@ -1195,6 +1352,7 @@ export class GhostCursor {
 
   destroy() {
     this.cancelActiveActions();
+    this.hideSubmitConfirmationPrompt();
     if (this._boundSyncPosition) {
       window.removeEventListener('scroll', this._boundSyncPosition, { capture: true });
       window.removeEventListener('resize', this._boundSyncPosition);
