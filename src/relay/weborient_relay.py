@@ -804,6 +804,7 @@ def get_or_create_session_memory(session_id: str, site_key: str, site_id: str, l
             "status": "active",
             "terminationReason": None,
             "reconnectCount": 0,
+            "latestDomSnapshot": "",
             "startedAt": now_iso,
             "updatedAt": now_iso
         }
@@ -832,6 +833,37 @@ def persist_session_memory(session_id: str):
             )
         except Exception:
             pass
+
+
+def enqueue_dom_update(queue: list[str], text: str, max_items: int = 6, max_chars: int = 8000) -> list[str]:
+    """Buffers non-blocking DOM/route updates in order without losing earlier handoffs."""
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return queue
+    if len(cleaned) > max_chars:
+        cleaned = cleaned[-max_chars:]
+    if cleaned in queue:
+        queue.remove(cleaned)
+    queue.append(cleaned)
+    while len(queue) > max_items or (len(queue) > 1 and sum(len(item) for item in queue) > max_chars):
+        queue.pop(0)
+    return queue
+
+
+def flush_dom_updates(queue: list[str]) -> str:
+    """Drains and joins buffered silent DOM/route updates for the next Gemini turn."""
+    if not queue:
+        return ""
+    combined = "\n\n".join(queue)
+    queue.clear()
+    return combined
+
+
+def is_key_level_connect_error(err: Exception | str) -> bool:
+    """Returns True when a connect error reflects quota/auth exhaustion rather than config incompatibility."""
+    msg = str(err or "").lower()
+    markers = ("401", "403", "429", "resource_exhausted", "quota", "api key", "api_key_invalid", "permission", "billing")
+    return any(marker in msg for marker in markers)
 
 
 def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dict) -> str:
@@ -891,6 +923,10 @@ def load_system_prompt_and_manifest(site_id: str, session_mem: dict, tenant: dic
         f"- USER GOAL / WANT: {session_mem['userGoal']} (Interested Plan: {session_mem['interestedTier']})\n"
         f"- CRITICAL VISUAL GROUNDING RULE: Go with the user in any order they want! Every single time you describe any DOM section, card, tab, carousel, calculator, popup, or input field, call `move_and_highlight`, `click_element`, `swipe_or_swap`, or `fill_form_field` on its actual interactive component selector (NEVER highlight h1/h2 titles or headers)."
     )
+
+    latest_dom = str(session_mem.get("latestDomSnapshot") or "").strip()
+    if latest_dom and session_mem.get("reconnectCount", 0) > 0:
+        memory_block += f"\n\n### LATEST RESTORED PAGE DOM SNAPSHOT:\n{latest_dom[-3500:]}"
 
     return prompt_text + manifest_context + memory_block
 
@@ -1420,7 +1456,7 @@ async def handle_browser_client(websocket):
                             is_secretary_hold = False
                             session_minutes_burned = 0.0
                             last_saved_sec_reported = int(session_mem.get("secretarySavedSeconds", 0))
-                            pending_dom_context: str | None = None
+                            pending_dom_updates: list[str] = []
 
                             async def credit_metering_loop():
                                 """Meters active voice co-browsing credits every 30s; pauses when Local Secretary holds stream."""
@@ -1579,7 +1615,7 @@ async def handle_browser_client(websocket):
                                         pass
 
                             async def forward_browser_to_gemini():
-                                nonlocal is_secretary_hold, pending_dom_context
+                                nonlocal is_secretary_hold, pending_dom_updates
                                 audio_count = 0
                                 try:
                                     async for raw_msg in websocket:
@@ -1684,9 +1720,9 @@ async def handle_browser_client(websocket):
                                                                 if k not in ("domEventLogs", "partialLead")
                                                             }
                                                             sanitized_out["sessionMemoryDigest"] = sanitized_digest
-                                                        if pending_dom_context:
-                                                            sanitized_out["latestDomContext"] = pending_dom_context
-                                                            pending_dom_context = None
+                                                        dom_batch = flush_dom_updates(pending_dom_updates)
+                                                        if dom_batch:
+                                                            sanitized_out["latestDomContext"] = dom_batch
                                                         sanitized_response["output"] = sanitized_out
 
                                                     fn_responses.append(
@@ -1700,17 +1736,19 @@ async def handle_browser_client(websocket):
 
                                             elif "text" in data:
                                                 turn_complete = bool(data.get("turnComplete", True))
+                                                text_str = str(data["text"]).strip()
+                                                if not text_str:
+                                                    continue
                                                 if turn_complete:
                                                     is_secretary_hold = False
-                                                    text_payload = str(data["text"])
-                                                    if pending_dom_context:
-                                                        text_payload = f"{pending_dom_context}\n\n{text_payload}"
-                                                        pending_dom_context = None
+                                                    dom_batch = flush_dom_updates(pending_dom_updates)
+                                                    text_payload = f"{dom_batch}\n\n{text_str}" if dom_batch else text_str
                                                     await gemini_session.send_realtime_input(text=text_payload)
                                                 else:
                                                     # Never call send_client_content(turn_complete=False), which blocks realtime audio turns!
-                                                    # Store silent DOM/route context to attach on next tool response or prompt.
-                                                    pending_dom_context = str(data["text"])
+                                                    # Buffer silent DOM/route updates in order without overwriting earlier handoffs.
+                                                    enqueue_dom_update(pending_dom_updates, text_str)
+                                                    session_mem["latestDomSnapshot"] = text_str[-3500:]
 
                                         except websockets.exceptions.ConnectionClosed:
                                             break
@@ -1733,6 +1771,9 @@ async def handle_browser_client(websocket):
                             session_completed = True
                             break
                     except Exception as inner_err:
+                        if is_key_level_connect_error(inner_err):
+                            print(f"[RELAY] ⚠️ Key-level connect failure ({inner_err}); failing over immediately to next key...")
+                            raise
                         if not connected_once and attempt_idx < len(attempt_plan) - 1:
                             print(f"[RELAY] ⚠️ Connect attempt {attempt_idx + 1} failed ({inner_err}); trying fallback config...")
                             continue

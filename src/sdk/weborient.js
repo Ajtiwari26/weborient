@@ -288,6 +288,8 @@ export class WebOrient {
             this.memory.setLiveSessionStatus(false);
             this.client = null;
             this._syncShadowWidgetState(false, 'idle');
+          } else if (status === 'error' && this.client?.isReconnecting) {
+            this._syncShadowWidgetState(true, 'connecting');
           } else {
             this._syncShadowWidgetState(status === 'connected', 'idle');
           }
@@ -360,7 +362,10 @@ export class WebOrient {
       this.client.endpoint = wsUrl;
     }
 
-    await this.client.connect({ flushAudioChunks: options.flushAudioChunks || [] });
+    await this.client.connect({
+      flushAudioChunks: options.flushAudioChunks || [],
+      isAutoReconnect: Boolean(options.isAutoReconnect)
+    });
     this.memory.setLiveSessionStatus(true, endpoint);
     this._syncShadowWidgetState(true, 'listening');
 
@@ -1266,18 +1271,15 @@ export class WebOrient {
       btn.addEventListener('click', async () => {
         langPopover?.classList.remove('wo-open');
         const hasOpenSocket = Boolean(this.client && this.client.ws && this.client.ws.readyState === WebSocket.OPEN);
-        if (!this.client) {
+        if (this.client?.isReconnecting) {
+          this.stop();
+          return;
+        }
+        if (!this.client || this.client.vadState === 'hibernating' || !hasOpenSocket) {
+          const isRestore = Boolean(this.client && this.client.vadState === 'hibernating');
           this._syncShadowWidgetState(true, 'connecting');
           try {
-            await this.start();
-          } catch (_) {
-            this.client = null;
-            this._syncShadowWidgetState(false, 'offline');
-          }
-        } else if (this.client.vadState === 'hibernating' || !hasOpenSocket) {
-          this._syncShadowWidgetState(true, 'connecting');
-          try {
-            await this.start({ isRestore: this.client.vadState === 'hibernating' });
+            await this.start({ isRestore });
           } catch (_) {
             this.client = null;
             this._syncShadowWidgetState(false, 'offline');

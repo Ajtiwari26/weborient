@@ -35,7 +35,7 @@ export function initMultiPageDemo(pageConfig = {}) {
     mountWidget: false,
     onEvent: (type, detail) => {
       if (type === 'status') {
-        if (detail.status === 'reconnecting') {
+        if (detail.status === 'reconnecting' || (detail.status === 'error' && weborient.client?.isReconnecting)) {
           syncAssistUI(true, 'connecting');
         } else {
           syncAssistUI(
@@ -307,7 +307,10 @@ function wireAssistToggleActions(weborient, activePage) {
     if (e.target.closest('#quick-lang-select')) return;
 
     const hasOpenSocket = Boolean(weborient.client && weborient.client.ws && weborient.client.ws.readyState === WebSocket.OPEN);
-    if (!weborient.client || weborient.client.vadState === 'hibernating' || !hasOpenSocket) {
+    if (weborient.client?.isReconnecting) {
+      weborient.stop();
+      syncAssistUI(false, 'idle');
+    } else if (!weborient.client || weborient.client.vadState === 'hibernating' || !hasOpenSocket) {
       syncAssistUI(true, 'connecting');
       const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       weborient.options.endpoint = isLocal ? 'ws://localhost:8088' : 'wss://relay.deploymate.in';

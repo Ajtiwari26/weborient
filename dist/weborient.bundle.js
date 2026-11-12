@@ -2704,6 +2704,7 @@ class LiveClient {
     this._reconnectTimer = null;
     this._reconnectAttempts = 0;
     this._maxReconnectAttempts = 3;
+    this.isReconnecting = false;
     this._userStopped = false;
     this._terminalError = false;
     this._intentionalHibernate = false;
@@ -2712,6 +2713,9 @@ class LiveClient {
   async connect(options = {}) {
     this._userStopped = false;
     this._terminalError = false;
+    if (!options.isAutoReconnect) {
+      this.isReconnecting = false;
+    }
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
@@ -2744,12 +2748,22 @@ class LiveClient {
 
     return new Promise((resolve, reject) => {
       let settled = false;
+      let openedThisSocket = false;
       const ws = new WebSocket(this.endpoint);
       this.ws = ws;
+
+      const canScheduleRetry = (isTerminal = this._terminalError) =>
+        (openedThisSocket || Boolean(options.isAutoReconnect)) &&
+        !this._userStopped &&
+        !isTerminal &&
+        this._reconnectAttempts < this._maxReconnectAttempts &&
+        typeof this.onReconnectNeeded === 'function';
 
       ws.onopen = async () => {
         if (this.ws !== ws) return;
         settled = true;
+        openedThisSocket = true;
+        this.isReconnecting = false;
         this.vadState = 'active';
         this.consecutiveVoiceFrames = 0;
         this.lastSpeechOrActionAt = Date.now();
@@ -2787,12 +2801,14 @@ class LiveClient {
       };
 
       ws.onclose = (closeEvent) => {
-        if (this.ws !== null && this.ws !== ws) return;
+        if (this.ws !== ws) return;
         if (this._keepaliveTimer) {
           clearInterval(this._keepaliveTimer);
           this._keepaliveTimer = null;
         }
         if (this._intentionalHibernate) {
+          this.ws = null;
+          this.isReconnecting = false;
           this.onStatusChange('hibernating');
           return;
         }
@@ -2800,13 +2816,15 @@ class LiveClient {
         const code = closeEvent?.code || 1006;
         const isTerminalClose = this._terminalError || code === 4002 || code === 4003;
 
-        if (!this._userStopped && !isTerminalClose && this._reconnectAttempts < this._maxReconnectAttempts && typeof this.onReconnectNeeded === 'function') {
+        if (canScheduleRetry(isTerminalClose)) {
           this._reconnectAttempts += 1;
+          this.isReconnecting = true;
           const delayMs = this._reconnectAttempts * 900;
           console.warn(`[WebOrient] Connection interrupted (code=${code}); auto-reconnecting (${this._reconnectAttempts}/${this._maxReconnectAttempts}) in ${delayMs}ms...`);
           this.ws = null;
           this.onStatusChange('reconnecting');
           this._reconnectTimer = setTimeout(() => {
+            this._reconnectTimer = null;
             if (!this._userStopped) {
               this.onReconnectNeeded(this._reconnectAttempts);
             }
@@ -2814,14 +2832,18 @@ class LiveClient {
           return;
         }
 
+        this.isReconnecting = false;
+        this.stop({ silent: true });
         this.onStatusChange('disconnected');
-        this.stop();
       };
 
       ws.onerror = (err) => {
-        if (this.ws !== null && this.ws !== ws) return;
+        if (this.ws !== ws) return;
         console.error('[WebOrient] WebSocket error:', err);
-        this.onStatusChange('error');
+        const willAutoReconnect = this.isReconnecting || canScheduleRetry();
+        if (!willAutoReconnect) {
+          this.onStatusChange('error');
+        }
         if (!settled) {
           settled = true;
           this.vadState = wasWaking ? 'hibernating' : 'active';
@@ -3252,9 +3274,11 @@ class LiveClient {
     return new Int16Array(bytes.buffer);
   }
 
-  stop() {
+  stop(options = {}) {
     this._userStopped = true;
     this._intentionalHibernate = false;
+    this.isReconnecting = false;
+    this._reconnectAttempts = 0;
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
@@ -3289,8 +3313,12 @@ class LiveClient {
       this.playbackContext = null;
     }
     if (this.ws) {
-      try { this.ws.close(); } catch (_) {}
+      const closingWs = this.ws;
       this.ws = null;
+      try { closingWs.close(); } catch (_) {}
+    }
+    if (!options.silent) {
+      this.onStatusChange('disconnected');
     }
   }
 }
@@ -3586,6 +3614,8 @@ class WebOrient {
             this.memory.setLiveSessionStatus(false);
             this.client = null;
             this._syncShadowWidgetState(false, 'idle');
+          } else if (status === 'error' && this.client?.isReconnecting) {
+            this._syncShadowWidgetState(true, 'connecting');
           } else {
             this._syncShadowWidgetState(status === 'connected', 'idle');
           }
@@ -3658,7 +3688,10 @@ class WebOrient {
       this.client.endpoint = wsUrl;
     }
 
-    await this.client.connect({ flushAudioChunks: options.flushAudioChunks || [] });
+    await this.client.connect({
+      flushAudioChunks: options.flushAudioChunks || [],
+      isAutoReconnect: Boolean(options.isAutoReconnect)
+    });
     this.memory.setLiveSessionStatus(true, endpoint);
     this._syncShadowWidgetState(true, 'listening');
 
@@ -4564,18 +4597,15 @@ class WebOrient {
       btn.addEventListener('click', async () => {
         langPopover?.classList.remove('wo-open');
         const hasOpenSocket = Boolean(this.client && this.client.ws && this.client.ws.readyState === WebSocket.OPEN);
-        if (!this.client) {
+        if (this.client?.isReconnecting) {
+          this.stop();
+          return;
+        }
+        if (!this.client || this.client.vadState === 'hibernating' || !hasOpenSocket) {
+          const isRestore = Boolean(this.client && this.client.vadState === 'hibernating');
           this._syncShadowWidgetState(true, 'connecting');
           try {
-            await this.start();
-          } catch (_) {
-            this.client = null;
-            this._syncShadowWidgetState(false, 'offline');
-          }
-        } else if (this.client.vadState === 'hibernating' || !hasOpenSocket) {
-          this._syncShadowWidgetState(true, 'connecting');
-          try {
-            await this.start({ isRestore: this.client.vadState === 'hibernating' });
+            await this.start({ isRestore });
           } catch (_) {
             this.client = null;
             this._syncShadowWidgetState(false, 'offline');
